@@ -6,6 +6,17 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./keys/protocol": "./src/keys/protocol.ts",
+    "./keys/idp": "./src/keys/idp.ts",
+    "./keys/company-api": "./src/keys/company-api.ts",
+    "./keys/relay": "./src/keys/relay.ts",
+    "./db": "./src/db/index.ts",
+    "./db/relay": "./src/db/relay.ts",
+    "./audit": "./src/audit/index.ts",
+    "./log": "./src/log/index.ts"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
   }
 }

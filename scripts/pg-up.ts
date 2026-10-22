@@ -75,8 +75,11 @@ const MAX_SOCKET_PATH_BYTES = 107;
 // 一時ディレクトリの名前の接頭辞。mkdtemp が後ろに6文字を足す。
 const TEMP_PREFIX = 'warifu-pg-';
 
-/** 一時ディレクトリを置く場所を決め、そのまま postgresql.conf に書けるかを確かめる。 */
-function tempBase(): string {
+/**
+ * 一時ディレクトリを置く場所を決め、そのまま postgresql.conf に書けるかを確かめる。
+ * 鍵サービスのソケットのディレクトリ（scripts/keysvc-up.ts）も、ここに置く（ソケットのパスの方が短い）。
+ */
+export function tempBase(): string {
   const base = isRoot() ? '/tmp' : tmpdir();
   if (UNSAFE_PATH.test(base)) {
     throw new Error(

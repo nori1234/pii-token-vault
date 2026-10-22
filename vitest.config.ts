@@ -10,7 +10,7 @@ export default defineConfig({
       'test/**/*.test.ts',
     ],
     exclude: ['**/node_modules/**'],
-    globalSetup: ['test/setup/global-pg.ts'],
+    globalSetup: ['test/setup/global-pg.ts', 'test/setup/global-keysvc.ts'],
     testTimeout: 20_000,
     hookTimeout: 60_000,
   },
