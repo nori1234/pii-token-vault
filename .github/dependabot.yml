@@ -1,5 +1,8 @@
 # 依存の更新の PR を、週に1回まとめて出す。
-# 2026年10月の注意喚起（docs/standards.md。どれも抜粋のみ）は、既知の脆弱性の修正の適用（JPCERT/CC）と、パッチの迅速な適用（国家サイバー統括室）を求めている。版は固定したまま、更新を遅らせない。
+# 2026年10月の注意喚起（docs/standards.md。どれも抜粋のみ）は、既知の脆弱性の修正の適用（JPCERT/CC）と、パッチの迅速な適用（国家サイバー統括室）を求めている。
+# - 脆弱性の修正（Dependabot security updates）は、待たずに出る（cooldown は版の更新にだけかかる）。
+# - 版の更新は、公開から7日（npm の major は14日）たったものだけを提案させる（cooldown）。乗っ取られたアカウントから公開された直後の版を、
+#   週次のまとめた PR で取り込まないため。
 # - @playwright/test は 1.56.1 に完全固定する（CLAUDE.md「環境の注意」）。更新の PR を出さない。
 # - アクションは SHA で固定している。Dependabot は SHA と末尾のコメントの版を両方更新する。
 
@@ -10,6 +13,9 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
     groups:
       minor-and-patch:
         update-types: [minor, patch]
@@ -23,3 +29,5 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7

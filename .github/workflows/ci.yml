@@ -61,6 +61,23 @@ jobs:
             echo '::error::Biome の設定は、ルートの biome.json だけにする（不変条件7と9）'
             exit 1
           fi
+          # テスト、scripts/、test/、ルートの *.config.ts は、lint の制限を外している（biome.json の overrides）。
+          # 本体のコードがそれらを import すると、制限した import を、lint に止められずに使える。
+          import_re="(from|import\()[[:space:]]*[\"'](\.\.?/|/)[^\"']*(\.(test|e2e)\.ts[\"']|/(scripts|test)/|\.config\.ts[\"'])"
+          if git grep -nE "$import_re" -- packages spikes ':(exclude)*.test.ts' ':(exclude)*.e2e.ts' ':(exclude)*.md'; then
+            echo '::error::本体のコードから、テスト、scripts/、test/、*.config.ts を import しない（不変条件7と9）'
+            exit 1
+          fi
+
+      - name: シンボリックリンクを追跡していないことを確かめる
+        # 追跡したリンクは、checkout でリンク先を指すようになり、npm ci などがリンク先の中身を消しうる。
+        run: |
+          links=$(git ls-files -s | awk '$1 == "120000"' | cut -f2)
+          if [ -n "$links" ]; then
+            echo "$links"
+            echo '::error::シンボリックリンクを追跡しない'
+            exit 1
+          fi
 
       - name: typecheck（tsc --noEmit）
         run: npm run typecheck
@@ -106,7 +123,8 @@ jobs:
 
       - name: Chromium を入れる
         # @playwright/test は 1.56.1 に固定している。ブラウザはその版に合うものが入る。
-        run: npx playwright install --with-deps chromium
+        # --no：node_modules にある版だけを使い、見つからなければ、ネットから別の版を取らずに失敗する。
+        run: npx --no playwright install --with-deps chromium
 
       - name: e2e（CDP の仮想認証器）
         run: npm run e2e
