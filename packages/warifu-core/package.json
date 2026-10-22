@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./keys/protocol": "./src/keys/protocol.ts",
+    "./keys/errors": "./src/keys/errors.ts",
     "./keys/idp": "./src/keys/idp.ts",
     "./keys/company-api": "./src/keys/company-api.ts",
     "./keys/relay": "./src/keys/relay.ts",

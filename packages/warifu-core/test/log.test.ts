@@ -1,8 +1,8 @@
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
+import { toBase32Lower } from '../src/encoding.ts';
 import { createLogger, REDACTED_MESSAGE } from '../src/log/index.ts';
 import { randomBytesOf } from '../src/random.ts';
-import { toBase32Lower } from '../src/encoding.ts';
 
 function marker(): string {
   return `m${toBase32Lower(randomBytesOf(10))}`;
