@@ -1,0 +1,28 @@
+name: 文書の改善
+description: 誤り、分かりにくい説明、文書どうしの食い違い、一次資料の照合結果
+title: "[文書] "
+labels: ["documentation"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: 対象のファイルと箇所
+      description: 例：docs/plan.md 4章、DESIGN.md 3章の警告文 B
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 問題
+      description: 何が誤っている、または分かりにくいか
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 直し方の案
+  - type: textarea
+    id: source
+    attributes:
+      label: 根拠（一次資料など）
+      description: 一次資料の照合なら、資料の版・節番号・該当の文言を書いてください

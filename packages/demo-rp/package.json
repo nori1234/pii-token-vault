@@ -1,0 +1,11 @@
+{
+  "name": "@pii-token-vault/demo-rp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "デモ用の予約サイトと窓口担当者の画面",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

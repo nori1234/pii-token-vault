@@ -1,0 +1,11 @@
+{
+  "name": "@pii-token-vault/rp-kit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "企業向け SDK と適合テスト",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

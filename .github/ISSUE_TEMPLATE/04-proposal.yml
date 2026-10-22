@@ -1,0 +1,27 @@
+name: 提案
+description: 機能、設計、進め方についての提案
+title: "[提案] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解決したいこと
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案の内容
+    validations:
+      required: true
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: 不変条件との関係
+      options:
+        - label: CLAUDE.md の不変条件（とくに肯定リスト）を破らない提案である
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考えたほかの案

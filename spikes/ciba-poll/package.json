@@ -1,0 +1,15 @@
+{
+  "name": "@pii-token-vault/spike-ciba-poll",
+  "version": "0.0.0",
+  "private": true,
+  "description": "捨てスパイク2：oidc-provider の CIBA を poll で1往復させる",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "jose": "6.2.12",
+    "oidc-provider": "9.12.2"
+  },
+  "devDependencies": {
+    "@types/oidc-provider": "9.12.1"
+  }
+}

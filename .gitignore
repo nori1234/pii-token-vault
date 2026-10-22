@@ -1,0 +1,12 @@
+node_modules
+coverage/
+playwright-report/
+test-results/
+blob-report/
+*.log
+*.tsbuildinfo
+.env
+.env.*
+.claude/settings.local.json
+CLAUDE.local.md
+*.tgz

@@ -1,0 +1,11 @@
+{
+  "name": "@pii-token-vault/sender",
+  "version": "0.0.0",
+  "private": true,
+  "description": "送信サービス（外向きの通信の唯一の出口）",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

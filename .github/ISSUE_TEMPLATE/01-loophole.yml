@@ -1,0 +1,41 @@
+name: 抜け道の指摘
+description: 漏れた連絡先や属性で、本人確認・回復・承認を突破できてしまう設計上の経路
+title: "[抜け道] "
+labels: ["loophole"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        設計（文書）の上での抜け道を指摘するためのテンプレートです。
+        **実装済みのコードで再現できる脆弱性は、ここではなく SECURITY.md の方法で非公開で報告してください。**
+        実在の人のメールアドレス、電話番号、住所、氏名は書かないでください。例には架空の値（例：user@example.com）を使ってください。
+  - type: textarea
+    id: attacker-has
+    attributes:
+      label: 攻撃者が持っている情報
+      description: 例：別名、sub、氏名、予約番号、本物のメール、回復コード（値そのものは書かず、種類だけを書く）
+    validations:
+      required: true
+  - type: textarea
+    id: path
+    attributes:
+      label: 試す経路
+      description: どの画面、API、メール、窓口、第三者（運送会社、携帯キャリアなど）を使うか
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: 起きること
+      description: 何が突破でき、誰に影響するか
+    validations:
+      required: true
+  - type: input
+    id: docs
+    attributes:
+      label: 関係する文書
+      description: 例：docs/plan.md 3-1、ADR 0003
+  - type: textarea
+    id: idea
+    attributes:
+      label: 対策の案（あれば）

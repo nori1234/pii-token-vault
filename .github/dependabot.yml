@@ -1,0 +1,25 @@
+# 依存の更新の PR を、週に1回まとめて出す。
+# 2026年10月の注意喚起（docs/standards.md。どれも抜粋のみ）は、既知の脆弱性の修正の適用（JPCERT/CC）と、パッチの迅速な適用（国家サイバー統括室）を求めている。版は固定したまま、更新を遅らせない。
+# - @playwright/test は 1.56.1 に完全固定する（CLAUDE.md「環境の注意」）。更新の PR を出さない。
+# - アクションは SHA で固定している。Dependabot は SHA と末尾のコメントの版を両方更新する。
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '@playwright/test'
+      # 実行環境は Node 22 なので、型の major だけを上げない（CLAUDE.md「環境の注意」）。
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

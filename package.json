@@ -1,0 +1,32 @@
+{
+  "name": "pii-token-vault",
+  "version": "0.0.0",
+  "private": true,
+  "description": "企業に本物の連絡先を本人確認に使わせず、持たせないための基盤（PoC）",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "spikes/*"
+  ],
+  "scripts": {
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "pg-up": "node scripts/pg-up.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@playwright/test": "1.56.1",
+    "@types/node": "22.20.5",
+    "@types/pg": "8.23.1",
+    "pg": "8.23.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}

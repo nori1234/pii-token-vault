@@ -1,0 +1,33 @@
+name: 不具合
+description: コードやテストが期待どおりに動かない（脆弱性は除く）
+title: "[不具合] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        脆弱性に当たるものは、ここではなく SECURITY.md の方法で非公開で報告してください。
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現の手順
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待した動き
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の動き
+      description: エラーやログを貼る場合は、本物の連絡先やトークンを伏せてください
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: 環境
+      description: 例：Node 22.22、Postgres 16.15、コミット（`git rev-parse --short HEAD` の結果）
