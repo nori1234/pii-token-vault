@@ -76,7 +76,7 @@ git ls-files --cached --others --exclude-standard | grep -E '(^|/)\.?biome\.json
 - `biome.json` の差分。`overrides` の `includes` が広がっていないか、ルールを `off` にする箇所や、制限するモジュールとグローバルの一覧が減っていないか。広げるなら、理由が PR に書かれているか。
 - `.github/workflows/ci.yml` の差分。lint をすり抜ける書き方の検査が、弱められたり消されたりしていないか。
 - 制限を外しているファイル（テスト、`scripts/`、`test/`、ルートの `*.config.ts`。`public/` の中ではグローバルの制限）に、上の検索がヒットしないか。ヒットしたら、宛先がテストの中で立てたローカルのサーバーだけかを確かめる。
-- `CLAUDE.md`、`.claude/`（settings.json、hooks、skills）、`.npmrc`、`package.json` の scripts、ルートの `*.config.ts`、テストと `scripts/`・`test/` のコード、`.github/`（workflows、dependabot.yml、CODEOWNERS）の差分。フックや設定は、Claude Code でそのブランチを開いただけで動き、テストと設定は `npm test` で動く。メンテナー以外が作った PR は、GitHub の上で読むだけにし、checkout も、セッションでの実行もしない（CLAUDE.md「進め方」）。
+- `CLAUDE.md`、`AGENTS.md`、`.claude/`（settings.json、hooks、skills）、`.npmrc`、`package.json` の scripts、ルートの `*.config.ts`、テストと `scripts/`・`test/` のコード、`.github/`（workflows、dependabot.yml、CODEOWNERS）の差分。フックや設定は、Claude Code でそのブランチを開いただけで動き、テストと設定は `npm test` で動く。メンテナー以外が作った PR は、GitHub の上で読むだけにし、checkout も、セッションでの実行もしない（CLAUDE.md「進め方」）。
 
 観点2は、ルート一覧のスナップショットのテストの差分を必ず読む。観点8は、全テーブルが RLS の ENABLE と FORCE の両方を持つことを `pg_class` の `relrowsecurity` と `relforcerowsecurity` で確かめる固定テストが通っていることを見る。
 
