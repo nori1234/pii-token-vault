@@ -77,7 +77,8 @@ jobs:
         # テスト、scripts/、test/、ルートの *.config.ts は、lint の制限を外している（biome.json の overrides）。
         # 本体のコードがそれらを import すると、制限した import を、lint に止められずに使える。
         # 正規表現ではなく、tsc が解決した import のグラフで確かめる（副作用だけの import、改行をはさむ import、
-        # export … from、package.json の imports、間接の import を含む）。文字列リテラル以外を渡す動的な import も拒否する。
+        # export … from、package.json の imports、間接の import を含む）。tsc がたどれない読み込み方として、
+        # 引用符で囲んだ文字列リテラル1つ以外を渡す動的な import（字句を解析して判定する）と、CommonJS のファイルも拒否する。
         run: node scripts/check-entry-imports.ts
 
       - name: typecheck（tsc --noEmit）

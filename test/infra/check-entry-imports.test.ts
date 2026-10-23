@@ -8,9 +8,11 @@ import { findViolations } from '../../scripts/check-entry-imports.ts';
 
 let root: string;
 
+// ルートの package.json は、指定がなければ ES モジュールにする（リポジトリと同じ）。
 function write(files: Record<string, string>) {
   root = mkdtempSync(join(tmpdir(), 'entry-imports-test-'));
-  for (const [path, text] of Object.entries(files)) {
+  const all = { 'package.json': JSON.stringify({ type: 'module' }), ...files };
+  for (const [path, text] of Object.entries(all)) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), text);
   }
@@ -72,32 +74,72 @@ describe('本体のコードから、lint の制限を外したファイルへ�
     ]);
   });
 
-  it('文字列リテラル以外を渡す動的な import を拒否する', () => {
+  const NON_LITERAL = '引用符で囲んだ文字列リテラル1つ以外を渡す動的な import';
+
+  it.each([
+    ['変数', "const path = './helper.test.ts';\nawait import( path);\n"],
+    ['文字列の連結', "await import('./helper' + '.test.ts');\n"],
+    ['型の注釈をはさむ連結', "await import('./helper' + ('.test.ts' as string));\n"],
+    [
+      'import と括弧の間のコメント',
+      "const path = './helper.test.ts';\nawait import /* c */ (path);\n",
+    ],
+    ['三項演算子', "await import(Math.random() > 1 ? './a.ts' : './helper.test.ts');\n"],
+    ['括弧で包んだ文字列', "await import(('./helper.test.ts'));\n"],
+    // テンプレート文字列（\x24 は $）。置き換えのないものも拒否する。
+    ['置き換えのあるテンプレート文字列', 'await import(`./\x24{name}.ts`);\n'],
+    ['置き換えのないテンプレート文字列', 'await import(`./helper.test.ts`);\n'],
+  ])('%s を渡す動的な import を拒否する', (_name, text) => {
+    // 置き換えのないテンプレート文字列は、tsc もたどるので、import されているほうの違反も出る。
+    const violations = findViolations(write({ ...HELPER, 'packages/x/src/a.ts': text }));
+    expect(violations).toContain(`packages/x/src/a.ts：${NON_LITERAL}`);
+  });
+
+  it('走査しないディレクトリ（. で始まる）のファイルも、本体のコードから import されれば調べる', () => {
     const violations = findViolations(
       write({
-        'packages/x/src/a.ts': "const path = './helper.test.ts';\nawait import( path);\n",
-        // テンプレート文字列（\x24 は $）。
-        'packages/x/src/b.ts': 'await import(`./\x24{name}.ts`);\n',
-        // 走査しないディレクトリ（. で始まる）のファイルも、本体のコードから import されれば調べる。
         'packages/x/src/c.ts': "import './.hidden/d.ts';\n",
         'packages/x/src/.hidden/d.ts': 'await import(path);\n',
       }),
     );
+    expect(violations).toEqual([`packages/x/src/.hidden/d.ts：${NON_LITERAL}`]);
+  });
+
+  it('CommonJS として読み込まれるファイルを拒否する', () => {
+    const violations = findViolations(
+      write({
+        'packages/x/src/a.ts': "import './b.cjs';\n",
+        'packages/x/src/b.cjs': "require('./helper' + '.test.ts');\n",
+        'packages/y/package.json': JSON.stringify({ name: 'y' }),
+        'packages/y/src/c.ts': 'export const c = 1;\n',
+      }),
+    );
     expect(violations.sort()).toEqual([
-      'packages/x/src/.hidden/d.ts：文字列リテラル以外を渡す動的な import',
-      'packages/x/src/a.ts：文字列リテラル以外を渡す動的な import',
-      'packages/x/src/b.ts：文字列リテラル以外を渡す動的な import',
+      'packages/x/src/b.cjs：CommonJS として読み込まれる（require は tsc の import のグラフに載らない）',
+      'packages/y/src/c.ts：CommonJS として読み込まれる（require は tsc の import のグラフに載らない）',
     ]);
   });
 
-  it('本体のコードどうしの import、文字列リテラルの動的な import、テストからの import は通す', () => {
+  it('構文を解析できないファイルを拒否する', () => {
+    const violations = findViolations(
+      write({ 'packages/x/src/a.ts': 'enum Mode {\n  A,\n}\nexport { Mode };\n' }),
+    );
+    expect(violations).toEqual([
+      'packages/x/src/a.ts：構文を解析できない（tsc がたどれない import を確かめられない）',
+    ]);
+  });
+
+  it('本体のコードどうしの import、文字列リテラル1つの動的な import、テストからの import は通す', () => {
     const violations = findViolations(
       write({
         ...HELPER,
         'packages/x/src/a.ts':
           "import './b.ts';\nimport { readFileSync } from 'node:fs';\nexport { readFileSync };\n",
-        'packages/x/src/b.ts': "export const loader = () => import( './c.ts');\nobj.import(x);\n",
-        'packages/x/src/c.ts': 'export {};\n',
+        'packages/x/src/b.ts':
+          "export const loader = () => import( './c.ts');\nobj.import(x);\nconst s = 'import(x)'; // import(y)\n",
+        'packages/x/src/c.ts':
+          "export const load = async <T,>(): Promise<T> =>\n  (await import /* c */ (\n    './d.json', { with: { type: 'json' } })) as T;\n",
+        'packages/x/src/d.json': '{ "a": "import(x)" }\n',
         'packages/x/src/a.test.ts': "import './helper.test.ts';\n",
       }),
     );
