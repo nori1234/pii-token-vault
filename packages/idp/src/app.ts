@@ -90,6 +90,8 @@ export interface Idp {
   readonly mailer: Mailer;
   readonly store: MacMemoryStore;
   readonly db: Db;
+  /** Fastify に登録したルート（メソッドとパス）。x-idp-routes で一覧を固定する。 */
+  routes(): readonly string[];
   close(): Promise<void>;
 }
 
@@ -162,6 +164,10 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
     bodyLimit: JSON_LIMIT,
     return503OnClosing: true,
     trustProxy: false,
+  });
+  const routes: string[] = [];
+  app.addHook('onRoute', (route) => {
+    for (const method of [route.method].flat()) routes.push(`${method} ${route.url}`);
   });
   // JSON 以外の本文は受け付けない（Fastify は既定で text/plain も解析する）。
   app.removeContentTypeParser('text/plain');
@@ -645,6 +651,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
     mailer,
     store,
     db,
+    routes: () => [...routes].sort(),
     async close() {
       await app.close();
       await db.close();

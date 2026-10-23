@@ -40,6 +40,11 @@ export class MacMemoryStore {
   }
 
   /** `<種類>:<MAC>`。同じ id でも、種類が違えば別の鍵になる。 */
+  /** いまの時刻（秒）。 */
+  nowSeconds(): number {
+    return Math.floor(this.#now() / 1000);
+  }
+
   async keyOf(kind: string, id: string): Promise<string> {
     const mac = await this.#keys.mac('oidc_storage_id', lengthPrefixed([STORAGE_LABEL, kind, id]));
     return `${kind}:${toBase64Url(mac)}`;
@@ -166,7 +171,7 @@ class MacAdapter implements Adapter {
     const row = this.#store.getByKey<AdapterPayload>(key);
     if (row !== undefined) {
       // 期限は元の行に合わせる必要はない（消費済みの印が付けば、それ以上は使われない）。短く保つ。
-      this.#store.setByKey(key, { ...row, consumed: Math.floor(Date.now() / 1000) }, 600);
+      this.#store.setByKey(key, { ...row, consumed: this.#store.nowSeconds() }, 600);
     }
   }
 

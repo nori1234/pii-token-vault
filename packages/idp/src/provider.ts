@@ -265,15 +265,17 @@ export function buildProvider(deps: ProviderDeps): Provider {
   provider.proxy = false;
 
   provider.use(async (ctx, next) => {
-    if (ctx.path === '/auth') {
-      for (const name of REJECTED_AUTHORIZATION_PARAMS) {
-        if (ctx.query[name] !== undefined) {
-          ctx.status = 400;
-          ctx.type = 'html';
-          ctx.body =
-            '<!doctype html><html lang="ja"><meta charset="utf-8"><title>割符</title><main><h1>要求の形が違います</h1></main></html>';
-          return;
-        }
+    if (ctx.path === '/auth' || ctx.path.startsWith('/auth/')) {
+      // 認可の要求は GET だけ（POST の本文の項目は、ここでは見られないため）。
+      const rejected =
+        ctx.method !== 'GET' ||
+        REJECTED_AUTHORIZATION_PARAMS.some((name) => ctx.query[name] !== undefined);
+      if (rejected) {
+        ctx.status = 400;
+        ctx.type = 'html';
+        ctx.body =
+          '<!doctype html><html lang="ja"><meta charset="utf-8"><title>割符</title><main><h1>要求の形が違います</h1></main></html>';
+        return;
       }
     }
     await next();
