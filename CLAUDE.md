@@ -98,7 +98,7 @@ npm run pg-up       # 一時的なクラスタを手で起動する。接続先�
   - `packages/sender` 以外での、外向きの通信のモジュールと `node:child_process` の import、`fetch` などのグローバル。`node:http` は、`createServer`、`Server`、`IncomingMessage`、`ServerResponse`、`STATUS_CODES` だけを許す。
   - `packages/sender` も含めて、`node:module` の import と、グローバルの `crypto`、`globalThis`、`global`（`packages/sender` で外しているのは、1つ目の項目の制限だけ）。
   - `packages/warifu-core`・`packages/keysvc`・`spikes/` 以外での、`node:crypto` の import。
-  - CI は、さらに `packages/` と `spikes/` の中（Markdown を除く）の `biome-ignore` と `getBuiltinModule`（`process.getBuiltinModule` を含む）と、ルートの `biome.json` 以外の Biome の設定ファイル（入れ子のものと、ルートの `biome.jsonc`、`.biome.json`、`.biome.jsonc`）を見つけたら失敗する。テストと `*.config.ts` 以外のコードから、テスト、`scripts/`、`test/`、`*.config.ts` を import したときと、シンボリックリンクを追跡したときも失敗する。
+  - CI は、さらに `packages/` と `spikes/` の中（Markdown を除く）の `biome-ignore` と `getBuiltinModule`（`process.getBuiltinModule` を含む）と、ルートの `biome.json` 以外の Biome の設定ファイル（入れ子のものと、ルートの `biome.jsonc`、`.biome.json`、`.biome.jsonc`）を見つけたら失敗する。本体のコード（`packages/` と `spikes/` の、テスト以外のファイル）から、テスト、`scripts/`、`test/`、ルートの `*.config.ts` に import でたどり着くとき（`scripts/check-entry-imports.ts` が、tsc の解決した import のグラフで確かめる。副作用だけの import と間接の import も含む）と、本体のコードで文字列リテラル以外を渡す動的な import を使ったとき、シンボリックリンクを追跡したとき（依存を入れる前に確かめる）も失敗する。
   - テスト（`*.test.ts`、`*.e2e.ts`）、`scripts/`、`test/`、ルートの `*.config.ts` では、上の3つの制限と `noConsole` を外している（Biome のほかの規則と書式の検査はかかる）。ブラウザで動く `public/` の中では、グローバルの制限（`fetch` など）を外している。制限を外したところでも、不変条件は適用する。
   - 例外は `biome.json` の overrides にまとめてある。overrides を広げる変更は、principle-review で点検する。
 - ゲート（plan 10章）では、さらに plan 11章でそこまでに割り当てたテストがすべて通ることを確かめる。

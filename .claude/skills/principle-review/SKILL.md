@@ -70,7 +70,7 @@ grep -rnE 'createCipheriv|createDecipheriv|createHash|createHmac|createSign|gene
 # 未追跡のファイルを足したもの）。どちらも何も出なければよい。
 git grep --untracked -nE 'biome-ignore|getBuiltinModule' -- packages spikes ':(exclude)*.md'
 git ls-files --cached --others --exclude-standard | grep -E '(^|/)\.?biome\.jsonc?$' | grep -vx 'biome.json'
-git grep --untracked -nE "(from|import\()[[:space:]]*[\"'](\.\.?/|/)[^\"']*(\.(test|e2e)\.ts[\"']|/(scripts|test)/|\.config\.ts[\"'])" -- packages spikes ':(exclude)*.test.ts' ':(exclude)*.e2e.ts' ':(exclude)*.md'
+node scripts/check-entry-imports.ts   # 本体のコードから、テスト・scripts/・test/・*.config.ts への import（未追跡のファイルも見る）
 git ls-files -s | awk '$1 == "120000"'   # 追跡しているシンボリックリンク
 ```
 
@@ -81,7 +81,7 @@ git ls-files -s | awk '$1 == "120000"'   # 追跡しているシンボリック�
 - `packages/sender` も含めて、`node:module` の import（`createRequire` などで import の制限を回避させない）と、グローバルの `crypto`（Web Crypto）、`globalThis`、`global`。
 - `packages/warifu-core`・`packages/keysvc`・`spikes/` 以外での、`node:crypto` の import。
 
-ただし、テスト（`*.test.ts`、`*.e2e.ts`）、`scripts/`、`test/`、ルートの `*.config.ts` は対象外で、`public/` の中ではグローバルの制限（`fetch` など）を外している。CI は、lint に加えて、`packages/` と `spikes/` の中（Markdown を除く）の `biome-ignore` と `getBuiltinModule`（`process.getBuiltinModule` を含む）と、ルートの `biome.json` 以外の Biome の設定ファイル（入れ子のものと、ルートの `biome.jsonc`、`.biome.json`、`.biome.jsonc`）を拒否する。テストと `*.config.ts` 以外のコードから、テスト、`scripts/`、`test/`、`*.config.ts` への import と、追跡したシンボリックリンクも拒否する。lint と CI が通っても、次の4つは点検する。
+ただし、テスト（`*.test.ts`、`*.e2e.ts`）、`scripts/`、`test/`、ルートの `*.config.ts` は対象外で、`public/` の中ではグローバルの制限（`fetch` など）を外している。CI は、lint に加えて、`packages/` と `spikes/` の中（Markdown を除く）の `biome-ignore` と `getBuiltinModule`（`process.getBuiltinModule` を含む）と、ルートの `biome.json` 以外の Biome の設定ファイル（入れ子のものと、ルートの `biome.jsonc`、`.biome.json`、`.biome.jsonc`）を拒否する。本体のコード（`packages/` と `spikes/` の、テスト以外のファイル）から、テスト、`scripts/`、`test/`、ルートの `*.config.ts` への import（tsc の解決した import のグラフで確かめる）と、文字列リテラル以外を渡す動的な import、追跡したシンボリックリンクも拒否する。lint と CI が通っても、次の4つは点検する。
 
 - `biome.json` の差分。`overrides` の `includes` が広がっていないか、ルールを `off` にする箇所や、制限するモジュールとグローバルの一覧が減っていないか。広げるなら、理由が PR に書かれているか。
 - `.github/workflows/ci.yml` の差分。lint をすり抜ける書き方の検査が、弱められたり消されたりしていないか。
