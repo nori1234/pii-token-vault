@@ -219,7 +219,7 @@
                   "node:tls": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
                   "tls": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
                   "node:http": {
-                    "message": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。このファイルだけは、割符の内部の Unix ドメインソケット（鍵サービスなど）につなぐために request を許す（ADR 0012）。",
+                    "message": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。このファイルだけは、割符の内部の Unix ドメインソケット（鍵サービスなど）につなぐために request を許す（ADR 0013）。",
                     "allowImportNames": [
                       "createServer",
                       "Server",
@@ -230,7 +230,7 @@
                     ]
                   },
                   "http": {
-                    "message": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。このファイルだけは、割符の内部の Unix ドメインソケット（鍵サービスなど）につなぐために request を許す（ADR 0012）。",
+                    "message": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。このファイルだけは、割符の内部の Unix ドメインソケット（鍵サービスなど）につなぐために request を許す（ADR 0013）。",
                     "allowImportNames": [
                       "createServer",
                       "Server",

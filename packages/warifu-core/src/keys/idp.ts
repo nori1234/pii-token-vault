@@ -1,4 +1,4 @@
-// idp の鍵のクライアント（不変条件3「型には許した操作のメソッドだけ」、ADR 0012）。
+// idp の鍵のクライアント（不変条件3「型には許した操作のメソッドだけ」、ADR 0013）。
 // 連絡先を暗号化できるが、復号はできない（メソッドがない。鍵サービスも 403 を返す）。
 
 import { parseWarifuUserId, type TenantId, type WarifuUserId } from '../ids.ts';

@@ -1,6 +1,6 @@
 // 鍵サービス（packages/keysvc）とクライアントが共有する約束：操作、鍵、用途の名前、要求と応答の型、上限、エラーの本文。
 // 名前を足すときは、keysvc の acl.ts、各クライアントの型、t08-keysvc-acl と t08-key-client-surface の期待の表を
-// 同じ PR で直す（ADR 0012）。
+// 同じ PR で直す（ADR 0013）。
 
 /** 鍵サービスの資格情報を持つサービス。sender、rp-kit、demo-rp は持たない（plan 8章）。 */
 export type KeysvcCaller = 'idp' | 'relay' | 'company-api';
@@ -31,7 +31,7 @@ export const ENCRYPTION_KEY_IDS: readonly EncryptionKeyId[] = Object.freeze([
 export type MacPurpose = 'alias_lookup' | 'audit_chain';
 export const MAC_PURPOSES: readonly MacPurpose[] = Object.freeze(['alias_lookup', 'audit_chain']);
 
-/** 署名の鍵（ES256）。SET、操作ごとの承認、テナントの JWT の鍵は、各マイルストーンで足す（ADR 0013）。 */
+/** 署名の鍵（ES256）。SET、操作ごとの承認、テナントの JWT の鍵は、各マイルストーンで足す（ADR 0014）。 */
 export type SigningKeyId = 'id_token';
 export const SIGNING_KEY_IDS: readonly SigningKeyId[] = Object.freeze(['id_token']);
 

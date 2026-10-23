@@ -1,4 +1,4 @@
-// 鍵サービス（encrypt、mac、derive_alias、decrypt の ACL）。ADR 0012。
+// 鍵サービス（encrypt、mac、derive_alias、decrypt の ACL）。ADR 0013。
 // ローカルでは別プロセス（src/main.ts）で立て、KMS の IAM を模す。本番は KMS に置き換える（P1）。
 // DB は使わない。外向きの通信もしない。
 

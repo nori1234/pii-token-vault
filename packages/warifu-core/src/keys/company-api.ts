@@ -1,4 +1,4 @@
-// company-api の鍵のクライアント（不変条件3、ADR 0012）。照合用の MAC と、別名の導出だけ。
+// company-api の鍵のクライアント（不変条件3、ADR 0013）。照合用の MAC と、別名の導出だけ。
 // 暗号化と復号のメソッドはない（鍵サービスも 403 を返す）。
 
 import type { TenantId, WarifuUserId } from '../ids.ts';

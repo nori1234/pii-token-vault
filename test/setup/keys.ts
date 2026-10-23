@@ -1,4 +1,4 @@
-// テストから鍵サービスを呼ぶための補助（ADR 0012）。
+// テストから鍵サービスを呼ぶための補助（ADR 0013）。
 // - keysvcConnection：鍵のクライアントに渡す接続（既定は globalSetup の keysvc）。
 // - rawKeysvcCall：型を通さない生の要求。攻撃の段で使う（テストの中の node:http で送る）。
 // - startKeysvcExpectingFailure：起動に失敗するはずの設定で起動し、終了コードと出力を返す。

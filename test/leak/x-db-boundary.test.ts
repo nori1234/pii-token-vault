@@ -115,7 +115,7 @@ describe('漏えい：DB の境界（plan 2章 BOLA、10章 M2）', () => {
   it('境界の値を自分で設定した生の接続でも、列の権限を越えられない（残るリスクの確認）', async () => {
     // 攻撃者が持っている情報：盗んだ warifu_idp の接続の設定と、テナント B の ID（ATK-07）
     // 試す経路：set_config でテナント B を設定してから読む
-    // 期待する結果：B の行のうち、列の権限のある列だけが読める（ADR 0014 の残るリスク）。lookup_mac は 42501
+    // 期待する結果：B の行のうち、列の権限のある列だけが読める（ADR 0015 の残るリスク）。lookup_mac は 42501
     // plan 11章：番号なし（plan 2章「BOLA を防ぐ」、10章 M2）
     const client = await raw('warifu_idp');
     await client.query("SELECT pg_catalog.set_config('warifu.tenant_id', $1, false)", [tenantB]);

@@ -1,4 +1,4 @@
-// 監査ログの MAC にかける形（ADR 0015）。
+// 監査ログの MAC にかける形（ADR 0016）。
 //
 //   scope         = ('tenant', tenant_id) または ('user', user_id)
 //   content_mac_i = HMAC(k, lp('warifu/audit/content/v1', scope の種類, scope の ID, scope_seq, occurred_at のミリ秒,

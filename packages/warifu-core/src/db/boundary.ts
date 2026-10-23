@@ -1,4 +1,4 @@
-// DB の境界（不変条件8、ADR 0014）。アプリのコードは withTenant か withWarifuUser を通してだけ DB に触れる。
+// DB の境界（不変条件8、ADR 0015）。アプリのコードは withTenant か withWarifuUser を通してだけ DB に触れる。
 //
 // 1つのトランザクションごとに：
 //   1. すでに境界の中なら nested_boundary（境界を入れ子にしない）。

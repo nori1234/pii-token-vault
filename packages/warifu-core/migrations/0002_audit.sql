@@ -1,4 +1,4 @@
--- 0002：監査ログ（CAP-17、ADR 0015）。全体のチェーン（範囲の情報を持たない）と、範囲を RLS で限った本文。
+-- 0002：監査ログ（CAP-17、ADR 0016）。全体のチェーン（範囲の情報を持たない）と、範囲を RLS で限った本文。
 -- MAC は鍵サービスの mac(audit_chain)。追記だけ。
 SET ROLE warifu_owner;
 
@@ -10,7 +10,7 @@ CREATE TABLE audit.chain (
   mac bytea NOT NULL CHECK (octet_length(mac) = 32)
 );
 
--- 本文。範囲はテナントか利用者のどちらか1つ。属性に値（連絡先、トークンなど）を入れない（ADR 0015）。
+-- 本文。範囲はテナントか利用者のどちらか1つ。属性に値（連絡先、トークンなど）を入れない（ADR 0016）。
 CREATE TABLE audit.events (
   seq bigint PRIMARY KEY REFERENCES audit.chain (seq),
   scope_seq bigint NOT NULL CHECK (scope_seq >= 1),

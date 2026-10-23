@@ -1,4 +1,4 @@
-// relay の DB（不変条件8の例外の SECURITY DEFINER 関数、ADR 0005、ADR 0014）。relay だけが import する。
+// relay の DB（不変条件8の例外の SECURITY DEFINER 関数、ADR 0005、ADR 0015）。relay だけが import する。
 // resolveAlias は、境界の値を両方とも空にしたトランザクションで、relay.resolve_alias だけを呼ぶ。
 // 返すのは利用者 ID とテナント ID の2つだけ。戻り値を relay の外に出さない（不変条件2）。
 // テナント ID は配送の判断（送信元ロックなど）だけに使い、許可の判断に流さない（不変条件1(e)）。

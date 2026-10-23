@@ -1,4 +1,4 @@
-// 割符の内部の Unix ドメインソケットへの HTTP の POST（ADR 0012）。
+// 割符の内部の Unix ドメインソケットへの HTTP の POST（ADR 0013）。
 //
 // node:http の request を import してよいのは、このファイルだけ（biome.json の overrides の例外。t08-key-client-surface で
 // 固定する）。不変条件7が塞ぐのは外部への接続で、割符の内部の接続（サービスから鍵サービスへ）は当たらない

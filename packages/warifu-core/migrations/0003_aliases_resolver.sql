@@ -1,4 +1,4 @@
--- 0003：別名の世代と、relay の解決関数（不変条件8の例外の SECURITY DEFINER 関数。ADR 0005、ADR 0014）。
+-- 0003：別名の世代と、relay の解決関数（不変条件8の例外の SECURITY DEFINER 関数。ADR 0005、ADR 0015）。
 -- 別名そのものは置かない。照合用の HMAC（鍵サービスの mac(alias_lookup)）だけを置き、一意にする（二度と割り当てない）。
 -- 世代は足すだけ。最新でない世代が廃番。UPDATE と DELETE はどのロールにも与えない。
 SET ROLE warifu_owner;

@@ -1,4 +1,4 @@
-// DB の境界の型（不変条件8、ADR 0014）。
+// DB の境界の型（不変条件8、ADR 0015）。
 
 import type { ServiceName, TenantId, WarifuUserId } from '../ids.ts';
 

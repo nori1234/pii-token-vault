@@ -1,4 +1,4 @@
-// 鍵を使う暗号の処理のすべて。keysvc で node:crypto を import するのは、このファイルだけ（不変条件9、ADR 0012）。
+// 鍵を使う暗号の処理のすべて。keysvc で node:crypto を import するのは、このファイルだけ（不変条件9、ADR 0013）。
 // 使う方式は許可リストのものだけ：保存は AES-256-GCM（IV は96ビットの乱数）、MAC は HMAC-SHA-256、署名は ES256。
 
 import {

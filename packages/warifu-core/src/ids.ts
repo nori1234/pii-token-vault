@@ -6,7 +6,7 @@ import { randomUuid } from './random.ts';
 export type ServiceName = 'idp' | 'relay' | 'company-api';
 export type Component = ServiceName | 'keysvc' | 'sender';
 
-/** サービスごとの DB のログインロール（ADR 0014）。 */
+/** サービスごとの DB のログインロール（ADR 0015）。 */
 export const SERVICE_ROLE: Readonly<Record<ServiceName, string>> = Object.freeze({
   idp: 'warifu_idp',
   relay: 'warifu_relay',

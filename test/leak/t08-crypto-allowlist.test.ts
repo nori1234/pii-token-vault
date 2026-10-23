@@ -19,7 +19,7 @@ import {
   stripComments,
 } from '../setup/source.ts';
 
-// node:crypto を import してよいファイルと、その名前（ADR 0012）。
+// node:crypto を import してよいファイルと、その名前（ADR 0013）。
 const CRYPTO_IMPORTERS: Readonly<Record<string, readonly string[]>> = {
   'packages/keysvc/src/crypto.ts': [
     'createCipheriv',
