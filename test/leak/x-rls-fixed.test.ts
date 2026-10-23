@@ -31,6 +31,63 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
       },
     ]),
   ),
+  'contacts.email': {
+    warifu_idp: {
+      INSERT: ['ciphertext', 'updated_at', 'user_id'],
+      SELECT: ['ciphertext', 'updated_at', 'user_id'],
+      UPDATE: ['ciphertext', 'updated_at'],
+    },
+    warifu_relay: { SELECT: ['ciphertext', 'user_id'] },
+  },
+  'contacts.email_pending': {
+    warifu_idp: {
+      INSERT: ['ciphertext', 'code_mac', 'expires_at', 'user_id'],
+      SELECT: ['attempts', 'ciphertext', 'code_mac', 'created_at', 'expires_at', 'user_id'],
+      UPDATE: ['attempts'],
+    },
+    warifu_relay: { SELECT: ['ciphertext', 'user_id'] },
+  },
+  'contacts.email_previous': {
+    warifu_idp: {
+      INSERT: ['ciphertext', 'replaced_at', 'user_id'],
+      SELECT: ['replaced_at', 'user_id'],
+    },
+    warifu_relay: { SELECT: ['ciphertext', 'user_id'] },
+  },
+  'idp.connections': {
+    warifu_idp: {
+      INSERT: ['tenant_id', 'user_id'],
+      SELECT: ['consented_at', 'tenant_id', 'user_id'],
+    },
+  },
+  'idp.credentials': {
+    warifu_idp: {
+      INSERT: [
+        'backed_up',
+        'backup_eligible',
+        'credential_id',
+        'public_key',
+        'sign_count',
+        'transports',
+        'user_id',
+      ],
+      SELECT: [
+        'backed_up',
+        'backup_eligible',
+        'created_at',
+        'credential_id',
+        'last_used_at',
+        'public_key',
+        'sign_count',
+        'transports',
+        'user_id',
+      ],
+      UPDATE: ['backed_up', 'last_used_at', 'sign_count'],
+    },
+  },
+  'idp.users': {
+    warifu_idp: { INSERT: ['user_id'], SELECT: ['created_at', 'user_id'] },
+  },
   'audit.events': Object.fromEntries(
     APP_ROLES.map((role) => {
       const cols = [
@@ -49,6 +106,7 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
 };
 
 const APP = '{warifu_company_api,warifu_idp,warifu_relay}';
+const OWN = '(user_id = warifu.current_user_id())';
 const POLICIES = [
   'aliases.generation|company_api_insert|INSERT|{warifu_company_api}||((tenant_id = warifu.current_tenant_id()) AND (generation >= 2))',
   'aliases.generation|company_api_select|SELECT|{warifu_company_api}|(tenant_id = warifu.current_tenant_id())|',
@@ -59,6 +117,32 @@ const POLICIES = [
   `audit.chain|chain_select|SELECT|${APP}|warifu.has_boundary()|`,
   `audit.events|events_insert|INSERT|${APP}||((service = warifu.service_of(CURRENT_USER)) AND (((tenant_id = warifu.current_tenant_id()) AND (user_id IS NULL)) OR ((user_id = warifu.current_user_id()) AND (tenant_id IS NULL))))`,
   `audit.events|events_select|SELECT|${APP}|((tenant_id = warifu.current_tenant_id()) OR (user_id = warifu.current_user_id()))|`,
+  ...['email', 'email_pending', 'email_previous'].flatMap((t) => [
+    ...(t === 'email_previous' || t === 'email_pending'
+      ? [`contacts.${t}|idp_delete|DELETE|{warifu_idp}|${OWN}|`]
+      : []),
+    `contacts.${t}|idp_insert|INSERT|{warifu_idp}||${OWN}`,
+    `contacts.${t}|idp_select|SELECT|{warifu_idp}|${OWN}|`,
+    ...(t === 'email' || t === 'email_pending'
+      ? [`contacts.${t}|idp_update|UPDATE|{warifu_idp}|${OWN}|${OWN}`]
+      : []),
+    `contacts.${t}|relay_select|SELECT|{warifu_relay}|${OWN}|`,
+  ]),
+  `idp.connections|idp_insert|INSERT|{warifu_idp}||${OWN}`,
+  `idp.connections|idp_select|SELECT|{warifu_idp}|${OWN}|`,
+  `idp.credentials|idp_delete|DELETE|{warifu_idp}|${OWN}|`,
+  `idp.credentials|idp_insert|INSERT|{warifu_idp}||${OWN}`,
+  `idp.credentials|idp_select|SELECT|{warifu_idp}|${OWN}|`,
+  `idp.credentials|idp_update|UPDATE|{warifu_idp}|${OWN}|${OWN}`,
+  `idp.users|idp_insert|INSERT|{warifu_idp}||${OWN}`,
+  `idp.users|idp_select|SELECT|{warifu_idp}|${OWN}|`,
+];
+
+// 表の単位の権限（DELETE は列の単位で与えられない）。これ以外は0件（UPDATE は列の単位だけ）。
+const TABLE_GRANTS = [
+  'contacts.email_pending|warifu_idp|DELETE',
+  'contacts.email_previous|warifu_idp|DELETE',
+  'idp.credentials|warifu_idp|DELETE',
 ];
 
 let client: pg.Client;
@@ -93,6 +177,12 @@ describe('漏えい：RLS とロールの固定（plan 10章 M2）', () => {
         'aliases.generation',
         'audit.chain',
         'audit.events',
+        'contacts.email',
+        'contacts.email_pending',
+        'contacts.email_previous',
+        'idp.connections',
+        'idp.credentials',
+        'idp.users',
         'warifu_meta.migrations',
       ]),
     );
@@ -242,7 +332,8 @@ describe('漏えい：RLS とロールの固定（plan 10章 M2）', () => {
     // 攻撃者が持っている情報：同上（ATK-02、ATK-07）
     // 試す経路：aclexplode(relacl) と aclexplode(attacl) を読む
     // 期待する結果：アプリのロール（と解決関数の所有者）に表の単位の権限がない。列の単位の権限が一覧と完全に一致する
-    //               （UPDATE、DELETE、TRUNCATE、REFERENCES、TRIGGER はない。lookup_mac はアプリのロールが読めない）
+    //               （表の単位は、利用者の範囲の DELETE の3つだけ。UPDATE は列の単位だけ。TRUNCATE、REFERENCES、
+    //               TRIGGER はない。lookup_mac はアプリのロールが読めない。idp の暗号文は、復号できないが読める）
     // plan 11章：番号なし（plan 10章 M2、2章「BOLA を防ぐ」）
     const roles = [...APP_ROLES, 'warifu_alias_resolver'];
     const tableGrants = await rows<{ t: string; grantee: string; priv: string }>(
@@ -253,7 +344,7 @@ describe('漏えい：RLS とロールの固定（plan 10章 M2）', () => {
         WHERE n.nspname NOT IN ${SYSTEM_SCHEMAS} AND (a.grantee = 0 OR pg_catalog.pg_get_userbyid(a.grantee) = ANY($1))`,
       [roles],
     );
-    expect(tableGrants).toEqual([]);
+    expect(tableGrants.map((g) => `${g.t}|${g.grantee}|${g.priv}`).sort()).toEqual(TABLE_GRANTS);
     const columnGrants = await rows<{ t: string; grantee: string; priv: string; col: string }>(
       `SELECT n.nspname || '.' || c.relname AS t, pg_catalog.pg_get_userbyid(x.grantee) AS grantee,
               x.privilege_type AS priv, a.attname AS col
@@ -321,7 +412,7 @@ describe('漏えい：RLS とロールの固定（plan 10章 M2）', () => {
       `SELECT n.nspname || '.' || p.proname AS name
          FROM pg_catalog.pg_proc AS p JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace,
               pg_catalog.aclexplode(COALESCE(p.proacl, pg_catalog.acldefault('f', p.proowner))) AS a
-        WHERE n.nspname IN ('warifu', 'audit', 'aliases', 'relay', 'idp', 'company_api', 'warifu_meta')
+        WHERE n.nspname IN ('warifu', 'audit', 'aliases', 'relay', 'idp', 'company_api', 'contacts', 'warifu_meta')
           AND a.grantee = 0`,
     );
     expect(publicExecute).toEqual([]);
