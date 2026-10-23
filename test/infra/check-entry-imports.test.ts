@@ -1,6 +1,7 @@
-// scripts/check-entry-imports.ts の検査が、正規表現では見逃していた import の書き方も拒否することを確かめる。
+// scripts/check-entry-imports.ts の検査が、Node が実際に読み込むファイルを、書き方によらずたどることを確かめる。
+// 正規表現や、tsc と字句解析の組み合わせでは見逃していた書き方も含める。
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -32,6 +33,15 @@ describe('本体のコードから、lint の制限を外したファイルへ�
     ['改行をはさむ import', "import { a } from\n  './helper.test.ts';\nexport { a };\n"],
     ['改行をはさむ動的な import', "await import(\n  './helper.test.ts'\n);\n"],
     ['export … from', "export * from './helper.test.ts';\n"],
+    // Node は、URL のクエリとフラグメントを取り除き、%XX を元の文字に直して読み込む。
+    ['クエリを付けた import', "import './helper.test.ts?x';\n"],
+    ['クエリを付けた動的な import', "await import('./helper.test.ts?x');\n"],
+    ['フラグメントを付けた import', "import './helper.test.ts#x';\n"],
+    ['%2E で書いた import', "import './helper%2Etest.ts';\n"],
+    [
+      '型だけを取り除いた後に残る import',
+      "import { type A } from './helper.test.ts';\nexport type { A };\n",
+    ],
   ])('%s を拒否する', (_name, text) => {
     const violations = findViolations(write({ ...HELPER, 'packages/x/src/a.ts': text }));
     expect(violations).toEqual([
@@ -74,6 +84,45 @@ describe('本体のコードから、lint の制限を外したファイルへ�
     ]);
   });
 
+  it('ワークスペースのパッケージの exports で、テストに向けた名前も拒否する', () => {
+    write({
+      'packages/y/package.json': JSON.stringify({
+        name: '@t/y',
+        type: 'module',
+        exports: './src/helper.test.ts',
+      }),
+      'packages/y/src/helper.test.ts': 'export {};\n',
+      'packages/x/src/a.ts': "import '@t/y';\n",
+    });
+    // npm のワークスペースと同じく、node_modules の下にリンクを置く。Node は実体のパスに直す。
+    mkdirSync(join(root, 'node_modules/@t'), { recursive: true });
+    symlinkSync(join(root, 'packages/y'), join(root, 'node_modules/@t/y'));
+    expect(findViolations(root)).toEqual([
+      'packages/y/src/helper.test.ts：本体のコードから import されている',
+    ]);
+  });
+
+  it.each([
+    ['data: の URL', "await import('data:text/javascript,export default 1');\n", 'data:'],
+    ['https: の URL', "import 'https://example.com/a.js';\n", 'https:'],
+  ])('%s を読み込む import を拒否する', (_name, text) => {
+    const violations = findViolations(write({ 'packages/x/src/a.ts': text }));
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatch(
+      /^packages\/x\/src\/a\.ts：ファイル以外（data: や https: など）を読み込む import/,
+    );
+  });
+
+  it.each([
+    ['存在しないファイル', "import './missing.ts';\n", './missing.ts'],
+    ['存在しないパッケージ', "import 'no-such-package';\n", 'no-such-package'],
+  ])('%s を読み込む import を拒否する', (_name, text, specifier) => {
+    const violations = findViolations(write({ 'packages/x/src/a.ts': text }));
+    expect(violations).toEqual([
+      `packages/x/src/a.ts：読み込み先を解決できない import（${specifier}）`,
+    ]);
+  });
+
   const NON_LITERAL = '引用符で囲んだ文字列リテラル1つ以外を渡す動的な import';
 
   it.each([
@@ -89,10 +138,17 @@ describe('本体のコードから、lint の制限を外したファイルへ�
     // テンプレート文字列（\x24 は $）。置き換えのないものも拒否する。
     ['置き換えのあるテンプレート文字列', 'await import(`./\x24{name}.ts`);\n'],
     ['置き換えのないテンプレート文字列', 'await import(`./helper.test.ts`);\n'],
+    // 括弧の中の型の構文。型を取り除くと文字列リテラル1つに見えるが、元のコードではそうでない。
+    ['as string を付けた文字列', "await import('./helper.test.ts' as string);\n"],
+    ['as const を付けた文字列', "await import('./helper.test.ts' as const);\n"],
+    ['satisfies を付けた文字列', "await import('./helper.test.ts' satisfies string);\n"],
+    [
+      '型の構文を付けた2つ目の引数',
+      "await import('./d.json', { with: { type: 'json' } } as const);\n",
+    ],
   ])('%s を渡す動的な import を拒否する', (_name, text) => {
-    // 置き換えのないテンプレート文字列は、tsc もたどるので、import されているほうの違反も出る。
     const violations = findViolations(write({ ...HELPER, 'packages/x/src/a.ts': text }));
-    expect(violations).toContain(`packages/x/src/a.ts：${NON_LITERAL}`);
+    expect(violations).toEqual([`packages/x/src/a.ts：${NON_LITERAL}`]);
   });
 
   it('走査しないディレクトリ（. で始まる）のファイルも、本体のコードから import されれば調べる', () => {
@@ -115,8 +171,8 @@ describe('本体のコードから、lint の制限を外したファイルへ�
       }),
     );
     expect(violations.sort()).toEqual([
-      'packages/x/src/b.cjs：CommonJS として読み込まれる（require は tsc の import のグラフに載らない）',
-      'packages/y/src/c.ts：CommonJS として読み込まれる（require は tsc の import のグラフに載らない）',
+      'packages/x/src/b.cjs：CommonJS として読み込まれる（require() は、この検査でたどらない）',
+      'packages/y/src/c.ts：CommonJS として読み込まれる（require() は、この検査でたどらない）',
     ]);
   });
 
@@ -125,7 +181,7 @@ describe('本体のコードから、lint の制限を外したファイルへ�
       write({ 'packages/x/src/a.ts': 'enum Mode {\n  A,\n}\nexport { Mode };\n' }),
     );
     expect(violations).toEqual([
-      'packages/x/src/a.ts：構文を解析できない（tsc がたどれない import を確かめられない）',
+      'packages/x/src/a.ts：構文を解析できない（読み込み先を確かめられない）',
     ]);
   });
 
