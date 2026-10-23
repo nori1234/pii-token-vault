@@ -49,13 +49,13 @@
 
 ## いまの状態とロードマップ
 
-設計の文書がそろい、PoC の実装の最初の段階（M1：雛形と捨てスパイク、仕様書の骨子）を終えました。次は M2（暗号、鍵サービス、DB の境界）です。各マイルストーンはイシューで管理しています。
+設計の文書がそろい、PoC の実装の最初の段階（M1：雛形と捨てスパイク、仕様書の骨子）を終えました。いまは M2（暗号、鍵サービス、DB の境界）を進めています。各マイルストーンはイシューで管理しています。
 
 | マイルストーン | 内容 | ゲート | 状態 |
 |---|---|---|---|
 | M0 | 一次資料の原文照合（実装と並行） | | 人の作業待ち |
 | M1 | 雛形、パスキーと CIBA の試作、仕様書の骨子 | | 完了 |
-| M2 | 暗号、鍵サービス、DB の境界 | | 未着手 |
+| M2 | 暗号、鍵サービス、DB の境界 | | 進行中 |
 | M3 | ログイン（idp） | | 未着手 |
 | M4 | メール中継（relay） | Gate A | 未着手 |
 | M5 | 企業向け API と送信サービス | | 未着手 |
@@ -94,9 +94,10 @@
 npm ci
 npm run lint        # Biome。不変条件7と9に反する import も止める
 npm run typecheck   # tsc --noEmit
-npm test            # Vitest（一時的な Postgres を自動で起動して止める）
+npm test            # Vitest（一時的な Postgres と鍵サービスを自動で起動して止める）
 npm run e2e         # Playwright（パスキーは CDP の仮想認証器で試す）
 npm run pg-up       # 一時的な Postgres を手で起動する
+npm run migrate     # pg-up で起動した Postgres に、マイグレーションを流す（PGDATABASE も指定する）
 ```
 
 - PR では、上の4つ（lint、typecheck、test、e2e）がすべて通ることを求めます。CI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）でも同じものを実行します。
@@ -104,11 +105,11 @@ npm run pg-up       # 一時的な Postgres を手で起動する
 
 ### いまあるコード
 
-- `packages/`：本実装の置き場所です。中身は M2 から作ります。
+- `packages/`：本実装の置き場所です。M2 で、`warifu-core`（ID、符号化、鍵サービスのクライアント、DB の境界、監査ログ、ログの伏せ字）と `keysvc`（鍵サービス）を作りました。ほかのパッケージは、まだ空です。
 - `spikes/`：M1 の捨てスパイクです。本実装に置き換えたら消します。詳しくは [spikes/README.md](spikes/README.md) を参照してください。
   - `spikes/passkey`：仮想認証器で、パスキーの登録とログインを通します（`npm run e2e` で動きます）。
   - `spikes/ciba-poll`：oidc-provider の CIBA を poll で1往復させます（`npm test` で動きます）。
-- `test/leak/`：漏えいシナリオのテストの置き場所です。最初のテストは M2 で足します。書き方は [test/leak/README.md](test/leak/README.md) にあります。
+- `test/leak/`：漏えいシナリオのテストの置き場所です。M2 で、テスト8（鍵サービスの能力の表、暗号の許可リスト、監査ログのチェーン）と、RLS の固定テストを足しました。書き方は [test/leak/README.md](test/leak/README.md) にあります。
 
 [CLAUDE.md](CLAUDE.md) の「環境の注意」は、メンテナーが使う Claude Code のクラウド環境での注意です（例：その環境では `npx playwright install` を実行しない）。手元では、上の「前提」に従ってください。
 

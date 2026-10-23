@@ -9,7 +9,7 @@ import {
   arrayFrom,
   assertOneOf,
   bytesFrom,
-  createTransport,
+  createKeysvcTransport,
   ES256_SIGNATURE_BYTES,
   encodeBytes,
   stringFrom,
@@ -69,7 +69,7 @@ function toJwk(value: unknown): Es256PublicJwk {
 }
 
 export function createIdpKeyClient(connection: KeysvcConnection): IdpKeyClient {
-  const call = createTransport(connection, 'idp');
+  const call = createKeysvcTransport(connection, 'idp');
   return Object.freeze({
     async encryptContact(input: { readonly userId: WarifuUserId; readonly plaintext: Uint8Array }) {
       const response = await call('encrypt', {

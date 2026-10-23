@@ -29,7 +29,10 @@ export class KeysvcCredentialError extends Error {
 
 const decoder = new TextDecoder();
 
-export function createTransport(connection: KeysvcConnection, service: KeysvcCaller): KeysvcCall {
+export function createKeysvcTransport(
+  connection: KeysvcConnection,
+  service: KeysvcCaller,
+): KeysvcCall {
   const credential = connection?.credential;
   const prefix = `${service}.`;
   if (typeof credential !== 'string' || !credential.startsWith(prefix)) {

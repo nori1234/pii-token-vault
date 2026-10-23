@@ -6,7 +6,7 @@ import { isUuid, parseWarifuUserId, type WarifuUserId } from '../ids.ts';
 import { macWith } from './common.ts';
 import { KeysvcError } from './errors.ts';
 import { type KeysvcConnection, LIMITS } from './protocol.ts';
-import { bytesFrom, createTransport, encodeBytes } from './transport.ts';
+import { bytesFrom, createKeysvcTransport, encodeBytes } from './transport.ts';
 
 export type RelayMacPurpose = 'alias_lookup' | 'audit_chain';
 const MAC_PURPOSES: readonly RelayMacPurpose[] = ['alias_lookup', 'audit_chain'];
@@ -35,7 +35,7 @@ function queueItemId(value: string): string {
 }
 
 export function createRelayKeyClient(connection: KeysvcConnection): RelayKeyClient {
-  const call = createTransport(connection, 'relay');
+  const call = createKeysvcTransport(connection, 'relay');
   return Object.freeze({
     async decryptContact(input: {
       readonly userId: WarifuUserId;

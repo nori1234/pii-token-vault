@@ -4,7 +4,7 @@
 import type { TenantId, WarifuUserId } from '../ids.ts';
 import { deriveAliasWith, macWith } from './common.ts';
 import type { KeysvcConnection } from './protocol.ts';
-import { createTransport } from './transport.ts';
+import { createKeysvcTransport } from './transport.ts';
 
 export type CompanyApiMacPurpose = 'alias_lookup' | 'audit_chain';
 const MAC_PURPOSES: readonly CompanyApiMacPurpose[] = ['alias_lookup', 'audit_chain'];
@@ -19,7 +19,7 @@ export interface CompanyApiKeyClient {
 }
 
 export function createCompanyApiKeyClient(connection: KeysvcConnection): CompanyApiKeyClient {
-  const call = createTransport(connection, 'company-api');
+  const call = createKeysvcTransport(connection, 'company-api');
   return Object.freeze({
     mac(purpose: CompanyApiMacPurpose, message: Uint8Array) {
       return macWith(call, MAC_PURPOSES, purpose, message);

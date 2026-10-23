@@ -265,9 +265,11 @@ describe('漏えい：RLS とロールの固定（plan 10章 M2）', () => {
     );
     const actual: Record<string, Record<string, Record<string, string[]>>> = {};
     for (const g of columnGrants) {
-      const byRole = (actual[g.t] ??= {});
-      const byPriv = (byRole[g.grantee] ??= {});
-      (byPriv[g.priv] ??= []).push(g.col);
+      const byRole = actual[g.t] ?? {};
+      const byPriv = byRole[g.grantee] ?? {};
+      byPriv[g.priv] = [...(byPriv[g.priv] ?? []), g.col];
+      byRole[g.grantee] = byPriv;
+      actual[g.t] = byRole;
     }
     for (const byRole of Object.values(actual)) {
       for (const byPriv of Object.values(byRole)) {
