@@ -35,11 +35,12 @@ plan 8章は、鍵サービス（`packages/keysvc`）を別プロセスで立て
 | decrypt（contact、relay_queue） | — | — | ○ | M4 |
 | mac（alias_lookup） | ○ | ○ | ○ | M3〜M5 |
 | mac（audit_chain） | ○ | ○ | ○ | M2 |
+| mac（pairwise_sub、oidc_storage_id、email_verify_code） | ○ | — | — | M3（ADR 0018） |
 | derive_alias（alias_derive） | ○ | ○ | — | M3・M5 |
 | sign（id_token）、public_keys（id_token） | ○ | — | — | M3（ADR 0014） |
 
 - sender、rp-kit、demo-rp には資格情報を作らない。
-- **MAC の鍵は用途ごとに独立**にする。KMS は入力の中身で ACL をかけられないので、用途ごとの鍵と ACL にしておけば、本番でも KMS の鍵ごとのポリシーに写せる。M2 で作る用途は `alias_lookup` と `audit_chain` だけ。今後の見込みは、`oidc_storage_id`（M3）、sub の導出（M3 で、操作にするか用途にするかを決める）、`message_id`・`dkim_replay`・`reply_address`（M4）、`desk_code`（M7）、`recovery_code`・`invite_code`（M8）。用途を足すときは、`MacPurpose` の型、`acl.ts`、各クライアントの型、t08-keysvc-acl と t08-key-client-surface の期待の表を同じ PR で直す。
+- **MAC の鍵は用途ごとに独立**にする。KMS は入力の中身で ACL をかけられないので、用途ごとの鍵と ACL にしておけば、本番でも KMS の鍵ごとのポリシーに写せる。M2 で作った用途は `alias_lookup` と `audit_chain`。M3 で、idp だけの用途として `pairwise_sub`（sub の導出。操作ではなく用途にした）、`oidc_storage_id`（idp の保存の鍵）、`email_verify_code`（宛先確認のコード）を足した（ADR 0018）。今後の見込みは、`message_id`・`dkim_replay`・`reply_address`（M4）、`desk_code`（M7）、`recovery_code`・`invite_code`（M8）。用途を足すときは、`MacPurpose` の型、`acl.ts`、各クライアントの型、t08-keysvc-acl と t08-key-client-surface の期待の表を同じ PR で直す。
 - 別名を導く鍵（`alias_derive`）は、どの MAC の用途の鍵とも別にする（CAP-05、ADR 0005）。
 
 ### 検査の順番とエラー
@@ -86,7 +87,7 @@ plan 8章は、鍵サービス（`packages/keysvc`）を別プロセスで立て
 | 対象 | 形式での備え | 漏えいが疑われるときの手順 |
 |---|---|---|
 | 保存用の鍵（contact、relay_queue） | 暗号文に鍵の版を持ち、復号は版で鍵を選ぶ | 新しい版で暗号化し、古い版の暗号文は relay の中で復号して書き直す（復号できるのは relay だけ。実装は P1）。本番は KMS の自動の入れ替え |
-| 照合用の HMAC 鍵（用途ごと） | 用途ごとに独立 | 用途ごとに作り直す。`alias_lookup` は `derive_alias` から全世代の索引を作り直す（手順は M5）。`audit_chain` は新しい鍵で新しい区間を始める（区間の記録は P1） |
+| 照合用の HMAC 鍵（用途ごと） | 用途ごとに独立 | 用途ごとに作り直す。`alias_lookup` は `derive_alias` から全世代の索引を作り直す（手順は M5）。`audit_chain` は新しい鍵で新しい区間を始める（区間の記録は P1）。`pairwise_sub` は入れ替えない（全企業の sub が変わるため。付け替えのイベントと合わせて P1。ADR 0018）。`oidc_storage_id` と `email_verify_code` は、入れ替えると保存中のセッションと確認中のコードが無効になるだけ |
 | 署名の鍵（id_token） | `kid` を持ち、`public_keys` は有効な鍵をすべて返す | ADR 0014 |
 | サービスの資格情報 | サービスごとに1つ | 新しい資格情報で鍵サービスとそのサービスを起動し直す。新旧を重ねない（decrypt の資格情報を常に1つにするため。入れ替えの間は短く止まる） |
 | 別名の導出鍵 | — | P1（ADR 0005） |

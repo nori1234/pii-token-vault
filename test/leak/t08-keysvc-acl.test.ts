@@ -15,6 +15,9 @@ type Combo =
   | 'decrypt/relay_queue'
   | 'mac/alias_lookup'
   | 'mac/audit_chain'
+  | 'mac/pairwise_sub'
+  | 'mac/oidc_storage_id'
+  | 'mac/email_verify_code'
   | 'derive_alias'
   | 'sign/id_token'
   | 'public_keys/id_token';
@@ -26,6 +29,9 @@ const COMBOS: readonly Combo[] = [
   'decrypt/relay_queue',
   'mac/alias_lookup',
   'mac/audit_chain',
+  'mac/pairwise_sub',
+  'mac/oidc_storage_id',
+  'mac/email_verify_code',
   'derive_alias',
   'sign/id_token',
   'public_keys/id_token',
@@ -37,6 +43,9 @@ const ALLOWED: Readonly<Record<Caller, readonly Combo[]>> = {
     'encrypt/contact',
     'mac/alias_lookup',
     'mac/audit_chain',
+    'mac/pairwise_sub',
+    'mac/oidc_storage_id',
+    'mac/email_verify_code',
     'derive_alias',
     'sign/id_token',
     'public_keys/id_token',
@@ -103,6 +112,12 @@ function bodyFor(combo: Combo): { op: string; body: unknown } {
       return { op: 'mac', body: { purpose: 'alias_lookup', message: b64('m') } };
     case 'mac/audit_chain':
       return { op: 'mac', body: { purpose: 'audit_chain', message: b64('m') } };
+    case 'mac/pairwise_sub':
+      return { op: 'mac', body: { purpose: 'pairwise_sub', message: b64('m') } };
+    case 'mac/oidc_storage_id':
+      return { op: 'mac', body: { purpose: 'oidc_storage_id', message: b64('m') } };
+    case 'mac/email_verify_code':
+      return { op: 'mac', body: { purpose: 'email_verify_code', message: b64('m') } };
     case 'derive_alias':
       return { op: 'derive_alias', body: { tenantId, userId, generation: 1 } };
     case 'sign/id_token':

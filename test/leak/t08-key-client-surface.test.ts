@@ -31,6 +31,10 @@ function typeOnly(idp: IdpKeyClient, companyApi: CompanyApiKeyClient, relay: Rel
   void relay.sign('id_token', new Uint8Array());
   // @ts-expect-error まだない MAC の用途は、型にない
   void idp.mac('message_id', new Uint8Array());
+  // @ts-expect-error sub の導出は idp だけ
+  void companyApi.mac('pairwise_sub', new Uint8Array());
+  // @ts-expect-error 確認コードの MAC は idp だけ
+  void relay.mac('email_verify_code', new Uint8Array());
 }
 
 const EXPECTED_METHODS = {
@@ -44,7 +48,8 @@ describe('漏えい：鍵のクライアントの表面（plan 11章 テスト8�
     // 攻撃者が持っている情報：なし（不変条件3「型には許した操作だけ」の固定。侵害されたサービスのコードが、
     //                       型の上で decrypt などを呼べない）
     // 試す経路：typeOnly の中で、idp の decryptContact、company-api の encryptContact、relay の deriveAlias と
-    //           sign、idp の mac('message_id') を @ts-expect-error 付きで書く
+    //           sign、idp の mac('message_id')、company-api の mac('pairwise_sub')、relay の
+    //           mac('email_verify_code') を、型の誤りを期待する注記付きで書く
     // 期待する結果：型の検査で誤りになる（ならなければ npm run typecheck が失敗する）。typeOnly は呼ばない
     // plan 11章：テスト8
     expect(typeof typeOnly).toBe('function');
@@ -88,9 +93,14 @@ describe('漏えい：鍵のクライアントの表面（plan 11章 テスト8�
       expect(await companyApi.mac(purpose, message)).toEqual(a);
       expect(await relay.mac(purpose, message)).toEqual(a);
     }
-    expect(await idp.mac('alias_lookup', message)).not.toEqual(
+    // idp だけの用途。用途ごとに鍵が違う（同じ入力でも MAC が違う）。
+    const idpOnly = ['pairwise_sub', 'oidc_storage_id', 'email_verify_code'] as const;
+    const macs = [
+      await idp.mac('alias_lookup', message),
       await idp.mac('audit_chain', message),
-    );
+      ...(await Promise.all(idpOnly.map((purpose) => idp.mac(purpose, message)))),
+    ].map((mac) => Buffer.from(mac).toString('hex'));
+    expect(new Set(macs).size).toBe(macs.length);
     const alias = await idp.deriveAlias({ tenantId, userId, generation: 1 });
     expect(await companyApi.deriveAlias({ tenantId, userId, generation: 1 })).toBe(alias);
     expect((await idp.sign('id_token', message)).signature.byteLength).toBe(64);
