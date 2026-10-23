@@ -89,7 +89,7 @@ jobs:
     name: e2e（Playwright）
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    # E2E（test/e2e/idp.e2e.ts）は、一時的な Postgres と鍵サービスと idp を、テストのワーカーの中で起動する（M3）。
+    # E2E（test/leak/x-idp-browser.e2e.ts）は、一時的な Postgres と鍵サービスと idp を、テストのワーカーの中で起動する（M3）。
     env:
       PG_BIN: /usr/lib/postgresql/16/bin
     steps:

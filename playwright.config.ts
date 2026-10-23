@@ -20,5 +20,5 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   // サーバー（一時的な Postgres、鍵サービス、idp）は、各 E2E のファイルが自分のワーカーの中で起動する
-  // （test/e2e/idp.e2e.ts）。企業の鍵をテストが持つため、webServer は使わない。
+  // （test/leak/x-idp-browser.e2e.ts）。企業の鍵をテストが持つため、webServer は使わない。
 });
