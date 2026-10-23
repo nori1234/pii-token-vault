@@ -15,8 +15,19 @@ import {
   stringFrom,
 } from './transport.ts';
 
-export type IdpMacPurpose = 'alias_lookup' | 'audit_chain';
-const MAC_PURPOSES: readonly IdpMacPurpose[] = ['alias_lookup', 'audit_chain'];
+export type IdpMacPurpose =
+  | 'alias_lookup'
+  | 'audit_chain'
+  | 'pairwise_sub'
+  | 'oidc_storage_id'
+  | 'email_verify_code';
+const MAC_PURPOSES: readonly IdpMacPurpose[] = [
+  'alias_lookup',
+  'audit_chain',
+  'pairwise_sub',
+  'oidc_storage_id',
+  'email_verify_code',
+];
 
 export interface IdpKeyClient {
   encryptContact(input: {
