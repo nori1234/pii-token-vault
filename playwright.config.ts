@@ -3,7 +3,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const isCI = Boolean(process.env.CI);
-const passkeySpikePort = process.env.SPIKE_PASSKEY_PORT ?? '4101';
 
 export default defineConfig({
   testDir: '.',
@@ -20,16 +19,6 @@ export default defineConfig({
     trace: 'off',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: [
-    {
-      // 捨てスパイク1（spikes/passkey）。M3 で packages/idp に置き換える。
-      command: 'node spikes/passkey/server.ts',
-      env: { SPIKE_PASSKEY_PORT: passkeySpikePort },
-      url: `http://localhost:${passkeySpikePort}/`,
-      reuseExistingServer: !isCI,
-      timeout: 30_000,
-      stdout: 'ignore',
-      stderr: 'pipe',
-    },
-  ],
+  // サーバー（一時的な Postgres、鍵サービス、idp）は、各 E2E のファイルが自分のワーカーの中で起動する
+  // （test/e2e/idp.e2e.ts）。企業の鍵をテストが持つため、webServer は使わない。
 });
