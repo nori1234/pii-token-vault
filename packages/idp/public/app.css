@@ -1,0 +1,139 @@
+/* 割符の PWA。トークンは DESIGN.md 5章のとおり。外部のフォントや CDN は使わない。 */
+:root {
+  --color-bg: #ffffff;
+  --color-fg: #1a1a1a;
+  --color-muted: #5c5c5c;
+  --color-divider: #d0d0d0;
+  --color-control-border: #767676;
+  --color-primary: #1f4fd1;
+  --color-on-primary: #ffffff;
+  --color-danger: #b42318;
+  --color-on-danger: #ffffff;
+  --color-caution-bg: #fff4e5;
+  --color-caution-fg: #7a4a00;
+  --color-focus: #1f4fd1;
+  --font-sans: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --text-base: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+  --line-height: 1.7;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --radius: 8px;
+  --tap-min: 48px;
+  --focus-width: 3px;
+  --focus-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #121212;
+    --color-fg: #f0f0f0;
+    --color-muted: #a8a8a8;
+    --color-divider: #3a3a3a;
+    --color-control-border: #7a7a7a;
+    --color-primary: #7aa2ff;
+    --color-on-primary: #121212;
+    --color-danger: #ff8a80;
+    --color-on-danger: #121212;
+    --color-caution-bg: #3a2a10;
+    --color-caution-fg: #ffd699;
+    --color-focus: #7aa2ff;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--line-height);
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4);
+}
+
+h1 {
+  font-size: var(--text-lg);
+}
+
+h2 {
+  font-size: var(--text-lg);
+  margin-top: var(--space-6);
+  border-top: 1px solid var(--color-divider);
+  padding-top: var(--space-4);
+}
+
+.company {
+  font-size: var(--text-xl);
+  font-weight: 700;
+}
+
+.status {
+  color: var(--color-fg);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+button {
+  min-height: var(--tap-min);
+  min-width: var(--tap-min);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-control-border);
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font: inherit;
+}
+
+.actions.equal > button {
+  flex: 1 1 0;
+}
+
+button.danger {
+  background: var(--color-danger);
+  color: var(--color-on-danger);
+  border-color: var(--color-danger);
+}
+
+input {
+  display: block;
+  min-height: var(--tap-min);
+  width: 100%;
+  box-sizing: border-box;
+  margin: var(--space-2) 0 var(--space-3);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius);
+  font: inherit;
+  color: var(--color-fg);
+  background: var(--color-bg);
+}
+
+:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}
+
+ul.passkeys li,
+ul.companies li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.alias {
+  color: var(--color-muted);
+  word-break: break-all;
+}
