@@ -24,27 +24,10 @@ Codex など、Claude Code 以外のエージェント向けの入り口。規�
 
 ## 環境（Codex のクラウド環境）
 
-CLAUDE.md の「環境の注意」は、Claude Code のクラウド環境についてのもの。Codex の環境では、次のようにする。
+CLAUDE.md の「環境の注意」は、Claude Code のクラウド環境についてのもの。Codex の環境の設定と確認の手順は、[docs/codex-environment.md](docs/codex-environment.md) に従う。
 
-- Node は 22 を選ぶ。
-- セットアップスクリプト（インターネットにつながる段階）で、依存、Chromium、PostgreSQL 16 のバイナリを入れる。root でないときは、`apt-get` などに `sudo` を付ける。
-
-  ```sh
-  set -eu
-  npm ci --ignore-scripts --no-audit --no-fund
-  npx --no playwright install --with-deps chromium
-  # PostgreSQL 16 は、バイナリだけを使う。システムのクラスタは作らず、サービスも起動しない（CI と同じ）。
-  if [ ! -x /usr/lib/postgresql/16/bin/initdb ]; then
-    install -d /etc/postgresql-common/createcluster.d
-    echo 'create_main_cluster = false' > /etc/postgresql-common/createcluster.d/no-main-cluster.conf
-    printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod 0755 /usr/sbin/policy-rc.d
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends postgresql-16
-    rm -f /usr/sbin/policy-rc.d
-  fi
-  ```
-
-- 作業の段階のインターネット接続は、切ったままにする。依存はセットアップスクリプトで入れる。
+- セットアップスクリプト（インターネットにつながる段階）には、`bash scripts/setup-codex.sh` を指定する。依存、Chromium、PostgreSQL 16 のバイナリを入れる。サービスの起動を止める `policy-rc.d` と、システムのクラスタを作らない設定は一時的なもので、成功しても失敗しても元に戻す。
+- 作業の段階のインターネット接続は、切ったままにする。
 - PR を出す前に、4つのコマンド（`npm run lint`、`npm run typecheck`、`npm test`、`npm run e2e`）をすべて通す。
 
 ## Review guidelines
