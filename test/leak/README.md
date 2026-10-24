@@ -2,7 +2,20 @@
 
 漏れた連絡先や属性（と、割符が企業に渡す別名や sub）を持つ攻撃者が、割符と、接続要件を守る企業（完全な参加の企業。ADR 0010）での本人確認を突破できないことを、攻撃者の立場で確かめるテストを置く（CLAUDE.md の不変条件12、plan 11章）。
 
-いまは空。最初のテストは M2 で足す。
+M2 で、テスト8（`t08-*`）と、RLS の固定テストなど番号のない横断のテスト（`x-*`）を足した。
+
+| ファイル | 確かめること |
+|---|---|
+| `t08-keysvc-acl` | 鍵サービスの能力の表（全組み合わせ、表にない操作と対象、資格情報を持たないサービス） |
+| `t08-keysvc-auth` | 資格情報のなりすましと壊れた形、403 の一律、decrypt の資格情報を増やす設定での起動の拒否 |
+| `t08-keysvc-isolation` | TCP と UDP で待ち受けないこと、ソケットとディレクトリの権限、出力に値が出ないこと |
+| `t08-ciphertext-binding` | 暗号文の文脈（利用者 ID）への結び付き、書き換えと別の鍵での復号の拒否 |
+| `t08-crypto-allowlist` | `node:crypto` を import するファイルと名前、方式の文字列、実際の方式 |
+| `t08-key-client-surface` | 鍵のクライアントのメソッド、relay の部品の import、UDS のクライアントと lint の例外 |
+| `t08-audit-chain` | 監査ログのチェーンの検証、書き換えの拒否、改ざんの検出 |
+| `x-rls-fixed` | RLS の ENABLE と FORCE、ロール、ポリシーと列単位の GRANT の一覧、SECURITY DEFINER が1つだけ |
+| `x-db-boundary` | テナントと利用者の境界、境界なしの生の接続、権限の昇格、`sql` タグ |
+| `x-relay-resolver` | relay の解決関数（2つの ID だけを返す、廃番の区別がない、relay だけが呼べる） |
 
 ## いつ足すか
 
@@ -14,7 +27,15 @@
 
 - Vitest のテストは `test/leak/*.test.ts`、Playwright のテストは `test/leak/*.e2e.ts` に置く。どちらも、ルートの設定（`vitest.config.ts`、`playwright.config.ts`）がそのまま拾う。
 - ファイル名は `tNN-<短い名前>`。NN は plan 11章のテスト番号を2桁で書く（例：`t02-ciba-hints.test.ts`）。番号のない横断のテスト（SSRF、利用者どうしの BOLA など）は、番号の代わりに `x-` を付ける。
-- DB を使うテストは、`test/setup/worker-db.ts` の `workerDatabase()` で、ワーカーごとの DB を得る。
+- DB を使うテストは、`test/setup/db.ts` を使う。
+  - `serviceDb('idp' | 'company-api')`、`relayDb()`：アプリと同じ境界（`withTenant`、`withWarifuUser`）を通る。
+  - `rawRoleClient(role)`：境界を設定しない、アプリのロールの生の接続。盗んだ資格情報や SQL インジェクションを模すときに使う（権限はアプリのロールと同じ）。
+  - ワーカーの DB は、同じワーカーのファイルの間で共有する。偽の行を足すテストは、境界の中で足して、例外を投げて ROLLBACK する（DB を汚さない）。値は、テストごとの乱数のテナント ID と利用者 ID で分ける。
+  - ブートストラップのロール（`workerDatabase()`）で、DB の中身を読み書きしない（不変条件8の例外は、マイグレーションとテスト用の DB の作成だけ）。
+- 鍵サービスを使うテストは、`test/setup/keys.ts` を使う。
+  - `keysvcConnection(service)`：globalSetup の鍵サービスへの接続。DB を使うテストは、これを使う（監査ログのチェーンを、実行全体で同じ鍵で検証するため）。
+  - `rawKeysvcCall`：型を通さない生の要求。攻撃の段で使う。
+  - 鍵サービスの出力や起動を調べるテストは、`scripts/keysvc-up.ts` の `startKeysvc()` でファイルの中に自分の鍵サービスを起動する。起動に失敗するはずの設定は `startKeysvcExpectingFailure` で試す。
 
 ## 先頭のコメント（必須）
 
