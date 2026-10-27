@@ -186,7 +186,7 @@ binding_message：
 - CIBA の応答には、access_token が必ず付く。userinfo を無効にした構成では、使い道がない。企業が根拠にしてよいのは、ID トークンの iss・sub・acr・auth_time だけ（不変条件1(a)）。
 - `provider.use` で入れる Koa のミドルウェアは、本文の解析より前に走る（`lib/provider.js` の use は、ルーターの前に差し込む）。後処理（discovery の書き換え）には使えるが、パラメータの検査には向かない。
 - **承認と拒否の競合**：同じ承認待ちへの承認と拒否が、どちらも受信箱の検査を通ってから await で入れ替わると、両方が成功しうる（Grant が作られ、poll には ID トークンが出る）。`backchannelResult` は、要求に結果がもう入っているかを確かめずに上書きする（`lib/provider.js`）。スパイクでは、最初の await より前に受信箱の状態を resolving に変え、grantId、error、consumed のどれかがもう入っている要求を拒否した（`spikes/ciba-poll/provider.ts` の settle と loadRequest）。M6 と M7 では、この状態の変更を DB の1つの文で行う（例：`UPDATE … SET state = $2 WHERE id = $1 AND state = 'pending' RETURNING …`）。
-- **クッキーの署名**：`cookies.keys` に配列を渡すと、Koa の cookies が Keygrip の既定の HMAC-SHA1 で署名する。HMAC-SHA1 は、不変条件9の許可リストにない。oidc-provider は、配列でない keys をそのまま Koa に渡す（`lib/provider.js`）。スパイクでは、Keygrip と同じ形（sign、verify、index）で HMAC-SHA-256 を使うオブジェクトを渡した（`spikes/ciba-poll/provider.ts` の cookieKeys）。CIBA だけの構成ではクッキーを使わないが、M3 の画面とセッションはこの設定の上に作るので、M3 でもこの形を保つ。
+- **クッキーの署名**：`cookies.keys` に配列を渡すと、Koa の cookies が Keygrip の既定の HMAC-SHA1 で署名する。HMAC-SHA1 は、不変条件9の許可リストにない。oidc-provider は、配列でない keys をそのまま Koa に渡す（`lib/provider.js`）。スパイクでは、Keygrip と同じ形（sign、verify、index）で HMAC-SHA-256 を使うオブジェクトを渡した（`spikes/ciba-poll/provider.ts` の cookieKeys）。CIBA だけの構成ではクッキーを使わないが、M3 の画面とセッションはこの設定の上に作るので、M3 でもこの形を保つ。→ M3 では、クッキーを署名しないことにした（ADR 0018 の O-9。値は乱数の id で、署名の鍵を idp のプロセスに置かないため）。署名の鍵を渡さなければ、HMAC-SHA1 も使われない。
 - `@types/oidc-provider` 9.12.1 は、BackchannelAuthenticationRequest のコンストラクタの型が狭く、Client の追加の項目（tenant_id）の型がない。スパイクでは、理由を書いた局所的な型の変換で済ませた。
 
 ## 採らなかった案
@@ -211,5 +211,5 @@ binding_message：
 - **M3 で確かめること**：
   - コードフローのクライアント（pairwise と pairwiseIdentifier）と、CIBA のクライアント（public と導出済みの accountId）で、sub が同じ値になること。M3 では導出関数の単体テストで固定し、M7 で CIBA のクライアントを含めて確かめる（テスト4。plan 10章）。
   - コードフローは pairwise にする（「注意」を参照）ので、セッションの accountId は内部の利用者 ID になる。CIBA とは accountId の意味が違うので、findAccount で取り違えないこと。
-  - Postgres の保存アダプタを、Provider.ctx を使って withTenant に載せること。
+  - Postgres の保存アダプタを、Provider.ctx を使って withTenant に載せること。→ M3 では、保存物をメモリに置いた（ADR 0018 の O-10。Session と Interaction は境界が決まる前に引くため）。永続化は P1。
 - **M7 で決めること**：窓口コードの桁数と試行上限、レート制限の値、binding_message を拒否するか、企業の窓口画面に割符の文言を出すか、acr の値。

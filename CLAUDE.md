@@ -57,7 +57,7 @@
    - 保存：AES-256-GCM（IV は96ビットの乱数）
    - MAC と照合用の索引：HMAC-SHA-256（Message-ID などの「ハッシュ」も、これで作る）
    - JWS（ID トークン、SET、操作ごとの承認、テナントの JWT、企業の client assertion の検証）：ES256 だけ
-   - WebAuthn：ES256 と RS256 だけを受け付ける。それ以外は登録時に拒否する
+   - WebAuthn：ES256、EdDSA（曲線は Ed25519）、RS256 だけを受け付ける。それ以外は登録時に拒否する（EdDSA は ADR 0012 で足した）
    - プロトコルで決まる例外：Web Push（RFC 8291、VAPID は ES256）、DKIM と ARC の署名（rsa-sha256）、受け取ったメールの DKIM の検証（rsa-sha256 と ed25519-sha256。rsa-sha1 は不合格にする）
 10. **連絡先を列挙させない**：登録、回復、宛先確認、SMTP の RCPT への応答は、登録済みかどうかで、本文・ステータス・所要時間を変えない。
 11. **電話**：電話の中継（番号の種類を問わない）は、ADR 0004 の保留が解けるまで作らない。P0 では、割符は電話番号を集めない（入力欄、列、クレームを作らない）。原則2（企業に持たせない）は、電話については未達である。だからこそ、電話番号を根拠にしないことを不変条件1で担保する。
@@ -81,22 +81,24 @@ PR を出す前や、迷ったときは、`.claude/skills/principle-review` で�
   - root のときは、TMPDIR を見ずに `/tmp` の下に作る。一時ディレクトリのパスに空白、引用符、カンマ、バックスラッシュ、制御文字があるときと、Unix ソケットのパスとして長すぎるときは、起動せずに失敗する。
   - サーバーのログには、FATAL 以上だけを terse で残す（値をログに残さないため）。
   - stop() を呼ばずにプロセスが終わっても（Vitest は、Ctrl-C などで teardown を呼ばずに process.exit する）、プロセスの `exit` のときに同期でサーバーを止めて、ディレクトリを消す。`npm run pg-up` は、SIGINT、SIGTERM、SIGHUP を受けたら止めて消す。
+- `npm test` の globalSetup は、マイグレーションを流したテンプレートの DB と、鍵サービス（`scripts/keysvc-up.ts`）を1つずつ起動する。鍵サービスは Unix ソケットだけで待ち受け、資格情報は実行ごとの乱数で、標準入力で渡す。鍵は起動のたびに作り直すので、前の暗号文や MAC は使えなくなる（ADR 0013）。
 - Node では `*.localhost` を名前解決できない。各サービスは localhost のポート違いで動かす。ポートが違ってもクッキーは共有されるので、クッキー名をアプリごとに一意にし、Cookie と Authorization のヘッダーをログに出さない。クッキーの分離を前提にした検証は、ローカルでは成り立たない。WebAuthn の RP ID は localhost になるので、`expectedOrigin` はポート込みで固定する。
-- 外部ネットワークは npm レジストリなどに限られる。政府系サイトは環境のポリシーで拒否されるので、一次資料の照合は `docs/standards.md` の状態列で管理する（イシュー #2）。
+- 外部ネットワークは、npm レジストリと、`docs/standards.md` の末尾に挙げた公式サイトの多くに限られる（2026-10-23 時点で拒否されるドメインは、`docs/standards.md` の末尾に書いた）。一次資料の照合は `docs/standards.md` の状態列で管理する（イシュー #2、ADR 0012）。
 
 ## コマンド
 
 ```
 npm run lint        # Biome
 npm run typecheck   # tsc --noEmit
-npm test            # Vitest。globalSetup が scripts/pg-up.ts で一時的なクラスタを起動して止める
-npm run e2e         # Playwright。CDP の仮想認証器を使う
+npm test            # Vitest。globalSetup が一時的なクラスタ（scripts/pg-up.ts）と鍵サービス（scripts/keysvc-up.ts）を起動して止める
+npm run e2e         # Playwright。CDP の仮想認証器を使う。各ファイルが一時的なクラスタ、鍵サービス、idp を自分で起動する
 npm run pg-up       # 一時的なクラスタを手で起動する。接続先を表示し、Ctrl-C で止めて消す
+npm run migrate     # pg-up が表示した接続先と PGDATABASE に、マイグレーションと DB ごとの ACL を流す
 ```
 
 - 4つのコマンド（lint、typecheck、test、e2e）は、各マイルストーンの PR で通す。CI（`.github/workflows/ci.yml`）も同じものを実行する。
 - `npm run lint` は、不変条件7と9に反するものも止める。対象は次のとおり。
-  - `packages/sender` 以外での、外向きの通信のモジュールと `node:child_process` の import、`fetch` などのグローバル。`node:http` は、`createServer`、`Server`、`IncomingMessage`、`ServerResponse`、`STATUS_CODES` だけを許す。
+  - `packages/sender` 以外での、外向きの通信のモジュールと `node:child_process` の import、`fetch` などのグローバル。`node:http` は、`createServer`、`Server`、`IncomingMessage`、`ServerResponse`、`STATUS_CODES` だけを許す。ただし `packages/warifu-core/src/internal/uds-client.ts` だけは、割符の内部の Unix ドメインソケット（鍵サービスなど）につなぐために `request` を許す（ADR 0013。t08-key-client-surface で固定する）。
   - `packages/sender` も含めて、`node:module` の import と、グローバルの `crypto`、`globalThis`、`global`（`packages/sender` で外しているのは、1つ目の項目の制限だけ）。
   - `packages/warifu-core`・`packages/keysvc`・`spikes/` 以外での、`node:crypto` の import。
   - CI は、さらに `packages/` と `spikes/` の中（Markdown を除く）の `biome-ignore` と `getBuiltinModule`（`process.getBuiltinModule` を含む）と、ルートの `biome.json` 以外の Biome の設定ファイル（入れ子のものと、ルートの `biome.jsonc`、`.biome.json`、`.biome.jsonc`）を見つけたら失敗する。本体のコード（`packages/` と `spikes/` の、テスト以外のファイル）から、テスト、`scripts/`、`test/`、ルートの `*.config.ts` に import でたどり着くとき（`scripts/check-entry-imports.ts` が、Node と同じ方法（型の除去と `import.meta.resolve`）でたどった import のグラフで確かめる。副作用だけの import と間接の import も含む）と、本体のコードで、引用符で囲んだ文字列リテラル1つ以外を渡す動的な import（括弧の中の型の構文を含む）や、ファイルと `node:` の組み込み以外を読み込む import を使ったとき、CommonJS として読み込まれるファイルを置いたとき、シンボリックリンクを追跡したとき（依存を入れる前に確かめる）も失敗する。
@@ -107,6 +109,7 @@ npm run pg-up       # 一時的なクラスタを手で起動する。接続先�
 ## 進め方
 
 - マイルストーンごとに、`main` から `claude/mN-<短い名前>` のブランチを切り、`main` へのドラフト PR を出す（前のマイルストーンがマージされてから切る）。
+  - 例外：オーナーの OK があれば、マージを待っている前のマイルストーンのブランチの上に、1段だけ積んでよい。PR の向き先は前のブランチにし、ドラフトのままにする。前がマージされたら、向き先を `main` に変える。前の PR より先にマージしない。前の PR に入った直しは、積んだブランチにマージで取り込む。
 - 仕様（`docs/`）とコードは同じ PR で更新する。接続要件を変えたら、適合テストも同じ PR で直す。
 - 設計判断は、判断したその時に `docs/adr/NNNN-*.md` に書く。
 - P0 の範囲外（plan 10章で P1 とした項目、ADR 0004 で保留した電話）は、先回りして作らない。
@@ -130,8 +133,8 @@ packages/sender       送信サービス（外向きの通信の唯一の出口�
 packages/rp-kit       企業向け SDK と適合テスト
 packages/demo-rp      デモ用の予約サイトと窓口担当者の画面
 test/leak             漏えいシナリオのテスト（書き方は test/leak/README.md）
-test/setup            Vitest の globalSetup と、ワーカーごとの DB
-scripts               開発用のスクリプト（pg-up など）
+test/setup            Vitest の globalSetup、ワーカーごとの DB、idp の起動とソフトウェアの認証器
+scripts               開発用のスクリプト（pg-up、keysvc-up、migrate）
 spikes                捨てスパイク。本実装に置き換えたら消す（spikes/README.md）
 ```
 

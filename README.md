@@ -9,13 +9,13 @@
 >
 > 割符という名前のサービスは、どこでも運用していません。接続している企業もありません。割符を名乗って連絡先やコードを求める連絡は、このプロジェクトとは関係がありません。
 >
-> 法令についての記述（[docs/plan.md](docs/plan.md) の7章など）は、このプロジェクトの作業上の前提で、法的な助言ではありません。弁護士や官庁の確認はまだで、引用している基準や資料も、原文での照合が済んでいません（[docs/standards.md](docs/standards.md)）。
+> 法令についての記述（[docs/plan.md](docs/plan.md) の7章など）は、このプロジェクトの作業上の前提で、法的な助言ではありません。弁護士や官庁の確認はまだで、引用している基準や資料は、多くを原文で照合しましたが、接続できずに検索の抜粋でしか確かめていないものも残っています（[docs/standards.md](docs/standards.md)）。
 
 企業が利用者の本物の連絡先を本人確認に使わず、持たずに済む状態をつくる基盤「割符」の PoC と、設計の仕様書です。
 
 名前の「割符」は、1枚の札を2つに割り、両方の片割れを突き合わせて相手を確かめる昔の道具から取りました。連絡先ではなく、手元にある片割れ（パスキー）で本人を確かめる、という考え方を表しています。npm のパッケージ名は `@pii-token-vault/*` です（npm にはまだ何も出していません）。ほかのスコープ（`@warifu` など）や、スコープのない `warifu` などのパッケージ、同じ名前のほかのプロジェクト、秘密分散の「電子割符」の製品とは関係がありません。
 
-> **English summary**: **Warifu** (割符, a Japanese tally split in two whose halves are matched to confirm the other party) is an open design and early-stage proof of concept for a service that aims to let companies stop relying on customers' email addresses, phone numbers, postal addresses, and other personal attributes for identity verification. **It is not production-ready: do not use it in production or with real personal data.** Companies connected to Warifu may base identification and approval only on Warifu-issued ID token claims (`iss`, `sub`, `acr`, `auth_time`), CIBA results (for inquiries and low-risk requests only), and transaction-bound step-up approvals; users sign in to Warifu with passkeys. Instead of real email addresses, companies receive per-company email aliases and pairwise subject IDs. In P0 this covers email only, and only what a company receives after a customer's account is linked; real addresses a company already holds remain unless it deletes them. Phone numbers (pending legal review) and postal addresses are not yet covered, and correlation across companies through name and delivery address is not prevented. The project is designed so that merely knowing, or being able to receive, leaked contact details or attributes is not enough to pass identity verification at Warifu or at companies that meet its connection requirements. It does not prevent leaks; known residual risks are listed in [docs/plan.md section 1-2](docs/plan.md#1-2-主張できる範囲と残るリスク). No Warifu service is operated anywhere and no company is connected; the project is not affiliated with or endorsed by any organization it cites. Statements about Japanese law are the project's working assumptions pending legal review, not legal advice, and cited standards and advisories have so far been checked only against search excerpts. The npm package names use the `@pii-token-vault` scope; nothing has been published to npm yet. Documentation is in Japanese. Licensed under MIT.
+> **English summary**: **Warifu** (割符, a Japanese tally split in two whose halves are matched to confirm the other party) is an open design and early-stage proof of concept for a service that aims to let companies stop relying on customers' email addresses, phone numbers, postal addresses, and other personal attributes for identity verification. **It is not production-ready: do not use it in production or with real personal data.** Companies connected to Warifu may base identification and approval only on Warifu-issued ID token claims (`iss`, `sub`, `acr`, `auth_time`), CIBA results (for inquiries and low-risk requests only), and transaction-bound step-up approvals; users sign in to Warifu with passkeys. Instead of real email addresses, companies receive per-company email aliases and pairwise subject IDs. In P0 this covers email only, and only what a company receives after a customer's account is linked; real addresses a company already holds remain unless it deletes them. Phone numbers (pending legal review) and postal addresses are not yet covered, and correlation across companies through name and delivery address is not prevented. The project is designed so that merely knowing, or being able to receive, leaked contact details or attributes is not enough to pass identity verification at Warifu or at companies that meet its connection requirements. It does not prevent leaks; known residual risks are listed in [docs/plan.md section 1-2](docs/plan.md#1-2-主張できる範囲と残るリスク). No Warifu service is operated anywhere and no company is connected; the project is not affiliated with or endorsed by any organization it cites. Statements about Japanese law are the project's working assumptions pending legal review, not legal advice, and most of the cited standards and advisories have been checked against their original text, but a few that could not be fetched have been checked only against search excerpts. The npm package names use the `@pii-token-vault` scope; nothing has been published to npm yet. Documentation is in Japanese. Licensed under MIT.
 
 ## 目次
 
@@ -49,13 +49,13 @@
 
 ## いまの状態とロードマップ
 
-設計の文書がそろい、PoC の実装の最初の段階（M1：雛形と捨てスパイク、仕様書の骨子）を終えました。次は M2（暗号、鍵サービス、DB の境界）です。各マイルストーンはイシューで管理しています。
+設計の文書がそろい、PoC の実装の最初の段階（M1：雛形と捨てスパイク、仕様書の骨子）を終えました。いまは M2（暗号、鍵サービス、DB の境界）を進めています。各マイルストーンはイシューで管理しています。
 
 | マイルストーン | 内容 | ゲート | 状態 |
 |---|---|---|---|
-| M0 | 一次資料の原文照合（実装と並行） | | 人の作業待ち |
+| M0 | 一次資料の原文照合（実装と並行） | | 接続できた資料は照合済み（ADR 0012） |
 | M1 | 雛形、パスキーと CIBA の試作、仕様書の骨子 | | 完了 |
-| M2 | 暗号、鍵サービス、DB の境界 | | 未着手 |
+| M2 | 暗号、鍵サービス、DB の境界 | | 進行中 |
 | M3 | ログイン（idp） | | 未着手 |
 | M4 | メール中継（relay） | Gate A | 未着手 |
 | M5 | 企業向け API と送信サービス | | 未着手 |
@@ -95,9 +95,10 @@ npm ci
 npx --no playwright install --with-deps chromium   # 初回だけ。--no で、npm ci で入れた版だけを使う
 npm run lint        # Biome。不変条件7と9に反する import も止める
 npm run typecheck   # tsc --noEmit
-npm test            # Vitest（一時的な Postgres を自動で起動して止める）
-npm run e2e         # Playwright（パスキーは CDP の仮想認証器で試す）
+npm test            # Vitest（一時的な Postgres と鍵サービスを自動で起動して止める）
+npm run e2e         # Playwright（パスキーは CDP の仮想認証器で試す。一時的な Postgres、鍵サービス、idp を自動で起動する）
 npm run pg-up       # 一時的な Postgres を手で起動する
+npm run migrate     # pg-up で起動した Postgres に、マイグレーションを流す（PGDATABASE も指定する）
 ```
 
 - PR では、上の4つ（lint、typecheck、test、e2e）がすべて通ることを求めます。CI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）でも同じものを実行します。
@@ -105,11 +106,10 @@ npm run pg-up       # 一時的な Postgres を手で起動する
 
 ### いまあるコード
 
-- `packages/`：本実装の置き場所です。中身は M2 から作ります。
+- `packages/`：本実装の置き場所です。M2 で、`warifu-core`（ID、符号化、鍵サービスのクライアント、DB の境界、監査ログ、ログの伏せ字）と `keysvc`（鍵サービス）を作りました。M3 で、`idp`（パスキー、OIDC、企業ごとの ID と別名、step-up、メールアドレスの登録、PWA の土台）を作りました。ほかのパッケージは、まだ空です。
 - `spikes/`：M1 の捨てスパイクです。本実装に置き換えたら消します。詳しくは [spikes/README.md](spikes/README.md) を参照してください。
-  - `spikes/passkey`：仮想認証器で、パスキーの登録とログインを通します（`npm run e2e` で動きます）。
   - `spikes/ciba-poll`：oidc-provider の CIBA を poll で1往復させます（`npm test` で動きます）。
-- `test/leak/`：漏えいシナリオのテストの置き場所です。最初のテストは M2 で足します。書き方は [test/leak/README.md](test/leak/README.md) にあります。
+- `test/leak/`：漏えいシナリオのテストの置き場所です。M2 で、テスト8（鍵サービスの能力の表、暗号の許可リスト、監査ログのチェーン）と、RLS の固定テストを足しました。M3 で、テスト4の前半（企業ごとの ID と別名）、テスト10（メールの登録の応答）、パスキーの検証の守り、idp のルート一覧などを足しました。書き方は [test/leak/README.md](test/leak/README.md) にあります。
 
 [CLAUDE.md](CLAUDE.md) の「環境の注意」は、メンテナーが使う Claude Code のクラウド環境での注意です（例：その環境では `npx playwright install` を実行しない）。手元では、上の「前提」に従ってください。
 

@@ -1,7 +1,7 @@
 # 04. サービスと能力の対応表
 
 > 状態：M1 時点の骨子（M10 で確定）。正は [docs/plan.md](../plan.md) の 8章（能力の表）、2章、9章。
-> 出典：[CLAUDE.md](../../CLAUDE.md) の不変条件2・3・4・7・8・9・10 と「配置」、[ADR 0005](../adr/0005-alias-derivation.md)、[ADR 0006](../adr/0006-ciba-spike-findings.md)、[ADR 0010](../adr/0010-staged-participation.md)。
+> 出典：[CLAUDE.md](../../CLAUDE.md) の不変条件2・3・4・7・8・9・10 と「配置」、[ADR 0005](../adr/0005-alias-derivation.md)、[ADR 0006](../adr/0006-ciba-spike-findings.md)、[ADR 0010](../adr/0010-staged-participation.md)、[ADR 0013](../adr/0013-local-key-service.md)〜[ADR 0017](../adr/0017-log-allowlist.md)。
 
 ## 0. 読み方
 
@@ -35,24 +35,29 @@
 | CAP-06 | サービスの資格情報（鍵サービスを呼ぶ資格情報、DB のログインロールの資格情報）と鍵を、リポジトリ、コンテナのイメージ、設定ファイル、配信物に平文で置かない（plan 8章） |
 | CAP-07 | 割符の鍵、サービスの資格情報、テナントの資格情報には、漏えいが疑われるときの失効と、入れ替えの手順を持たせる。定期的に入れ替えるかと、その周期は、鍵ごとに決める（plan 2章） |
 
-| サービス | encrypt | mac（照合用） | derive_alias | decrypt | plan に書かれた用途 |
-|---|---|---|---|---|---|
-| idp | ○ | ○ | ○ | — | 本物のメールの暗号化（登録と変更のとき）。照合用の索引。ID トークンの email クレームと、PWA の別名の一覧 |
-| company-api | — | ○ | ○ | — | 照合用の索引。再発行した別名を企業に返す |
-| relay | ○（配送キュー用だけ） | ○ | — | ○（唯一） | 配送キューの暗号化。別名の照合用の HMAC。配送のときの本物のアドレスの復号 |
-| sender | — | — | — | — | なし |
-| rp-kit | — | — | — | — | なし |
-| demo-rp | — | — | — | — | なし |
+| 操作（対象） | idp | company-api | relay | 使い始める |
+|---|---|---|---|---|
+| encrypt（contact：本物のメール） | ○ | — | — | M3 |
+| encrypt（relay_queue：配送キュー） | — | — | ○ | M4 |
+| decrypt（contact、relay_queue） | — | — | ○（唯一） | M4 |
+| mac（alias_lookup：別名の照合用の索引） | ○ | ○ | ○ | M3〜M5 |
+| mac（audit_chain：監査ログのチェーン） | ○ | ○ | ○ | M2 |
+| derive_alias（alias_derive） | ○ | ○ | — | M3・M5 |
+| sign（id_token）、public_keys（id_token） | ○ | — | — | M3（ADR 0014） |
+| mac（pairwise_sub：sub の導出、oidc_storage_id：idp の保存の鍵、email_verify_code：宛先確認のコード） | ○ | — | — | M3（ADR 0018） |
+
+- sender、rp-kit、demo-rp は、鍵サービスの資格情報を持たない。表にない (サービス, 操作, 対象) は、すべて 403（理由によらず同じ本文とヘッダー）。表の本体は `packages/keysvc/src/acl.ts` の1か所に置く（ADR 0013）。
+- MAC の鍵は用途ごとに独立させる（KMS の鍵ごとのポリシーに写せるようにするため）。用途は使うマイルストーンで足す。M3 で、idp だけの用途として `pairwise_sub`、`oidc_storage_id`、`email_verify_code` を足した（ADR 0018）。見込みは、`message_id`・`dkim_replay`・`reply_address`（M4）、`desk_code`（M7）、`recovery_code`・`invite_code`（M8）。
+- 暗号化は鍵サービスの中で直接 AES-256-GCM にかけ（エンベロープにしない）、暗号文を文脈（`contact` は `{ field: 'email', user_id }`、`relay_queue` は `{ queue_item_id }`）に結び付ける（ADR 0013）。
 
 - warifu-core は資格情報を持たない。組み込まれたサービスの資格情報で、鍵サービスを呼ぶ。
 - idp から本物のアドレスへ送るメール（宛先確認、旧アドレスへの知らせ）は、relay の内部配送 API に利用者 ID を渡して、relay に送らせる（不変条件3）。
 - 未定：
-  - どの値を、どの鍵で mac にするか（oidc-provider の保存の id、窓口コード、回復コード、Message-ID など）。M2 で決める。
-  - sub の導出（テナント ID と HMAC。コードフローの `pairwiseIdentifier` と、CIBA の `processLoginHintToken` で同じ導出関数を使う。plan 9章、ADR 0006）に使う鍵と操作。M3 で決める。company-api が SET などで sub を扱う方法は、M5 で決める。
-  - 署名の鍵（ES256：ID トークン、SET、操作ごとの承認、テナントの JWT）と、relay の DKIM と ARC の鍵（rsa-sha256）は、plan 8章の能力の表にない（plan 8章「能力の表にまだないもの」）。置き場所と、鍵サービスの操作にするかは、M2 で決める（DKIM と ARC は M4）。
-  - サービスの資格情報の渡し方（CAP-06）。ローカルは M2、本番は P1 の AWS アダプタで決める。
-  - 鍵と資格情報ごとの失効と入れ替えの手順と周期（CAP-07）。保存用の鍵、照合用の HMAC 鍵、署名の鍵とサービスの資格情報は M2、sub の導出に使う鍵は M3、DKIM と ARC の鍵は M4、テナントの資格情報は M5、別名の導出鍵は P1（ADR 0005）で決める。
-  - エンベロープ暗号での分担（データ鍵による AES-256-GCM を warifu-core で行うか、鍵サービスで行うか）。M2 で決める。
+  - company-api が SET などで sub を扱う方法は、M5 で決める。sub の導出は、M3 で MAC の用途 `pairwise_sub`（idp だけ）にした。コードフローの `pairwiseIdentifier` と、CIBA の `processLoginHintToken`（M7）で、同じ導出関数（`packages/idp/src/subject.ts`）を使う（ADR 0018）。
+  - SET（M5）、操作ごとの承認（M7）、テナントの JWT（M5）の署名の鍵は、sign の keyId として足す（ADR 0014）。relay の DKIM と ARC の鍵（rsa-sha256）の置き場所は、M4 で決める。
+  - サービスの資格情報の本番の渡し方（CAP-06）。P1 の AWS アダプタで決める（ローカルは ADR 0013 と ADR 0015）。
+  - 失効と入れ替え（CAP-07）：保存用の鍵、照合用の HMAC 鍵、署名の鍵、サービスの資格情報の手順は ADR 0013 と ADR 0014 で決めた。定期的な入れ替えの周期は P1。sub の導出に使う鍵は入れ替えない（付け替えのイベントと合わせて P1。ADR 0018）。DKIM と ARC の鍵は M4、テナントの資格情報は M5、別名の導出鍵は P1（ADR 0005）で決める。
+  - 配送キューが 4KB を超える場合の暗号化の形（relay だけにデータ鍵の操作を足すか）。M4 で決める。
   - 本番で KMS へつなぐ経路。P1 の AWS アダプタで決める。
   - 導出鍵の入れ替えの手順（旧鍵での照合を一定期間残す、企業に SET で知らせる）。P1（ADR 0005）。
 
@@ -73,18 +78,22 @@
 
 | サービス | スキーマとログインロール | 境界 | plan と ADR に書かれた保存物 |
 |---|---|---|---|
-| idp | 専用 | 利用者のルートは `withWarifuUser`。oidc-provider の保存は `withTenant` に載せる見込み（ADR 0006。M3 で確かめる） | パスキー（BE/BS フラグを含む）、oidc-provider の保存先（id は HMAC）、窓口コード（HMAC の索引。M7）、回復（回復コードは平文で置かない。M8）、協力関係（内部 ID の組だけ）、端末の受信箱（M6） |
+| idp | 専用 | 利用者のルートは `withWarifuUser`（パスキーのログインも、userHandle の利用者の範囲で引く）。別名の世代は `withTenant`。oidc-provider の保存物と PWA のセッションは DB に置かない（メモリ。id は HMAC。ADR 0018） | 利用者、パスキー（BE/BS フラグを含む。名前などの自由文と AAGUID は置かない）、接続の同意、窓口コード（HMAC の索引。M7）、回復（回復コードは平文で置かない。M8）、協力関係（内部 ID の組だけ）、端末の受信箱（M6） |
 | relay | 専用 | テナントの横断は CAP-14 の関数だけ。引いた後の境界は未定（M4 で決める） | 配送キュー（暗号化）、配送ログ（件名と本文を残さない。Message-ID は HMAC。期限で消す）、リプレイの判定の記録（d=、s=、b= の HMAC、別名の照合用の HMAC。`x=` の期限まで。別名は平文で置かない）、返信用の使い捨てのアドレス |
 | company-api | 専用 | `withTenant` | テナント、企業の公開鍵（`jwks`）、参加の状態（完全・移行中）と、移行中の期限、割符が確かめた入り口と確かめた日（ADR 0010。M5） |
 | sender | 未定（M5 で決める） | 未定（M5） | 未定（M5） |
-| keysvc | 未定（M2 で決める） | — | 未定（M2） |
+| keysvc | 使わない（ADR 0013） | — | なし（鍵はメモリの中だけ） |
 | rp-kit、demo-rp | 割符の DB を使わない | — | demo-rp の DB は、テスト7の対象外 |
 
+- 決めたこと（ADR 0015）：
+  - ロール：全オブジェクトの所有者 `warifu_owner` と、解決関数の所有者 `warifu_alias_resolver` はログインしない。ログインロールは `warifu_idp`、`warifu_relay`、`warifu_company_api`（NOSUPERUSER、NOBYPASSRLS、NOINHERIT、`search_path` は空、時間切れを設定）と、マイグレーションとテスト用の DB の作成だけに使うブートストラップのロール。
+  - スキーマ：`warifu`（境界の関数）、`warifu_meta`（マイグレーションの記録）、`audit`（監査ログ。ADR 0016）、`aliases`（別名の世代）、`idp`、`relay`、`company_api`、`contacts`（暗号化した本物のメール。M3 で作った）。`public` は使わない。
+  - 別名の世代 `aliases.generation` は M2 で作った（照合用の HMAC だけを置き、一意にする。追記だけで、最新でない世代が廃番）。CAP-14 の関数は `relay.resolve_alias(bytea)` で、最新の世代だけを2つの ID で返す。
+  - 暗号化した本物のメール（`contacts.email`、確認中の `contacts.email_pending`、変更前の `contacts.email_previous`）は、M3 で作った。idp は移し替えのために暗号文の列も読めるが、復号できない（不変条件3）。relay には `withWarifuUser` で `(user_id, ciphertext)` だけを読ませる（ADR 0015、ADR 0018）。本物のメールの一意性は、P0 では検査しない（ADR 0018）。
+  - DB ごとに、PUBLIC の CONNECT と TEMP を外し、アプリのロールには CONNECT だけを与える。
+  - SQL は `sql` タグでだけ組み立て、値はパラメータにし、拡張プロトコルで1つの文だけを送る。
 - 未定：
-  - 暗号化した本物のメールを置くスキーマと、relay に読ませる GRANT。M2 で決める。
-  - 別名の世代（`tenant_id`、`user_id`、`generation`）と照合用の HMAC（一意制約）を置くスキーマ。M3 で決める。
-  - 監査ログを置くスキーマ。M2 で決める。
-  - 保存期間（CAP-19）。いま期限が決まっているのは、配送ログ、リプレイの判定の記録（`x=` の期限まで。`x=` がない場合は M4 で決める）、窓口コード（数分で失効する。失効した後の記録を消す時期は M7 で決める）だけ。oidc-provider の保存先、端末の受信箱、回復の記録、監査ログ、退会した利用者や接続をやめた企業のデータの保存期間と消し方は、その保存物を作るマイルストーンで決めて、ADR に記録する。別名の照合用の HMAC は、再利用しないこと（不変条件5）を保てる範囲で、残し方を M3 で決める。退会の流れ（保存物の消し方、別名の廃番、企業への知らせ）は P1 で扱う（plan 10章）。plan 8章）。
+  - 保存期間（CAP-19）。監査ログは、P0 では消さない（ADR 0016）。いま期限が決まっているのは、配送ログ、リプレイの判定の記録（`x=` の期限まで。`x=` がない場合は M4 で決める）、窓口コード（数分で失効する。失効した後の記録を消す時期は M7 で決める）だけ。oidc-provider の保存物と PWA のセッションは、メモリの中で期限（ADR 0018 の表）が過ぎたら消える。端末の受信箱、回復の記録、退会した利用者や接続をやめた企業のデータの保存期間と消し方は、その保存物を作るマイルストーンで決めて、ADR に記録する。別名の照合用の HMAC は、P0 では消さない（ADR 0018）。退会の流れ（保存物の消し方、別名の廃番、企業への知らせ）は P1 で扱う（plan 10章）。plan 8章）。
   - 運用で集計が要るときの扱い（CAP-18）。P1 の本番の運用の手順で決める。
   - 参加の状態（ADR 0010）：保存の形は、テナントの登録の形と合わせて M5 で決める。割符が確かめた結果を記録する経路と、idp が警告文 I を出すために参加の状態を読む方法（列単位の GRANT など）は、M9 で決める。どちらも、管理 API も、8章の新しい例外も作らない方法から選ぶ。参加の状態、移行中の期限、割符が確かめた入り口と確かめた日は、企業向けのルート（company-api と、CIBA の結果で呼べるもの）から書き換えられないようにする。企業向けのルートを処理するログインロールには、これらの列の INSERT と UPDATE を GRANT しない（テスト6）。
 
@@ -111,10 +120,10 @@
 | warifu-core | なし |
 | rp-kit、demo-rp | 企業の側のコード。割符のエンドポイント（トークン、CIBA、company-api）を呼ぶ方法と、不変条件7・lint の規則との関係は、未定（M9 で決める） |
 
-- 割符の内部の接続（サービスから keysvc、DB、relay の内部配送 API、sender へ）は、外向きの通信に当たらない。内部の接続の認証は、未定（keysvc は M2、sender は M5、relay の内部配送 API は M4 で決める）。
+- 割符の内部の接続（サービスから keysvc、DB、relay の内部配送 API、sender へ）は、外向きの通信に当たらない。内部の接続の認証は、keysvc はサービスごとの bearer の資格情報と Unix ドメインソケットにした（ADR 0013）。sender は M5、relay の内部配送 API は M4 で決める。
 - 内部の接続の組の一覧（CAP-27）は、各サービスを作るマイルストーンで足す。本番のネットワークの設定は、未定（P1 の AWS アダプタで決める）。
 - 移行中の企業の入り口が閉じたことを、割符の側から外の検査で確かめる場合（ADR 0010。方法は M9 で決める）も、外へつなぐのは sender だけにする（CAP-20）。
-- 静的な検査：lint（`biome.json`）で、sender の外からの通信用のモジュール（`node:dns`、`node:net`、`node:https`、`node:http` のうちサーバーを立てる名前以外、`node:child_process` など）と、`fetch` などのグローバルの利用を禁じる。`globalThis`、`global`、グローバルの `crypto` と、`node:module` の import は、sender でも禁じる。テスト（`*.test.ts`、`*.e2e.ts`）、`scripts/`、`test/`、ルートの `*.config.ts` は除き、`public/` の中ではグローバルの制限を外している。CI では、lint を外せる書き方（`biome-ignore`、`getBuiltinModule`、ルートの `biome.json` 以外の Biome の設定ファイル）も拒否する（CLAUDE.md の「コマンド」）。
+- 静的な検査：lint（`biome.json`）で、sender の外からの通信用のモジュール（`node:dns`、`node:net`、`node:https`、`node:http` のうちサーバーを立てる名前以外、`node:child_process` など）と、`fetch` などのグローバルの利用を禁じる。`globalThis`、`global`、グローバルの `crypto` と、`node:module` の import は、sender でも禁じる。テスト（`*.test.ts`、`*.e2e.ts`）、`scripts/`、`test/`、ルートの `*.config.ts` は除き、`public/` の中ではグローバルの制限を外している。CI では、lint を外せる書き方（`biome-ignore`、`getBuiltinModule`、ルートの `biome.json` 以外の Biome の設定ファイル）も拒否する（CLAUDE.md の「コマンド」）。例外は `packages/warifu-core/src/internal/uds-client.ts` の1ファイルだけで、割符の内部の Unix ドメインソケットにつなぐために `node:http` の `request` を許す（ADR 0013。t08-key-client-surface で、範囲が広がっていないことを固定する）。
 
 ## 5. 外から呼べるルート
 
@@ -145,9 +154,9 @@
 - P1：利用者アカウントの凍結と、法令に基づく開示。開示の対象・請求者・承認の手順を ADR で決めるまで実装しない。法令に基づく開示は、テスト6の唯一の例外として扱い、2人承認、根拠法令の記録、監査ログへの追記を必須にする（plan 4章）。
 - テナントの封じ込め（緊急停止、別名の再発行）は、P0 では運用の手順として行う。実行の方法は、管理 API も不変条件8の新しい例外も作らない方法から選ぶ（例：静的なクライアントの設定を変えて、配備し直す）。管理の機能にする場合は、2人承認と実行までの遅延を付ける（plan 2章）。手順は未定（M5 で決める）。
 - oidc-provider で既定で有効な機能のうち、使わないもの（devInteractions、PAR、DPoP、rpInitiatedLogout、userinfo、resourceIndicators）は、明示的に無効にする（ADR 0006。DPoP の扱いは P1 で決める）。
-- CAP-37 の確かめ方（配信物の検査など）は、未定（M3 で決める）。
-- 内部の API に外から届かないことの確かめ方（ルート一覧のテストに含めるかなど）は、未定（keysvc は M2、relay の内部配送 API は M4、sender は M5 で決める）。relay の内部配送 API が受け付ける入力（メールの種類を割符が定めたものに限るか、件名や本文を呼び出し側から受け取るか）は、未定（M4 で決める）。
-- トークンの期限と無効化（CAP-39）の未定（plan 2章）：ID トークンとセッションの有効期間、リフレッシュトークンを発行するか、パスキーを削除・一時停止したときにそのパスキーで作ったセッションの扱いは M3。テナントの JWT の有効期間と呼べる API の範囲、緊急停止のときに発行済みの JWT を無効にする方法は M5。操作ごとの承認の有効期間は M7。
+- CAP-37 の確かめ方：配信物（HTML、JavaScript、CSS）は、`test/leak/x-idp-routes` で CSP（応答ごとの nonce、Trusted Types、インラインのスクリプトがないこと）を確かめ、principle-review の観点7で、配信物に鍵や資格情報の文字列がないことを読む（ADR 0018）。
+- 内部の API に外から届かないことの確かめ方：keysvc は、TCP と UDP で待ち受けないこと、ソケットとディレクトリの権限、資格情報と能力の表を、t08-keysvc-isolation、t08-keysvc-auth、t08-keysvc-acl で確かめる（ADR 0013）。relay の内部配送 API は M4、sender は M5 で決める。relay の内部配送 API が受け付ける入力（メールの種類を割符が定めたものに限るか、件名や本文を呼び出し側から受け取るか）は、未定（M4 で決める）。
+- トークンの期限と無効化（CAP-39）の未定（plan 2章）：ID トークンとセッションの有効期間とリフレッシュトークンは M3 で決めた（ID トークン5分、リフレッシュトークンなし、パスキーを削除したらその利用者のセッションをすべて消す。ADR 0018）。パスキーの一時停止（回復の後）のときの扱いは M8。テナントの JWT の有効期間と呼べる API の範囲、緊急停止のときに発行済みの JWT を無効にする方法は M5。操作ごとの承認の有効期間は M7。
 
 ## 6. 暗号の許可リスト
 
@@ -161,7 +170,7 @@
 | 保存 | AES-256-GCM（IV は96ビットの乱数） |
 | MAC と照合用の索引（Message-ID などの「ハッシュ」も含む） | HMAC-SHA-256 |
 | JWS（ID トークン、SET、操作ごとの承認、テナントの JWT、企業の client assertion の検証） | ES256 だけ。oidc-provider の設定で固定する |
-| WebAuthn | ES256 と RS256 だけを受け付ける。それ以外は登録時に拒否する |
+| WebAuthn | ES256、EdDSA（曲線は Ed25519）、RS256 だけを受け付ける。それ以外は登録時に拒否する。RS256 は、登録のときに RSA の鍵長を確かめて記録し、2048 ビット未満は拒否する（ADR 0012） |
 | プロトコルで決まる例外（CRYPTREC への掲載を問わない） | Web Push（RFC 8291、VAPID は ES256）。DKIM と ARC の署名（rsa-sha256）。受け取ったメールの DKIM の検証（rsa-sha256 と ed25519-sha256。rsa-sha1 は不合格） |
 
 ## 7. 平文で扱ってよいもの
@@ -180,7 +189,7 @@
 | relay | 復号した本物のアドレス（配送のときだけ）。受け取った別名。中継するメールの件名と本文（バイト単位で変えずに渡す） | — |
 | company-api | 導いた別名（企業に返すときだけ） | 本物の連絡先 |
 | sender | 送る宛先（Webhook の URL など）と内容 | 本物のアドレスあての配送を通すかどうかは、未定（M4 で決める） |
-| keysvc | 操作に渡された入力と出力（encrypt と decrypt の平文、mac と derive_alias の入力）。どこまで渡るかは、エンベロープ暗号の分担（2章）による | — |
+| keysvc | 操作に渡された入力と出力（encrypt と decrypt の平文、mac と derive_alias の入力、署名の対象）。暗号化は鍵サービスの中で直接行う（ADR 0013）ので、本物の連絡先の平文も、encrypt と decrypt のときにメモリの中を通る | 鍵サービスのログには、入力も出力も書かない（t08-keysvc-isolation） |
 | warifu-core | 組み込まれたサービスと同じ | — |
 | rp-kit、demo-rp | 別名と sub（企業の側の値） | 本物の連絡先 |
 
@@ -203,10 +212,10 @@ DB の境界（CAP-10〜14）の例外は、次の5つだけ。新しい例外�
 |---|---|---|---|
 | 6 | A社のトークンでB社のものに触れない。利用者 U1 は U2 のものに触れない。逆引きのルートが存在しない。連絡先・認証器・回復協力者・回復の設定を変えるルートは、利用者自身が plan 4章の手順（step-up と、回復の流れ）で行う idp のルートだけにする。管理用のルートにも、企業向けのルート（company-api、CIBA の結果で呼べるもの）にも置かない（ルート一覧で固定）。機能ごとのレート制限が働く | CAP-10〜14、CAP-30〜34 | M5（窓口コードと CIBA のレート制限は M7、回復のレート制限は M8。利用者どうしの BOLA の横断は M10） |
 | 7 | 割符の全サービスの DB（pg_dump）、ログ、配送ログを、本物のアドレス、別名、トークン、回復コード、窓口コード、招待コード、協力者の表示名で検索して、ヒットが0件（demo-rp の DB とテスト用の受信箱は対象外） | CAP-16、CAP-40〜44 | M10 |
-| 8 | 能力の表（2章）にない鍵の操作をすると 403。監査ログのチェーンが検証できる。暗号の呼び出しとアルゴリズムの設定が、許可リストどおりに固定されている | CAP-01〜05、CAP-17、CAP-50、CAP-51 | M2 |
+| 8 | 能力の表（2章）にない鍵の操作をすると 403。監査ログのチェーンが検証できる。暗号の呼び出しとアルゴリズムの設定が、許可リストどおりに固定されている。暗号文が文脈に結び付いている | CAP-01〜05、CAP-17、CAP-38（keysvc）、CAP-50、CAP-51 | M2（`test/leak/t08-*`。ライブラリに渡すアルゴリズムの設定は M3） |
 | 11 | IMDS、内部 API、プライベート IP、DNS rebinding、リダイレクト、MX が内部の IP を指すアドレスへの配送は、sender で拒否される | CAP-20〜26 | M5（SSRF の横断は M10） |
 
-- RLS の ENABLE と FORCE は、`pg_class` の `relrowsecurity` と `relforcerowsecurity` で全テーブルを確かめる固定テストで守る（M2）。
+- RLS の ENABLE と FORCE は、`pg_class` の `relrowsecurity` と `relforcerowsecurity` で全テーブルを確かめる固定テストで守る（M2。`test/leak/x-rls-fixed.test.ts`。ポリシーと列単位の GRANT の一覧、SECURITY DEFINER が1つだけであることも固定する）。DB の境界は `x-db-boundary`、CAP-14 の関数は `x-relay-resolver` で確かめる。
 - 列挙の防止（CAP-35）はテスト10、企業に渡る値の一覧はテスト4で確かめる。
 - 利用者自身による変更（メールアドレスは step-up と宛先確認、パスキーと協力者は step-up、回復は回復の流れ。5章の表の idp）は、plan 4章の手順で行う。テスト6が許す変更のルートは、これだけである。管理用のルートにも、企業向けのルート（company-api、CIBA の結果で呼べるもの）にも、変更のルートを置かない（plan 11章）。
-- CAP-06、CAP-07、CAP-15、CAP-18、CAP-19、CAP-27、CAP-36〜39 には、まだテストを割り当てていない。CAP-37 と CAP-38 の確かめ方は、5章の未定のとおり（CAP-37 は M3、CAP-38 は M2・M4・M5）。それ以外の CAP にテストか監査の項目を割り当てるかは、未定（M10 で決める）。CAP-36 は TH-15（未割り当て。03 の 4-9）に当たる。
+- CAP-06、CAP-07、CAP-15、CAP-18、CAP-19、CAP-27、CAP-36〜39 には、まだテストを割り当てていない。CAP-37 と CAP-38 の確かめ方は、5章のとおり（CAP-37 は M3。CAP-38 は、keysvc は M2 で済み、relay の内部配送 API は M4、sender は M5）。それ以外の CAP にテストか監査の項目を割り当てるかは、未定（M10 で決める）。CAP-36 は TH-15（未割り当て。03 の 4-9）に当たる。
