@@ -40,7 +40,7 @@ plan 8章は、鍵サービス（`packages/keysvc`）を別プロセスで立て
 | sign（id_token）、public_keys（id_token） | ○ | — | — | M3（ADR 0014） |
 
 - sender、rp-kit、demo-rp には資格情報を作らない。
-- **MAC の鍵は用途ごとに独立**にする。KMS は入力の中身で ACL をかけられないので、用途ごとの鍵と ACL にしておけば、本番でも KMS の鍵ごとのポリシーに写せる。M2 で作った用途は `alias_lookup` と `audit_chain`。M3 で、idp だけの用途として `pairwise_sub`（sub の導出。操作ではなく用途にした）、`oidc_storage_id`（idp の保存の鍵）、`email_verify_code`（宛先確認のコード）を足した（ADR 0018）。今後の見込みは、`message_id`・`dkim_replay`・`reply_address`（M4）、`desk_code`（M7）、`recovery_code`・`invite_code`（M8）。用途を足すときは、`MacPurpose` の型、`acl.ts`、各クライアントの型、t08-keysvc-acl と t08-key-client-surface の期待の表を同じ PR で直す。
+- **MAC の鍵は用途ごとに独立**にする。KMS は入力の中身で ACL をかけられないので、用途ごとの鍵と ACL にしておけば、本番でも KMS の鍵ごとのポリシーに写せる。M2 で作った用途は `alias_lookup` と `audit_chain`。M3 で、idp だけの用途として `pairwise_sub`（sub の導出。操作ではなく用途にした）、`oidc_storage_id`（idp の保存の鍵）、`email_verify_code`（宛先確認のコード）を足した（ADR 0018）。今後の見込みは、`message_id`・`dkim_replay`・`reply_address`（M4。→ `relay_replay`、`relay_thread`、`message_id` の名前で足した。ADR 0021）、`desk_code`（M7）、`recovery_code`・`invite_code`（M8）。用途を足すときは、`MacPurpose` の型、`acl.ts`、各クライアントの型、t08-keysvc-acl と t08-key-client-surface の期待の表を同じ PR で直す。
 - 別名を導く鍵（`alias_derive`）は、どの MAC の用途の鍵とも別にする（CAP-05、ADR 0005）。
 
 ### 検査の順番とエラー
@@ -107,7 +107,7 @@ plan 8章は、鍵サービス（`packages/keysvc`）を別プロセスで立て
 
 - **要求の HMAC 署名、時刻、nonce、応答の署名**：ソケットは 0700 のディレクトリの中にあり、通信を盗み見られる者は、同じ OS 利用者としてプロセスのメモリも読める。署名は、その者に対して守りを足さない。本番は KMS の SigV4 と TLS に置き換わる。
 - **サービスごとのソケット**：同じ OS 利用者の中では区別にならない。区別は資格情報で行い、本番ではネットワークの組の制限（CAP-27）で行う。
-- **エンベロープ暗号を warifu-core で行う**：AES-GCM の処理が全サービスに入り、idp がデータ鍵を一時的に持つ。連絡先は 4KB に収まるので、直接の形で足りる。配送キューが 4KB を超えるなら、M4 で relay だけにデータ鍵の操作を足すかを決める。
+- **エンベロープ暗号を warifu-core で行う**：AES-GCM の処理が全サービスに入り、idp がデータ鍵を一時的に持つ。連絡先は 4KB に収まるので、直接の形で足りる。配送キューが 4KB を超えるなら、M4 で relay だけにデータ鍵の操作を足すかを決める。→ M4 では、受け取ったメールを DB に置かずにメモリで処理することにしたので、データ鍵の操作は足さない（ADR 0021）。
 - **照合用の鍵1本と種類の引数**：KMS の鍵ポリシーに写せず、company-api が任意の種類の MAC を作れる。
 - **1つの鍵から用途ごとの鍵を導く（HKDF など）**：不変条件9の許可リストにない。
 - **`node:net` の `connect({ path })` と自前の枠組み**、**子プロセスの IPC**、**`worker_threads`**、**`fetch` の UDS の指定**、**TCP（127.0.0.1）で待ち受ける**、**sender を経由する**：例外の範囲が広がる、別プロセスにならない、同じホストのほかのプロセスや SSRF の踏み台から届く、sender に鍵の操作の経路ができる、のどれかに当たる。
