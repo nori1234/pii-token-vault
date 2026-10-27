@@ -60,9 +60,15 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const THREAD_TTL_MS = 30 * DAY_MS;
 /** 配送ログを残す期間（ADR 0021 の仮置き）。 */
 export const DELIVERY_LOG_TTL_MS = 30 * DAY_MS;
-/** リプレイの記録の上限（x= が遠くても、これより長くは残さない。ADR 0021 の仮置き）。 */
-const REPLAY_MAX_TTL_MS = 30 * DAY_MS;
+/**
+ * リプレイの記録は、その署名を受け付ける間（t= から7日と x= の早いほう）だけ要る。その後は送信元ロックが
+ * 署名の時刻で断る。時計の境目の取りこぼしを避けるため、1時間の余裕を足す（ADR 0021）。
+ */
+const REPLAY_MARGIN_MS = 60 * 60 * 1000;
 const PURGE_INTERVAL_MS = 60 * 60 * 1000;
+/** SMTP の同時接続の上限と、無通信で切るまでの時間（ADR 0021。送信元ごとの上限は P1 の受信の前段で決める）。 */
+const SMTP_MAX_CLIENTS = 100;
+const SMTP_SOCKET_TIMEOUT_MS = 60_000;
 const MAX_ADDRESS_BYTES = 254;
 
 export interface RelayOptions {
@@ -209,7 +215,7 @@ export async function startRelay(options: RelayOptions): Promise<RelayHandle> {
     return `r-${token}@${tenant.relayDomain}`;
   }
 
-  /** リプレイなら false。(d=, s=, b=, 宛先) の MAC を、署名の期限まで残す（plan 3-2）。 */
+  /** リプレイなら false。(d=, s=, b=, 宛先のローカル部) の MAC を、署名を受け付ける間だけ残す（plan 3-2）。 */
   async function recordReplay(
     tenant: RelayTenant,
     lock: Extract<SenderLockResult, { ok: true }>,
@@ -225,11 +231,11 @@ export async function startRelay(options: RelayOptions): Promise<RelayHandle> {
         local,
       ]),
     );
-    const base = lock.signedAt.getTime() + SIGNATURE_MAX_AGE_MS;
-    const until = Math.min(
-      Math.max(base, lock.expiresAt?.getTime() ?? 0),
-      lock.signedAt.getTime() + REPLAY_MAX_TTL_MS,
-    );
+    const until =
+      Math.min(
+        lock.signedAt.getTime() + SIGNATURE_MAX_AGE_MS,
+        lock.expiresAt?.getTime() ?? Number.POSITIVE_INFINITY,
+      ) + REPLAY_MARGIN_MS;
     const rows = await db.withTenant(tenant.tenantId, (tx) =>
       tx.query(
         sql`INSERT INTO relay.replay (tenant_id, replay_mac, expires_at)
@@ -479,6 +485,8 @@ export async function startRelay(options: RelayOptions): Promise<RelayHandle> {
     hideSTARTTLS: true,
     disableReverseLookup: true,
     size: config.maxMessageBytes,
+    maxClients: SMTP_MAX_CLIENTS,
+    socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
     logger: false,
     onConnect(session, callback) {
       sessions.set(session, {});
