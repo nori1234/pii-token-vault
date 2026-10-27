@@ -4,7 +4,8 @@
 // - 本体のコード：packages/ と spikes/ の中の .ts と .js（*.test.ts、*.e2e.ts、node_modules を除く）。
 // - Node が実際に読み込むのと同じ方法で、import をたどる。tsc のように元のコードを見る道具と組み合わせると、
 //   型の構文（'./a.ts' as string など）や URL の書き方（?x、%2E）で、見え方が食い違うため。
-//   - 型の除去：Node 自身の stripTypeScriptTypes（node:module）。取り除いた後のコードを es-module-lexer で字句解析する。
+//   - 型の除去：Node 自身の stripTypeScriptTypes（node:module）。取り除いた後のコードを es-module-lexer で字句解析する
+//     （minimal の版。v2 と同じ形の記録を返す。Node では、init を待たなくても、parse が同期でコンパイルする）。
 //   - 読み込み先の解決：Node 自身の import.meta.resolve（子プロセスで動かす。読み込み先のコードは実行しない）。
 //     package.json の exports と imports、ワークスペースのパッケージ（実体のパスに直す）も、Node と同じに解決する。
 // - 次の書き方は、本体のコードと、そこから import でたどり着くファイルでは、そのものを拒否する。
@@ -24,7 +25,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { initSync, parse } from 'es-module-lexer';
+import { parse } from 'es-module-lexer/minimal';
 
 const ENTRY_DIRS = ['packages', 'spikes'];
 const SOURCE = /\.(ts|mts|cts|js|mjs|cjs)$/;
@@ -143,7 +144,6 @@ export function findViolations(root: string): string[] {
   const entries = entryFiles(absRoot);
   const violations = new Set<string>();
   if (entries.length === 0) return [];
-  initSync();
   const rel = (file: string) => toPosix(relative(absRoot, file));
 
   const seen = new Set(entries);
