@@ -21,6 +21,7 @@ idp（M3）では、`@simplewebauthn/server` を呼ぶ前と後に、次の検�
    - 応答の attestationObject を先に読み、fmt が `none` で、attStmt が空でなければ、ライブラリに渡さずに拒否する。
    - `MetadataService` は使わない。
 2. **アルゴリズムは ES256 と RS256 だけ**：`[-7, -257]` を、`generateRegistrationOptions` と `verifyRegistrationResponse` の両方に渡す。片方だけに渡すことを、テストで検出する。
+   - 2026-10-23 に、EdDSA（-8。曲線は Ed25519）を足した（ADR 0012 の決定10）。渡す値は、ES256、EdDSA、RS256 の順で `[-7, -8, -257]` になる。
 3. **アカウントは資格情報 ID だけで引く**：ログインでは `allowCredentials` を出さず、応答の資格情報 ID で保存済みの資格情報を引く。そのうえで、userHandle が持ち主と一致することを確かめる。見つからなければ、ほかの手がかりでは探さない。
 4. **UV はサーバーで確かめる**：ブラウザが止める場合もあるが、それに頼らない。`requireUserVerification: true` を渡し、結果の `userVerified` も確かめる。
 5. **理由を外に出さない**：ライブラリの例外は、応答にもログにも載せない。応答は、失敗の種類によらず同じ形にする。

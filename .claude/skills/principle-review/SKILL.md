@@ -39,7 +39,7 @@ git show refs/review/<番号>:<パス>                      # 新しいファイ
 | 6 | CIBA（6） | `login_hint`、`id_token_hint`、`user_code` を受け付ける。企業が送った binding_message を表示する |
 | 7 | SSRF（7） | sender 以外から外部へつなぐ。oidc-provider で jwks_uri・sector_identifier_uri・request_uri を有効にする。動的クライアント登録を有効にする |
 | 8 | DB の境界（8） | `withTenant` / `withWarifuUser` を通らない DB アクセス。`sql` タグ以外で SQL を組み立てる。`set_config` の第3引数が true でない。FORCE の付け忘れ。列単位でない GRANT、`USING (true)` のポリシー、SECURITY DEFINER 関数を新たに足す。参加の状態、移行中の期限、割符が確かめた項目と日の列に、企業向けのルート（company-api と、CIBA の結果で呼べるもの）のロールから書き換えられる GRANT を付ける（ADR 0010） |
-| 9 | 暗号の許可リスト（9） | 許可リスト以外の方式。96ビット以外の IV。ES256 以外の JWS。WebAuthn で ES256 と RS256 以外を受け付ける |
+| 9 | 暗号の許可リスト（9） | 許可リスト以外の方式。96ビット以外の IV。ES256 以外の JWS。WebAuthn で ES256、EdDSA（Ed25519）、RS256 以外を受け付ける |
 | 10 | 列挙の防止（10） | 登録済みかどうかで、本文・ステータス・所要時間が変わる分岐（already、exists、409、早めの return） |
 | 11 | 電話（11） | 電話番号の入力欄、列、クレームを足す。電話の中継に手を付ける |
 | 12 | 漏えいシナリオ（12） | 新しいルートや認証まわりの分岐を足したのに、`test/leak/` にテストがない。テストに「攻撃者が持っている情報、試す経路、期待する結果」と plan 11章のテスト番号が書かれていない（形式は `test/leak/README.md`） |
