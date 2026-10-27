@@ -8,12 +8,30 @@ describe('能力の表の性質（不変条件3）', () => {
     );
   });
 
-  it('relay は derive_alias、sign、public_keys を持たず、encrypt は relay_queue だけ', () => {
+  it('relay は derive_alias を持たず、sign と public_keys は dkim だけ、encrypt は relay_queue だけ', () => {
     expect(allowedOp('relay', 'derive_alias')).toBe(false);
-    expect(allowedOp('relay', 'sign')).toBe(false);
-    expect(allowedOp('relay', 'public_keys')).toBe(false);
+    expect(allowedTarget('relay', 'sign', 'id_token')).toBe(false);
+    expect(allowedTarget('relay', 'sign', 'dkim')).toBe(true);
+    expect(allowedTarget('relay', 'public_keys', 'id_token')).toBe(false);
+    expect(allowedTarget('relay', 'public_keys', 'dkim')).toBe(true);
     expect(allowedTarget('relay', 'encrypt', 'contact')).toBe(false);
     expect(allowedTarget('relay', 'encrypt', 'relay_queue')).toBe(true);
+  });
+
+  it('dkim の鍵で署名できるのは relay だけ。id_token の鍵で署名できるのは idp だけ', () => {
+    const signers = (key: string) =>
+      ACL.filter(([, op, target]) => op === 'sign' && target === key).map(([caller]) => caller);
+    expect(signers('dkim')).toEqual(['relay']);
+    expect(signers('id_token')).toEqual(['idp']);
+  });
+
+  it('返信、リプレイ、Message-ID の MAC は relay だけ', () => {
+    for (const purpose of ['relay_replay', 'relay_thread', 'message_id']) {
+      const callers = ACL.filter(([, op, target]) => op === 'mac' && target === purpose).map(
+        ([caller]) => caller,
+      );
+      expect(callers).toEqual(['relay']);
+    }
   });
 
   it('company-api は encrypt と decrypt を持たない', () => {
