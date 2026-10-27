@@ -92,6 +92,25 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
   'idp.users': {
     warifu_idp: { INSERT: ['user_id'], SELECT: ['created_at', 'user_id'] },
   },
+  // relay の表（0005。ADR 0021）。UPDATE はない。配送ログの Message-ID の MAC は、書けるが読めない。
+  'relay.delivery_log': {
+    warifu_relay: {
+      INSERT: ['direction', 'expires_at', 'log_id', 'message_id_mac', 'outcome', 'tenant_id'],
+      SELECT: ['created_at', 'direction', 'expires_at', 'log_id', 'outcome', 'tenant_id'],
+    },
+  },
+  'relay.replay': {
+    warifu_relay: {
+      INSERT: ['expires_at', 'replay_mac', 'tenant_id'],
+      SELECT: ['expires_at', 'replay_mac', 'tenant_id'],
+    },
+  },
+  'relay.threads': {
+    warifu_relay: {
+      INSERT: ['expires_at', 'target_ciphertext', 'tenant_id', 'thread_id', 'token_mac', 'user_id'],
+      SELECT: ['expires_at', 'target_ciphertext', 'tenant_id', 'thread_id', 'token_mac', 'user_id'],
+    },
+  },
   'audit.events': Object.fromEntries(
     APP_ROLES.map((role) => {
       const cols = [
@@ -111,6 +130,7 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
 
 const APP = '{warifu_company_api,warifu_idp,warifu_relay}';
 const OWN = '(user_id = warifu.current_user_id())';
+const TENANT = '(tenant_id = warifu.current_tenant_id())';
 const POLICIES = [
   'aliases.generation|company_api_insert|INSERT|{warifu_company_api}||((tenant_id = warifu.current_tenant_id()) AND (generation >= 2))',
   'aliases.generation|company_api_select|SELECT|{warifu_company_api}|(tenant_id = warifu.current_tenant_id())|',
@@ -140,6 +160,11 @@ const POLICIES = [
   `idp.credentials|idp_update|UPDATE|{warifu_idp}|${OWN}|${OWN}`,
   `idp.users|idp_insert|INSERT|{warifu_idp}||${OWN}`,
   `idp.users|idp_select|SELECT|{warifu_idp}|${OWN}|`,
+  ...['delivery_log', 'replay', 'threads'].flatMap((t) => [
+    `relay.${t}|relay_delete|DELETE|{warifu_relay}|${TENANT}|`,
+    `relay.${t}|relay_insert|INSERT|{warifu_relay}||${TENANT}`,
+    `relay.${t}|relay_select|SELECT|{warifu_relay}|${TENANT}|`,
+  ]),
 ];
 
 // 表の単位の権限（DELETE は列の単位で与えられない）。これ以外は0件（UPDATE は列の単位だけ）。
@@ -147,6 +172,9 @@ const TABLE_GRANTS = [
   'contacts.email_pending|warifu_idp|DELETE',
   'contacts.email_previous|warifu_idp|DELETE',
   'idp.credentials|warifu_idp|DELETE',
+  'relay.delivery_log|warifu_relay|DELETE',
+  'relay.replay|warifu_relay|DELETE',
+  'relay.threads|warifu_relay|DELETE',
 ];
 
 let client: pg.Client;
@@ -336,7 +364,8 @@ describe('漏えい：RLS とロールの固定（plan 10章 M2）', () => {
     // 攻撃者が持っている情報：同上（ATK-02、ATK-07）
     // 試す経路：aclexplode(relacl) と aclexplode(attacl) を読む
     // 期待する結果：アプリのロール（と解決関数の所有者）に表の単位の権限がない。列の単位の権限が一覧と完全に一致する
-    //               （表の単位は、利用者の範囲の DELETE の3つだけ。UPDATE は列の単位だけ。TRUNCATE、REFERENCES、
+    //               （表の単位は、利用者の範囲の DELETE の3つと、relay のテナントの範囲の DELETE の3つだけ。
+    //               UPDATE は列の単位だけ。TRUNCATE、REFERENCES、
     //               TRIGGER はない。lookup_mac はアプリのロールが読めない。idp の暗号文は、復号できないが読める）
     // plan 11章：番号なし（plan 10章 M2、2章「BOLA を防ぐ」）
     const roles = [...APP_ROLES, 'warifu_alias_resolver'];
