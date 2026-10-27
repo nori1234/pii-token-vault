@@ -16,7 +16,7 @@ import {
 } from 'jose';
 import { inject } from 'vitest';
 import { createIdp, type Idp } from '../../packages/idp/src/app.ts';
-import { MemoryOutbox } from '../../packages/idp/src/mailer.ts';
+import { type Mailer, MemoryOutbox } from '../../packages/idp/src/mailer.ts';
 import { SoftAuthenticator } from './soft-authenticator.ts';
 import { workerDatabase } from './worker-db.ts';
 
@@ -60,6 +60,10 @@ export interface ClientSpec {
 export async function startTestIdp(
   spec: { readonly tenants: number; readonly clients: readonly ClientSpec[] },
   now?: () => Date,
+  options?: {
+    /** 既定はメモリの送信箱（outbox）。relay の内部配送 API につなぐときは RelayMailer を渡す。 */
+    readonly mailer?: Mailer;
+  },
 ): Promise<TestIdp> {
   const tenants: TestTenant[] = Array.from({ length: spec.tenants }, (_, i) => ({
     tenantId: randomUUID(),
@@ -110,7 +114,7 @@ export async function startTestIdp(
     registry: { tenants, clients: publicClients },
     keysvc: { socketPath: provided.socketPath, credential: provided.credentials.idp },
     db: { host: String(config.host), port: Number(config.port), database: String(config.database) },
-    mailer: outbox,
+    mailer: options?.mailer ?? outbox,
     logWrite: (line) => {
       lines.push(line);
     },
