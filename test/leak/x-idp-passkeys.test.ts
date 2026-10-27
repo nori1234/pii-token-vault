@@ -44,6 +44,36 @@ describe('漏えい：パスキーの追加と削除', () => {
     expect(((await browser.get('/api/me')).json.passkeys as unknown[]).length).toBe(2);
   });
 
+  it('2つのパスキーの削除を同時に送っても、最後の1つは残る', async () => {
+    // 攻撃者が持っている情報：利用者の PWA のセッション（認証から5分以内のもの）
+    // 試す経路：パスキーが2つある利用者で、2つの削除を同時に送る（どちらも「残り2つ」と数えさせる）
+    // 期待する結果：1つは 200、もう1つは 400。消えるのは1つだけで、残ったパスキーでログインできる
+    // plan 11章：番号なし（plan 4章「予防」、ADR 0018「最後の1つは消させない」）
+    const browser = new Browser(t.origin);
+    expect((await browser.registerAccount()).status).toBe(200);
+    const second = new SoftAuthenticator(t.origin);
+    expect((await addPasskey(browser, second)).status).toBe(200);
+    const ids = ((await browser.get('/api/me')).json.passkeys as { id: string }[]).map((p) => p.id);
+    expect(ids).toHaveLength(2);
+
+    const results = await Promise.all(
+      ids.map((id) => browser.post('/api/passkeys/delete', { id })),
+    );
+    expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
+
+    const logins = await Promise.all(
+      [browser.authenticator, second].map(async (authenticator) => {
+        const other = new Browser(t.origin, authenticator);
+        const options = await other.post('/api/login/options');
+        const response = authenticator.get(options.json.options as never);
+        return (
+          await other.post('/api/login/verify', { ceremonyId: options.json.ceremonyId, response })
+        ).status;
+      }),
+    );
+    expect(logins.sort()).toEqual([200, 401]);
+  });
+
   it('削除したパスキーではログインできず、その利用者のセッション（PWA と OIDC）はすべて消える', async () => {
     // 攻撃者が持っている情報：利用者が消したパスキー（なくした端末）と、その端末のブラウザのセッション
     // 試す経路：利用者が別の端末でパスキーを1つ消す。その後、消したパスキーでログインし、古いセッションで PWA と企業の認可を使う

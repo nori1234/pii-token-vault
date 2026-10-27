@@ -171,6 +171,18 @@ export async function addCredential(
   });
 }
 
+/**
+ * この利用者のパスキーの行をすべてロックし、その数を返す。
+ * ロックしないと、2つの削除が同時に「残り2つ」と数え、最後の1つまで消せてしまう。
+ * 行は決まった順番でロックするので、2つの削除がデッドロックすることはない。
+ */
+async function lockCredentials(tx: Tx): Promise<number> {
+  const rows = await tx.query(
+    sql`SELECT credential_id FROM idp.credentials ORDER BY credential_id FOR UPDATE`,
+  );
+  return rows.length;
+}
+
 /** 最後の1つは消させない（回復の手段が整うまで、ログインできなくなるため）。消せたら true。 */
 export async function deleteCredential(
   deps: RepoDeps,
@@ -178,7 +190,7 @@ export async function deleteCredential(
   credentialId: Uint8Array,
 ): Promise<boolean> {
   return deps.db.withWarifuUser(userId, async (tx) => {
-    const count = await countCredentials(tx);
+    const count = await lockCredentials(tx);
     if (count <= 1) return false;
     const deleted = await tx.execute(
       sql`DELETE FROM idp.credentials WHERE credential_id = ${credentialId}`,
