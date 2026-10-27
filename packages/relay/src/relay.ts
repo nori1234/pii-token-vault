@@ -36,9 +36,9 @@ import {
   type RelayTenant,
 } from './config.ts';
 import { signAndSeal, signOnly } from './dkim.ts';
+import { inspectReply } from './inspect.ts';
 import { type InternalApi, startInternalApi } from './internal-api.ts';
 import {
-  bodyContainsAddress,
   buildMessage,
   encodeWord,
   field,
@@ -103,11 +103,6 @@ export interface RelayHandle {
   stop(): Promise<void>;
 }
 
-interface Session {
-  tenant?: RelayTenant;
-  local?: string;
-}
-
 function smtpError(code: number, text: string): Error & { responseCode: number } {
   const error = new Error(text) as Error & { responseCode: number };
   error.responseCode = code;
@@ -129,7 +124,6 @@ export async function startRelay(options: RelayOptions): Promise<RelayHandle> {
   const db: RelayDb = createRelayDb({ connection: options.db });
   const keys: RelayKeyClient = createRelayKeyClient(options.keysvc);
   const pending = new Set<Promise<void>>();
-  const sessions = new WeakMap<SMTPServerSession, Session>();
 
   const schedule = (task: () => Promise<void>) => {
     const run = task()
@@ -139,6 +133,22 @@ export async function startRelay(options: RelayOptions): Promise<RelayHandle> {
   };
 
   const sign = async (data: Uint8Array) => (await keys.signDkim(data)).signature;
+
+  function parseRecipient(
+    address: string,
+  ): { readonly tenant: RelayTenant; readonly local: string } | undefined {
+    const text = address.toLowerCase();
+    const at = text.lastIndexOf('@');
+    const tenant = at > 0 ? config.byRelayDomain.get(text.slice(at + 1)) : undefined;
+    return tenant === undefined ? undefined : { tenant, local: text.slice(0, at) };
+  }
+
+  function recipientOf(
+    session: SMTPServerSession,
+  ): { readonly tenant: RelayTenant; readonly local: string } | undefined {
+    const rcpt = session.envelope.rcptTo;
+    return rcpt.length === 1 && rcpt[0] !== undefined ? parseRecipient(rcpt[0].address) : undefined;
+  }
 
   async function realAddressOf(
     userId: WarifuUserId,
@@ -401,11 +411,6 @@ export async function startRelay(options: RelayOptions): Promise<RelayHandle> {
     }
     const dmarc = auth.dmarc || undefined;
     if (dmarc?.status.result !== 'pass') return;
-    // 本文に本物のアドレスがあれば、企業へ送らずに、利用者へ差し戻す（plan 3-2）。
-    if (bodyContainsAddress(message, real)) {
-      await sendNotice(real, 'reply_returned');
-      return;
-    }
     const target = decode(
       await keys.decryptQueueItem({
         queueItemId: thread.thread_id,
@@ -419,6 +424,17 @@ export async function startRelay(options: RelayOptions): Promise<RelayHandle> {
       messageId: `${toBase32Lower(randomBytesOf(16))}@${tenant.relayDomain}`,
       userDomain: real.slice(real.lastIndexOf('@') + 1),
     });
+    // 企業へ送るもの（残すヘッダーと本文）に本物のアドレスがあれば、送らずに利用者へ差し戻す。中身を確かめられない
+    // 部分（添付ファイルなど）があるときも差し戻す（plan 3-2、ADR 0021）。
+    const inspected = inspectReply(headers, message, real);
+    if (inspected !== 'clean') {
+      log.info({ event: 'relay.reply_returned', reason: inspected });
+      await sendNotice(
+        real,
+        inspected === 'contains_address' ? 'reply_returned' : 'reply_unsupported',
+      );
+      return;
+    }
     // ARC の結果には、利用者のドメインを書かない（企業へ、利用者のメールの事業者を伝えない）。
     const sealed = await signAndSeal(buildMessage(headers, message.body), {
       domain: tenant.relayDomain,
@@ -446,11 +462,10 @@ export async function startRelay(options: RelayOptions): Promise<RelayHandle> {
     const chunks: Buffer[] = [];
     for await (const chunk of stream) chunks.push(chunk as Buffer);
     if (stream.sizeExceeded) throw smtpError(552, '5.3.4 Message too big');
-    const state = sessions.get(session);
-    const tenant = state?.tenant;
-    const local = state?.local;
-    if (tenant === undefined || local === undefined)
-      throw smtpError(503, '5.5.1 Bad sequence of commands');
+    // 宛先は、smtp-server がトランザクションごとに持つ封筒から読む（DATA の後と RSET で空になる）。
+    const recipient = recipientOf(session);
+    if (recipient === undefined) throw smtpError(503, '5.5.1 Bad sequence of commands');
+    const { tenant, local } = recipient;
     const raw = Buffer.concat(chunks);
     const message = parseMessage(raw);
     if (THREAD_LOCAL_PART_PATTERN.test(local)) {
@@ -488,26 +503,16 @@ export async function startRelay(options: RelayOptions): Promise<RelayHandle> {
     maxClients: SMTP_MAX_CLIENTS,
     socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
     logger: false,
-    onConnect(session, callback) {
-      sessions.set(session, {});
-      callback();
-    },
     onRcptTo(address, session, callback) {
-      const state = sessions.get(session) ?? {};
-      sessions.set(session, state);
-      if (state.local !== undefined) {
+      // 1つのトランザクションの宛先は1つ（封筒は、トランザクションが終わるか RSET で空になる）。
+      if (session.envelope.rcptTo.length > 0) {
         callback(smtpError(452, '4.5.3 Too many recipients'));
         return;
       }
-      const text = address.address.toLowerCase();
-      const at = text.lastIndexOf('@');
-      const tenant = at > 0 ? config.byRelayDomain.get(text.slice(at + 1)) : undefined;
-      if (tenant === undefined) {
+      if (parseRecipient(address.address) === undefined) {
         callback(smtpError(550, '5.1.2 Recipient domain not accepted'));
         return;
       }
-      state.tenant = tenant;
-      state.local = text.slice(0, at);
       callback();
     },
     onData(stream, session, callback) {

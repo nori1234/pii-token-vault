@@ -19,6 +19,7 @@ import {
 let t: TestRelay;
 let company: TestCompany;
 const targets: Record<string, string> = {};
+let liveEmail = '';
 
 beforeAll(async () => {
   t = await startTestRelay();
@@ -43,6 +44,7 @@ beforeAll(async () => {
     ?.raw.toString('latin1')
     .match(/^From: .*<([^<>]+)>/m)?.[1];
   if (from === undefined) throw new Error('返信用のアドレスがない');
+  liveEmail = live.email;
   targets.live = liveAlias;
   targets.retired = retiredAlias;
   targets.unknown = `${toBase32Lower(new Uint8Array(randomBytes(10)))}@${company.relayDomain}`;
@@ -163,5 +165,42 @@ describe('漏えい：SMTP の応答で別名を列挙させない（plan 11章 
     expect([...texts].map((r) => r.slice(0, 3))).toEqual(['550']);
     expect(texts.size).toBe(1);
     expect(t.outbound.all()).toHaveLength(before);
+  });
+
+  it('同じ接続の次のトランザクションと、RSET の後は、1宛先の制限を保ったまま受け付ける', async () => {
+    // 攻撃者が持っている情報：なし（企業の送信サーバーが1つの接続で続けて送ることの確認）
+    // 試す経路：1つの SMTP の接続で、1通目を送った後に2通目を送る。3通目は RCPT の後に RSET で取り消してから送り直し、
+    //           同じトランザクションに2つ目の RCPT を足す
+    // 期待する結果：2通目と送り直した3通目の RCPT は 250、同じトランザクションの2つ目の RCPT は 452。
+    //               3通とも利用者に届く
+    // plan 11章：テスト10（SMTP の応答）、テスト5
+    const to = targets.live ?? '';
+    const before = t.outbound.all().filter((m) => m.rcptTo === liveEmail).length;
+    const session = await SmtpSession.open(t.relay.smtpPort);
+    try {
+      await session.command('EHLO sender.example');
+      for (let i = 0; i < 2; i += 1) {
+        expect((await session.command(`MAIL FROM:<bounce@${company.senderDomain}>`)).code).toBe(
+          250,
+        );
+        expect((await session.command(`RCPT TO:<${to}>`)).code).toBe(250);
+        expect((await session.command('DATA')).code).toBe(354);
+        const raw = await signCompanyMail(company, companyMail(company, to));
+        expect((await session.data(raw)).code).toBe(250);
+      }
+      expect((await session.command(`MAIL FROM:<bounce@${company.senderDomain}>`)).code).toBe(250);
+      expect((await session.command(`RCPT TO:<${to}>`)).code).toBe(250);
+      expect((await session.command('RSET')).code).toBe(250);
+      expect((await session.command(`MAIL FROM:<bounce@${company.senderDomain}>`)).code).toBe(250);
+      expect((await session.command(`RCPT TO:<${to}>`)).code).toBe(250);
+      expect((await session.command(`RCPT TO:<${to}>`)).code).toBe(452);
+      expect((await session.command('DATA')).code).toBe(354);
+      const raw = await signCompanyMail(company, companyMail(company, to));
+      expect((await session.data(raw)).code).toBe(250);
+    } finally {
+      session.close();
+    }
+    await t.relay.idle();
+    expect(t.outbound.all().filter((m) => m.rcptTo === liveEmail)).toHaveLength(before + 3);
   });
 });

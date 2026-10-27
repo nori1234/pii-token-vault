@@ -36,8 +36,8 @@ M4 で、relay のテストを足した（ADR 0021）。
 |---|---|
 | `t05-relay-sender-lock` | テスト5の送信元ロック（条件を1つずつ外したメールの拒否と理由、リプレイ、知らない別名、受信側での DKIM・ARC・DMARC の pass） |
 | `t05-relay-hygiene` | テスト5の中継の衛生（開封通知、Cc、Bcc、Sender の削除、To を別名だけに、List-Unsubscribe の書き換え、本文のバイト列、ログに値を出さない） |
-| `t05-relay-reply` | テスト5の返信の中継（DMARC が pass した本物のアドレスからの返信だけ、詐称の拒否、本文の本物のアドレスの差し戻し、署名の外の Reply-To、References、テナントと期限） |
-| `t10-relay-rcpt` | テスト10（SMTP の RCPT、VRFY、DATA の応答が、別名の状態によらず同じ。relay のドメインでない宛先） |
+| `t05-relay-reply` | テスト5の返信の中継（DMARC が pass した本物のアドレスからの返信だけ、詐称の拒否、件名と本文の本物のアドレスの差し戻し（文字参照、タグ、%xx、全角、ISO-2022-JP、encoded-word など）、確かめられない部分を含む返信の差し戻し、署名の外の Reply-To、References、テナントと期限） |
+| `t10-relay-rcpt` | テスト10（SMTP の RCPT、VRFY、DATA の応答が、別名の状態によらず同じ。relay のドメインでない宛先。同じ接続の次のトランザクションと RSET） |
 | `x-relay-internal-api` | relay の内部配送 API（idp の資格情報だけ、受け付ける入力、知らない利用者でも 202、ソケットの権限、idp から relay を経た宛先確認と旧アドレスへの知らせ） |
 
 ## いつ足すか

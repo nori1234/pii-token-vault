@@ -2,12 +2,17 @@
 // 旧アドレスへの知らせと、差し戻しの知らせには、操作のリンクもコードも入れない。
 // 確認コードは、宛先確認のときだけ入れる。文面に、ほかの値（企業名、アドレス、利用者の情報）を差し込まない。
 
-export type NoticeKind = 'email_verification' | 'email_changed_notice' | 'reply_returned';
+export type NoticeKind =
+  | 'email_verification'
+  | 'email_changed_notice'
+  | 'reply_returned'
+  | 'reply_unsupported';
 
 const SUBJECTS: Readonly<Record<NoticeKind, string>> = Object.freeze({
   email_verification: '割符：メールアドレスの確認コード',
   email_changed_notice: '割符：メールアドレスが変更されました',
   reply_returned: '割符：返信を中継しませんでした',
+  reply_unsupported: '割符：返信を中継しませんでした',
 });
 
 export function subjectOf(kind: NoticeKind): string {
@@ -37,9 +42,16 @@ export function bodyOf(kind: NoticeKind, code?: string): string {
       ].join('\r\n');
     case 'reply_returned':
       return [
-        'あなたの返信に、あなたのメールアドレスが含まれていたため、企業へ中継しませんでした。',
+        'あなたの返信の件名か本文に、あなたのメールアドレスが含まれていたため、企業へ中継しませんでした。',
         '',
         '署名や引用の中のアドレスを消してから、もう一度返信してください。',
+        '',
+      ].join('\r\n');
+    case 'reply_unsupported':
+      return [
+        'あなたの返信に、割符が中身を確かめられない部分（添付ファイル、画像、電子署名、対応していない文字コードなど）が含まれていたため、企業へ中継しませんでした。',
+        '',
+        '添付ファイルや画像を外し、文字だけで、もう一度返信してください。',
         '',
       ].join('\r\n');
   }

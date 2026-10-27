@@ -182,7 +182,7 @@
 - Disposition-Notification-To、Return-Receipt-To、Reply-To、Sender、Return-Path、企業の DKIM-Signature と ARC の組、Authentication-Results、Received-SPF を削除する。
 - List-Unsubscribe の `mailto:` を、relay 経由のアドレスに書き換える。`https:` は残し、それ以外は消す。List-Unsubscribe-Post は、`https:` が残ったときだけ、`List-Unsubscribe=One-Click` の値で残す。
 - 件名と本文はバイト単位で変えない。relay の DKIM を付け直し、ARC で封印する。relay のサブドメインは企業ごとに分ける。
-- 利用者からの返信は、やり取りごとの使い捨てのアドレス（30日で失効する）から、元の Reply-To（署名したもの）か From に届く。`X-Warifu-Unauthenticated` が付き、Message-ID は relay が作り直す。
+- 利用者からの返信は、やり取りごとの使い捨てのアドレス（30日で失効する）から、元の Reply-To（署名したもの）か From に届く。`X-Warifu-Unauthenticated` が付き、Message-ID は relay が作り直す。P0 では、添付ファイルや画像を含む返信は届かない（利用者に差し戻す）。
 - 1つの SMTP のトランザクションの宛先は1つだけ（2つ目の RCPT は 452）。1通は 10 MiB まで。
 
 ## 11. 決済
