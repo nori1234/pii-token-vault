@@ -38,7 +38,7 @@ git show refs/review/<番号>:<パス>                      # 新しいファイ
 | 5 | 突き合わせの防止（5） | sub の導出にテナント ID を使っていない。SET の jti に全体の通番や時刻を使う。email_verified を true にする。別名の世代を戻す |
 | 6 | 窓口の承認（6） | P0でCIBAを提供する。受付番号だけで認証・認可する。窓口用途の承認を高リスク操作に流用する |
 | 7 | SSRF（7） | sender 以外から外部へつなぐ。oidc-provider で jwks_uri・sector_identifier_uri・request_uri を有効にする。動的クライアント登録を有効にする |
-| 8 | DB の境界（8） | `withTenant` / `withWarifuUser` を通らない DB アクセス。`set_config` の第3引数が true でない。FORCE の付け忘れ。SECURITY DEFINER 関数を新たに足す。参加の状態、移行中の期限、割符が確かめた項目と日の列に、企業向けのルート（company-api と、窓口承認で呼べるもの）のロールから書き換えられる GRANT を付ける（ADR 0010） |
+| 8 | DB の境界（8） | `withTenant` / `withWarifuUser` を通らない DB アクセス。`sql` タグ以外で SQL を組み立てる。`set_config` の第3引数が true でない。FORCE の付け忘れ。列単位でない GRANT、`USING (true)` のポリシー、SECURITY DEFINER 関数を新たに足す。参加の状態、移行中の期限、割符が確かめた項目と日の列に、企業向けのルート（company-api と、窓口承認で呼べるもの）のロールから書き換えられる GRANT を付ける（ADR 0010） |
 | 9 | 暗号の許可リスト（9） | 許可リスト以外の方式。96ビット以外の IV。ES256 以外の JWS。WebAuthn で ES256、EdDSA（Ed25519）、RS256 以外を受け付ける |
 | 10 | 列挙の防止（10） | 登録済みかどうかで、本文・ステータス・所要時間が変わる分岐（already、exists、409、早めの return） |
 | 11 | 電話（11） | 電話番号の入力欄、列、クレームを足す。電話の中継に手を付ける |
@@ -55,7 +55,8 @@ git show refs/review/<番号>:<パス>                      # 新しいファイ
 grep -rniE '\b(e-?mail|phone|telephone|msisdn|postal|zip|birth|dob|kana|order_?(id|no|number)|reservation|card|payment)' <files>
 
 # 観点3：relay と keysvc 以外の復号
-grep -rniE 'decrypt|decipher' packages/ spikes/ | grep -vE '^packages/(relay|keysvc)/'
+# （warifu-core の keys/relay.ts は relay のクライアントで、keys/protocol.ts は操作の名前。エラーの名前 decrypt_failed は除く）
+grep -rniE 'decrypt|decipher' packages/ spikes/ | grep -vE '^packages/(relay|keysvc)/|^packages/warifu-core/src/keys/(relay|protocol)\.ts:' | grep -vE 'decrypt_failed'
 
 # 観点6：受け付けてはならない hint（login_hint_token は許可。拒否を確かめるテストもヒットする）
 grep -rnE 'login_hint([^_]|$)|id_token_hint|user_code' packages/ spikes/
@@ -63,7 +64,11 @@ grep -rnE 'login_hint([^_]|$)|id_token_hint|user_code' packages/ spikes/
 # 観点7：sender 以外からの外向きの通信
 grep -rnE "fetch\(|https?\.(request|get)\(|net\.connect|tls\.connect|dns\.|from ['\"](undici|got|axios|node-fetch|ky|web-push)['\"]|createTransport" packages/ spikes/ | grep -v '^packages/sender/'
 
-# 観点9：暗号の呼び出し
+# 観点8：DB の境界を広げる書き方（マイグレーションと、テストの中の文字列）
+grep -rniE 'SECURITY DEFINER|USING \(true\)|GRANT .* ON .* TO|BYPASSRLS|DISABLE ROW LEVEL' packages/ test/ scripts/
+
+# 観点9：暗号の呼び出し（node:crypto を import してよいのは packages/keysvc/src/crypto.ts と
+# packages/warifu-core/src/random.ts だけ。t08-crypto-allowlist で固定している）
 grep -rnE 'createCipheriv|createDecipheriv|createHash|createHmac|createSign|generateKeyPair' packages/ spikes/
 
 # 観点7と9：lint を黙って外せる書き方（CI の「lint をすり抜ける書き方がないことを確かめる」と同じ検査に、
@@ -79,19 +84,20 @@ git ls-files -s | awk '$1 == "120000"'   # 追跡しているシンボリック�
 
 `npm run lint`（Biome）は、観点7と9の一部をすでに止める。対象は次のとおり。
 
-- `packages/sender` 以外での、外向きの通信のモジュール（`node:net`、`node:dns`、`node:https`、`undici` など）と `node:child_process` の import。`node:http` は、`createServer`、`Server`、`IncomingMessage`、`ServerResponse`、`STATUS_CODES` だけを許す。
+- `packages/sender` 以外での、外向きの通信のモジュール（`node:net`、`node:dns`、`node:https`、`undici` など）と `node:child_process` の import。`node:http` は、`createServer`、`Server`、`IncomingMessage`、`ServerResponse`、`STATUS_CODES` だけを許す。例外は `packages/warifu-core/src/internal/uds-client.ts` の1ファイルで、`request` だけを許す（ADR 0013）。
 - `packages/sender` 以外での、`fetch` などのグローバル。
 - `packages/sender` も含めて、`node:module` の import（`createRequire` などで import の制限を回避させない）と、グローバルの `crypto`（Web Crypto）、`globalThis`、`global`。
 - `packages/warifu-core`・`packages/keysvc`・`spikes/` 以外での、`node:crypto` の import。
 
 ただし、テスト（`*.test.ts`、`*.e2e.ts`）、`scripts/`、`test/`、ルートの `*.config.ts` は対象外で、`public/` の中ではグローバルの制限（`fetch` など）を外している。CI は、lint に加えて、`packages/` と `spikes/` の中（Markdown を除く）の `biome-ignore` と `getBuiltinModule`（`process.getBuiltinModule` を含む）と、ルートの `biome.json` 以外の Biome の設定ファイル（入れ子のものと、ルートの `biome.jsonc`、`.biome.json`、`.biome.jsonc`）を拒否する。本体のコード（`packages/` と `spikes/` の、テスト以外のファイル）から、テスト、`scripts/`、`test/`、ルートの `*.config.ts` への import（Node と同じ方法でたどった import のグラフで確かめる）と、引用符で囲んだ文字列リテラル1つ以外を渡す動的な import（括弧の中の型の構文を含む）、ファイルと `node:` の組み込み以外を読み込む import（`data:` など）、CommonJS として読み込まれるファイル、追跡したシンボリックリンクも拒否する。コードの文字列の実行（`Function`、`node:vm`）と、別のファイルの起動（`node:worker_threads`）は、この検査では見ないので、上の検索で点検する。lint と CI が通っても、次の4つは点検する。
 
-- `biome.json` の差分。`overrides` の `includes` が広がっていないか、ルールを `off` にする箇所や、制限するモジュールとグローバルの一覧が減っていないか。広げるなら、理由が PR に書かれているか。
+- `biome.json` の差分。`overrides` の `includes` が広がっていないか、ルールを `off` にする箇所や、制限するモジュールとグローバルの一覧が減っていないか。広げるなら、理由が PR に書かれているか。uds-client.ts の override は、`includes` がその1ファイルのままで、`request` 以外を許していないか（t08-key-client-surface）。
+- `packages/keysvc/src/acl.ts` の差分（とくに decrypt と sign の行）と、`INTERNAL_SOCKET_NAMES` の差分。能力の表を広げるなら、plan 8章、spec 04、ADR を先に直しているか。
 - `.github/workflows/ci.yml` の差分。lint をすり抜ける書き方の検査が、弱められたり消されたりしていないか。
 - 制限を外しているファイル（テスト、`scripts/`、`test/`、ルートの `*.config.ts`。`public/` の中ではグローバルの制限）に、上の検索がヒットしないか。ヒットしたら、宛先がテストの中で立てたローカルのサーバーだけかを確かめる。
 - `CLAUDE.md`、`AGENTS.md`、`.claude/`（settings.json、hooks、skills）、`.npmrc`、`package.json` の scripts、ルートの `*.config.ts`、テストと `scripts/`・`test/` のコード、`.github/`（workflows、dependabot.yml、CODEOWNERS）の差分。フックや設定は、Claude Code でそのブランチを開いただけで動き、テストと設定は `npm test` で動く。メンテナー以外が作った PR は、GitHub の上で読むだけにし、checkout も、セッションでの実行もしない（CLAUDE.md「進め方」）。
 
-観点2は、ルート一覧のスナップショットのテストの差分を必ず読む。観点8は、全テーブルが RLS の ENABLE と FORCE の両方を持つことを `pg_class` の `relrowsecurity` と `relforcerowsecurity` で確かめる固定テストが通っていることを見る。
+観点2は、ルート一覧のスナップショットのテストの差分を必ず読む。観点8は、全テーブルが RLS の ENABLE と FORCE の両方を持つことを `pg_class` の `relrowsecurity` と `relforcerowsecurity` で確かめる固定テスト（`test/leak/x-rls-fixed.test.ts`）が通っていることを見る。マイグレーションを足したら、その固定テストの期待の一覧（ポリシー、列単位の GRANT）の差分を必ず読む。
 
 ## 3. 報告する
 

@@ -18,7 +18,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
-    "pg-up": "node scripts/pg-up.ts"
+    "pg-up": "node scripts/pg-up.ts",
+    "migrate": "node scripts/migrate.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

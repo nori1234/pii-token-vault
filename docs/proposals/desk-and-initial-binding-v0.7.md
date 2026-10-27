@@ -2,7 +2,7 @@
 
 作成日：2026-10-22。更新日：2026-10-27。状態：共有された判断を反映した文書案。文書PRへの反映・実装はまだ行っていない。v0.1〜v0.6は履歴として残す。指定されたレビュー全文はこの環境に見つからず、この版は会話に記載された指摘を反映する。
 
-2026-10-27時点の公開mainの確認基準は`7f6b2bcd57d6d1132b4f8d2011f384f9cd6cf5f8`。PR #24・#25は未マージ、#26はmainへマージ済み。v0.5までの基準`d7fd5be1eee2283d3258f004378329972d8fbcd9`から更新した。現行mainは引き続き窓口をCIBAとするため、この案を解釈だけで実装へ適用しない。
+2026-10-27時点の公開mainの確認基準は`29debc824db7cbed6181366be5534d00a0b6af59`。PR #25は未マージ、#24・#26はmainへマージ済み。v0.5までの基準`d7fd5be1eee2283d3258f004378329972d8fbcd9`から更新した。現行mainは引き続き窓口をCIBAとするため、この案を解釈だけで実装へ適用しない。
 
 **共有された判断：窓口は操作別step-upへ一本化し、初回紐付けは適格な旧パスキー等と割符の操作別承認を組み合わせる案(a)を採る。パスワードによる案(b)は採らない。提示済みの数値は、根拠のない仮置きとして扱う。** P0の書き込み範囲など、§0に示す4点は引き続きオーナー確認待ちとする。
 
@@ -230,7 +230,7 @@ company-apiは署名・issuer・audience・期限・クライアントとテナ�
 
 削除済み・未知のIDに対する再送や照会は、情報を復元したり新規通知として再登録したりしない。認証した相手にも期限切れ・不明の限定した結果を返す。削除済みIDから処理を復活させないことは企業側でも保証する。遅れた再送のために削除済みの本文を保存し続けない。
 
-**受信箱の削除と監査ログの削除は別である。** 公開PR #24・#25にあるADR 0016は提案段階で、P0の監査ログを消さない案になっている。追記専用チェーンへ通知本文・変更前後の値・移行証跡を写してから「24時間で消える」と約束しない。監査へ残す事象・主体やテナントとの対応・保存期間は同じ文書PRで調整する。最小の監査情報からも活動の痕跡は分かりうる。
+**受信箱の削除と監査ログの削除は別である。** mainに入ったADR 0016は、P0の監査ログを消さないと定める。追記専用チェーンへ通知本文・変更前後の値・移行証跡を写してから「24時間で消える」と約束しない。監査へ残す事象・主体やテナントとの対応・保存期間は同じ文書PRで調整する。最小の監査情報からも活動の痕跡は分かりうる。
 
 上の期間は通知と処理の保存方針案であり、ログ・バックアップを含む完全消去を意味しない。ログへの値の混入防止、バックアップの保存期間、復元時に期限切れの処理を復活させない手順も、実データを使う前に定める。機微な値・署名済みトークンを平文のDB・ログに残さない既存の規則は維持する。
 
@@ -389,7 +389,7 @@ pending_link / awaiting_final_confirmation
 
 **これはCLAUDE.mdの不変条件1(a)の変更である。** 会話で限定追加の判断が共有された。文書PRに記録し、現行文書に反映する前に実装しない。 現行のPRN-10〜13とRP-02〜04の解釈だけで、旧企業のパスキー等を新たな確認根拠として実装しない。ADR 0010の経路内の例外も、紐付けとsubの扱いにはそのまま流用できない。
 
-[CLAUDE.md](https://github.com/nori1234/pii-token-vault/blob/7f6b2bcd57d6d1132b4f8d2011f384f9cd6cf5f8/CLAUDE.md)には「破る必要がありそうなら、実装せずに止まってオーナーに確認する」とある。不変条件とplanの食い違いについても「文書を直すPRを先に出す」と定める。本件では、新ADRとCLAUDE.md・plan・仕様書・レビュー基準の変更を文書PRにまとめ、共有された判断を記録してから実装へ進む。会員ごとの追加条件など4点は別途オーナー確認待ちである。
+[CLAUDE.md](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/CLAUDE.md)には「破る必要がありそうなら、実装せずに止まってオーナーに確認する」とある。不変条件とplanの食い違いについても「文書を直すPRを先に出す」と定める。本件では、新ADRとCLAUDE.md・plan・仕様書・レビュー基準の変更を文書PRにまとめ、共有された判断を記録してから実装へ進む。会員ごとの追加条件など4点は別途オーナー確認待ちである。
 
 新ADRの決定文として、次を提案する。公開PR #24で0013〜0017、#25で0018が使われているため、今回は0019以降を候補とする。公開時に衝突を再確認する。公開PR #26でmainに入った0012も再利用しない。
 
@@ -506,13 +506,13 @@ ADR 0019の決定文案：
 
 ## 6. 確認した参照元
 
-2026-10-27にmainのコミット`7f6b2bcd57d6d1132b4f8d2011f384f9cd6cf5f8`を確認。以下の公開PRの状態はこの確認時点のもの。採用判断とmainへのマージを区別する。
+2026-10-27にmainのコミット`29debc824db7cbed6181366be5534d00a0b6af59`を確認。以下の公開PRの状態はこの確認時点のもの。採用判断とmainへのマージを区別する。
 
-- [実装計画](https://github.com/nori1234/pii-token-vault/blob/7f6b2bcd57d6d1132b4f8d2011f384f9cd6cf5f8/docs/plan.md)：3-1の操作別承認とCIBA、10章のP0とM7、11章のテスト、企業の認証方式。
-- [CLAUDE.md](https://github.com/nori1234/pii-token-vault/blob/7f6b2bcd57d6d1132b4f8d2011f384f9cd6cf5f8/CLAUDE.md)、[RP接続要件](https://github.com/nori1234/pii-token-vault/blob/7f6b2bcd57d6d1132b4f8d2011f384f9cd6cf5f8/docs/spec/02-rp-requirements.md)、[DESIGN.md](https://github.com/nori1234/pii-token-vault/blob/7f6b2bcd57d6d1132b4f8d2011f384f9cd6cf5f8/DESIGN.md)：不変条件、RP-20〜28・73、画面と警告文。
-- [ADR 0010](https://github.com/nori1234/pii-token-vault/blob/7f6b2bcd57d6d1132b4f8d2011f384f9cd6cf5f8/docs/adr/0010-staged-participation.md)：移行中の参加。初回移行の証明方法と本案の会員別追加条件は別判断。
-- [公開PR #26](https://github.com/nori1234/pii-token-vault/pull/26)、[ADR 0012](https://github.com/nori1234/pii-token-vault/blob/7f6b2bcd57d6d1132b4f8d2011f384f9cd6cf5f8/docs/adr/0012-primary-source-review.md)：mainにマージ済み。
-- [公開PR #24](https://github.com/nori1234/pii-token-vault/pull/24)：未マージ、headはf13fbadc77e5373eae3fefbad149ab8c0d50f3be。0013〜0017を使用。
+- [実装計画](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/docs/plan.md)：3-1の操作別承認とCIBA、10章のP0とM7、11章のテスト、企業の認証方式。
+- [CLAUDE.md](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/CLAUDE.md)、[RP接続要件](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/docs/spec/02-rp-requirements.md)、[DESIGN.md](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/DESIGN.md)：不変条件、RP-20〜28・73、画面と警告文。
+- [ADR 0010](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/docs/adr/0010-staged-participation.md)：移行中の参加。初回移行の証明方法と本案の会員別追加条件は別判断。
+- [公開PR #26](https://github.com/nori1234/pii-token-vault/pull/26)、[ADR 0012](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/docs/adr/0012-primary-source-review.md)：mainにマージ済み。
+- [公開PR #24](https://github.com/nori1234/pii-token-vault/pull/24)：mainにマージ済み。ADR 0013〜0017を使用。
 - [公開PR #25](https://github.com/nori1234/pii-token-vault/pull/25)：未マージ、headはf8339828a8449e0afa892f5641cc146f2f756b6c。0018を使用。[ADR 0017](https://github.com/nori1234/pii-token-vault/blob/f8339828a8449e0afa892f5641cc146f2f756b6c/docs/adr/0017-log-allowlist.md)と[ロガー](https://github.com/nori1234/pii-token-vault/blob/f8339828a8449e0afa892f5641cc146f2f756b6c/packages/warifu-core/src/log/redact.ts)の許可リスト、[能力表](https://github.com/nori1234/pii-token-vault/blob/f8339828a8449e0afa892f5641cc146f2f756b6c/docs/spec/04-capabilities.md)の保存・鍵境界を参照。
 - [OIDC Core](https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest)、[RFC 9396](https://www.rfc-editor.org/rfc/rfc9396.html#section-3)：認可要求とRAR。操作への結び付けと承認内容は本案の製品プロファイル。
 - [RFC 7523 §2.2](https://www.rfc-editor.org/rfc/rfc7523.html#section-2.2)：JWTによるクライアント認証。company-apiの呼び出しは現行RP-73のトークン利用に合わせる。
