@@ -96,7 +96,7 @@ npx --no playwright install --with-deps chromium   # 初回だけ。--no で、n
 npm run lint        # Biome。不変条件7と9に反する import も止める
 npm run typecheck   # tsc --noEmit
 npm test            # Vitest（一時的な Postgres と鍵サービスを自動で起動して止める）
-npm run e2e         # Playwright（パスキーは CDP の仮想認証器で試す）
+npm run e2e         # Playwright（パスキーは CDP の仮想認証器で試す。一時的な Postgres、鍵サービス、idp を自動で起動する）
 npm run pg-up       # 一時的な Postgres を手で起動する
 npm run migrate     # pg-up で起動した Postgres に、マイグレーションを流す（PGDATABASE も指定する）
 ```
@@ -106,11 +106,10 @@ npm run migrate     # pg-up で起動した Postgres に、マイグレーショ
 
 ### いまあるコード
 
-- `packages/`：本実装の置き場所です。M2 で、`warifu-core`（ID、符号化、鍵サービスのクライアント、DB の境界、監査ログ、ログの伏せ字）と `keysvc`（鍵サービス）を作りました。ほかのパッケージは、まだ空です。
+- `packages/`：本実装の置き場所です。M2 で、`warifu-core`（ID、符号化、鍵サービスのクライアント、DB の境界、監査ログ、ログの伏せ字）と `keysvc`（鍵サービス）を作りました。M3 で、`idp`（パスキー、OIDC、企業ごとの ID と別名、step-up、メールアドレスの登録、PWA の土台）を作りました。ほかのパッケージは、まだ空です。
 - `spikes/`：M1 の捨てスパイクです。本実装に置き換えたら消します。詳しくは [spikes/README.md](spikes/README.md) を参照してください。
-  - `spikes/passkey`：仮想認証器で、パスキーの登録とログインを通します（`npm run e2e` で動きます）。
   - `spikes/ciba-poll`：oidc-provider の CIBA を poll で1往復させます（`npm test` で動きます）。
-- `test/leak/`：漏えいシナリオのテストの置き場所です。M2 で、テスト8（鍵サービスの能力の表、暗号の許可リスト、監査ログのチェーン）と、RLS の固定テストを足しました。書き方は [test/leak/README.md](test/leak/README.md) にあります。
+- `test/leak/`：漏えいシナリオのテストの置き場所です。M2 で、テスト8（鍵サービスの能力の表、暗号の許可リスト、監査ログのチェーン）と、RLS の固定テストを足しました。M3 で、テスト4の前半（企業ごとの ID と別名）、テスト10（メールの登録の応答）、パスキーの検証の守り、idp のルート一覧などを足しました。書き方は [test/leak/README.md](test/leak/README.md) にあります。
 
 [CLAUDE.md](CLAUDE.md) の「環境の注意」は、メンテナーが使う Claude Code のクラウド環境での注意です（例：その環境では `npx playwright install` を実行しない）。手元では、上の「前提」に従ってください。
 

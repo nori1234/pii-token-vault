@@ -17,6 +17,19 @@ M2 で、テスト8（`t08-*`）と、RLS の固定テストなど番号のな�
 | `x-db-boundary` | テナントと利用者の境界、境界なしの生の接続、権限の昇格、`sql` タグ |
 | `x-relay-resolver` | relay の解決関数（2つの ID だけを返す、廃番の区別がない、relay だけが呼べる） |
 
+M3 で、idp のテストを足した（ADR 0018）。
+
+| ファイル | 確かめること |
+|---|---|
+| `t04-pairwise` | テスト4の前半（A社とB社で sub と別名が違い、同じテナントの2つのクライアントで sub が同じ。企業に渡る値の一覧。別名から relay の解決関数で戻ること） |
+| `t10-email-registration` | テスト10（メールの登録の応答が、登録済みかどうかで変わらない）。宛先確認、DB に暗号文だけが残ること、試行の上限、旧アドレスへの知らせ、step-up |
+| `x-webauthn-guards` | ADR 0007 の決定1〜5（attestation、アルゴリズム、userHandle、UV、理由を出さない）とチャレンジの結び付き |
+| `x-webauthn-algorithms` | 受け付けるアルゴリズム（ES256、EdDSA、RS256）と、登録した公開鍵の種類・曲線・RSA の鍵長（ADR 0012 の決定6・10） |
+| `x-idp-oidc` | discovery の方式、step-up（max_age=0、prompt=login）、受け付けない項目、PKCE、クライアント認証、接続しない、別のテナントの同意 |
+| `x-idp-routes` | idp のルート一覧、Host と Origin、CSP と Trusted Types、PWA のクッキー |
+| `x-idp-passkeys` | パスキーの追加と削除の step-up、削除でセッションが消えること、最後の1つは消せないこと |
+| `x-idp-browser`（E2E） | CDP の仮想認証器で、企業の認可から ID トークンまで、PWA のメールの登録、UV のないログインの拒否。CSP の違反がないこと |
+
 ## いつ足すか
 
 - 新しいルートを足したとき。
@@ -32,6 +45,11 @@ M2 で、テスト8（`t08-*`）と、RLS の固定テストなど番号のな�
   - `rawRoleClient(role)`：境界を設定しない、アプリのロールの生の接続。盗んだ資格情報や SQL インジェクションを模すときに使う（権限はアプリのロールと同じ）。
   - ワーカーの DB は、同じワーカーのファイルの間で共有する。偽の行を足すテストは、境界の中で足して、例外を投げて ROLLBACK する（DB を汚さない）。値は、テストごとの乱数のテナント ID と利用者 ID で分ける。
   - ブートストラップのロール（`workerDatabase()`）で、DB の中身を読み書きしない（不変条件8の例外は、マイグレーションとテスト用の DB の作成だけ）。
+- idp を使うテストは、`test/setup/idp.ts` を使う。
+  - `startTestIdp`：ワーカーの DB と globalSetup の鍵サービスで、idp をファイルの中に起動する（テナントとクライアントは乱数）。時計を渡せる。
+  - `Browser`：クッキーを持つブラウザ役。`registerAccount`、`stepUp`。認証器は `test/setup/soft-authenticator.ts` のソフトウェアの認証器（わざと違えた応答も作れる）。
+  - `codeFlow`：企業の役。認可コード、PKCE、private_key_jwt で ID トークンを受け取り、`/oidc/jwks` の鍵で検証する。
+  - E2E（`*.e2e.ts`）は、一時的なクラスタ、鍵サービス、idp を、そのファイルのワーカーの中で起動する（`x-idp-browser.e2e.ts`）。
 - 鍵サービスを使うテストは、`test/setup/keys.ts` を使う。
   - `keysvcConnection(service)`：globalSetup の鍵サービスへの接続。DB を使うテストは、これを使う（監査ログのチェーンを、実行全体で同じ鍵で検証するため）。
   - `rawKeysvcCall`：型を通さない生の要求。攻撃の段で使う。

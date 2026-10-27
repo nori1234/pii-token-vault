@@ -25,7 +25,7 @@
 | `audit` | 監査ログ（ADR 0016） | アプリのロール |
 | `aliases` | 別名の世代 | idp、company-api、`warifu_alias_resolver` |
 | `idp`、`relay`、`company_api` | 各サービスの表（M3 以降）。`relay` には解決関数 | それぞれのサービスだけ |
-| `contacts` | 暗号化した本物のメール（M3 で作る。下） | idp、relay |
+| `contacts` | 暗号化した本物のメール（M3 で作った。下） | idp、relay |
 | `public` | 使わない。PUBLIC の権限をすべて外す | — |
 
 - sender のロールとスキーマは M5 で決める。鍵サービスは DB を使わない（ADR 0013）。BI ツールなどのロールは作らない（CAP-18）。
@@ -37,6 +37,7 @@
 - 全テーブルに ENABLE と FORCE。ポリシーは、ロールを名指しする（PUBLIC 向けのポリシーを作らない）。
 - 境界の値が未設定か空文字なら、`current_tenant_id()` と `current_user_id()` は NULL になり、どのポリシーにも一致しない（閉じる側に倒す）。
 - 列単位の SELECT と INSERT だけを GRANT する。UPDATE、DELETE、TRUNCATE、REFERENCES、TRIGGER は M2 の表では誰にも与えない。
+- M3 の表（idp と contacts。マイグレーション 0004）では、利用者の範囲の行についてだけ、列単位の UPDATE と、表の単位の DELETE（DELETE は列単位で与えられない）を、要る表に限って idp に与える（パスキーの使用の記録と削除、宛先確認の途中のもの、変更前のアドレス）。どれも `user_id = warifu.current_user_id()` のポリシーの中だけで効く。TRUNCATE、REFERENCES、TRIGGER は誰にも与えない。
 - `USING (true)` のポリシーは、解決関数の所有者の `resolver_select` だけ。
 - 一覧は x-rls-fixed の期待の一覧を正とする。表、ポリシー、GRANT を足すときは、同じ PR でその一覧を直す。
 
@@ -47,11 +48,12 @@
 - idp は第1世代だけを、company-api は自分のテナントの第2世代以降だけを書ける（M3・M5 で見直してよい）。アプリのロールは `lookup_mac` を書けるが読めない。
 - `relay.resolve_alias(bytea)` は、最新の世代だけを `(user_id, tenant_id)` で返す。廃番、存在しない、長さが違う、NULL は、どれも同じ0行。所有者は `warifu_alias_resolver`、`search_path` は `pg_catalog, pg_temp` に固定、EXECUTE は `warifu_relay` だけ。relay の表を直接読む権限は与えない。
 
-### 暗号化した本物のメールの置き場所（表は M3 で作る）
+### 暗号化した本物のメールの置き場所（M3 で作った。ADR 0018）
 
-- `contacts.email(user_id uuid PRIMARY KEY, ciphertext bytea NOT NULL, updated_at timestamptz NOT NULL)`。M3 で、一意性の検査（不変条件1(e)）のための照合用の HMAC の列と合わせて作る。
-- idp（`withWarifuUser`）：`INSERT (user_id, ciphertext, updated_at)`、`UPDATE (ciphertext, updated_at)`、`SELECT (user_id, updated_at)`。暗号文の列は読ませない（復号できないので要らない）。
-- relay（`withWarifuUser`。解決関数で利用者 ID を得た後）：`SELECT (user_id, ciphertext)`。
+- `contacts.email(user_id, ciphertext, updated_at)`（現在）、`contacts.email_pending(user_id, ciphertext, code_mac, attempts, expires_at, created_at)`（宛先確認の途中）、`contacts.email_previous(user_id, ciphertext, replaced_at)`（旧アドレスへの知らせのため）。マイグレーション 0004。
+- 一意性の検査（不変条件1(e) の例外）は、P0 ではしない。照合用の HMAC の列も作らない（ADR 0018 の O-13。登録済みかどうかの分岐を作らないため）。
+- idp（`withWarifuUser`）：3つの表の読み書き（列単位）。確認中から現在、現在から変更前への移し替えに SELECT が要るので、暗号文の列も読める。復号の ACL がないので平文にはできない（不変条件3。ADR 0018）。確認コードは `mac(email_verify_code)` だけを置く。
+- relay（`withWarifuUser`。解決関数で利用者 ID を得た後）：3つの表の `SELECT (user_id, ciphertext)`（M4 で使う）。
 - ポリシーはどちらも `user_id = warifu.current_user_id()`。暗号文は `{ field: 'email', user_id }` の文脈に結び付く（ADR 0013）ので、行を入れ替えられても別人のアドレスには届かない。
 
 ### 境界の実装（`withTenant` と `withWarifuUser`）

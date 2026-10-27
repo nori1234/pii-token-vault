@@ -110,8 +110,9 @@ jobs:
     name: e2e（Playwright）
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    # いまの E2E（spikes/passkey）は DB を使わない。E2E で DB が要るようになったら（M3）、
-    # check ジョブと同じ PostgreSQL の手順をここにも足す。
+    # E2E（test/leak/x-idp-browser.e2e.ts）は、一時的な Postgres と鍵サービスと idp を、テストのワーカーの中で起動する（M3）。
+    env:
+      PG_BIN: /usr/lib/postgresql/16/bin
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -140,6 +141,23 @@ jobs:
         # @playwright/test は 1.56.1 に固定している。ブラウザはその版に合うものが入る。
         # --no：node_modules にある版だけを使い、見つからなければ、ネットから別の版を取らずに失敗する。
         run: npx --no playwright install --with-deps chromium
+
+      - name: PostgreSQL 16 のバイナリを確かめる
+        # ubuntu-24.04 のイメージには、ふつう PostgreSQL 16 が入っている（サービスは止まったまま）。
+        # 無いときだけ apt で入れる。システムのクラスタは作らず、サービスも起動しない。
+        run: |
+          if [ ! -x "$PG_BIN/initdb" ]; then
+            sudo install -d /etc/postgresql-common/createcluster.d
+            echo 'create_main_cluster = false' \
+              | sudo tee /etc/postgresql-common/createcluster.d/ci-no-main-cluster.conf > /dev/null
+            printf '#!/bin/sh\nexit 101\n' | sudo tee /usr/sbin/policy-rc.d > /dev/null
+            sudo chmod 0755 /usr/sbin/policy-rc.d
+            sudo apt-get update
+            sudo env DEBIAN_FRONTEND=noninteractive \
+              apt-get install --yes --no-install-recommends postgresql-16
+            sudo rm -f /usr/sbin/policy-rc.d
+          fi
+          "$PG_BIN/initdb" --version
 
       - name: e2e（CDP の仮想認証器）
         run: npm run e2e

@@ -91,7 +91,7 @@ PR を出す前や、迷ったときは、`.claude/skills/principle-review` で�
 npm run lint        # Biome
 npm run typecheck   # tsc --noEmit
 npm test            # Vitest。globalSetup が一時的なクラスタ（scripts/pg-up.ts）と鍵サービス（scripts/keysvc-up.ts）を起動して止める
-npm run e2e         # Playwright。CDP の仮想認証器を使う
+npm run e2e         # Playwright。CDP の仮想認証器を使う。各ファイルが一時的なクラスタ、鍵サービス、idp を自分で起動する
 npm run pg-up       # 一時的なクラスタを手で起動する。接続先を表示し、Ctrl-C で止めて消す
 npm run migrate     # pg-up が表示した接続先と PGDATABASE に、マイグレーションと DB ごとの ACL を流す
 ```
@@ -109,6 +109,7 @@ npm run migrate     # pg-up が表示した接続先と PGDATABASE に、マイ�
 ## 進め方
 
 - マイルストーンごとに、`main` から `claude/mN-<短い名前>` のブランチを切り、`main` へのドラフト PR を出す（前のマイルストーンがマージされてから切る）。
+  - 例外：オーナーの OK があれば、マージを待っている前のマイルストーンのブランチの上に、1段だけ積んでよい。PR の向き先は前のブランチにし、ドラフトのままにする。前がマージされたら、向き先を `main` に変える。前の PR より先にマージしない。前の PR に入った直しは、積んだブランチにマージで取り込む。
 - 仕様（`docs/`）とコードは同じ PR で更新する。接続要件を変えたら、適合テストも同じ PR で直す。
 - 設計判断は、判断したその時に `docs/adr/NNNN-*.md` に書く。
 - P0 の範囲外（plan 10章で P1 とした項目、ADR 0004 で保留した電話）は、先回りして作らない。
@@ -132,7 +133,7 @@ packages/sender       送信サービス（外向きの通信の唯一の出口�
 packages/rp-kit       企業向け SDK と適合テスト
 packages/demo-rp      デモ用の予約サイトと窓口担当者の画面
 test/leak             漏えいシナリオのテスト（書き方は test/leak/README.md）
-test/setup            Vitest の globalSetup と、ワーカーごとの DB
+test/setup            Vitest の globalSetup、ワーカーごとの DB、idp の起動とソフトウェアの認証器
 scripts               開発用のスクリプト（pg-up、keysvc-up、migrate）
 spikes                捨てスパイク。本実装に置き換えたら消す（spikes/README.md）
 ```
