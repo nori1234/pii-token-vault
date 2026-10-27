@@ -25,6 +25,17 @@ const ARC_SIGNED_HEADERS = `DKIM-Signature:${DKIM_SIGNED_HEADERS}`;
 
 export type DkimSign = (canonicalized: Uint8Array) => Promise<Uint8Array>;
 
+export interface SignOptions {
+  /** 署名のドメイン（d=）。テナントごとの relay のサブドメイン、または割符の知らせのドメイン。 */
+  readonly domain: string;
+  /** セレクタ（s=）。 */
+  readonly selector: string;
+  /** 鍵サービスの signDkim。 */
+  readonly sign: DkimSign;
+  /** 署名の時刻（t=）。 */
+  readonly now: Date;
+}
+
 export interface SealOptions {
   /** 署名のドメイン（d=）。テナントごとの relay のサブドメイン。 */
   readonly domain: string;
@@ -57,7 +68,7 @@ async function signLine(
   type: 'DKIM' | 'ARC',
   head: Buffer,
   fieldNames: string,
-  options: SealOptions,
+  options: SignOptions,
   bh: string,
   instance?: number,
 ): Promise<string> {
@@ -102,6 +113,13 @@ async function sealLine(
     { ...tags, b: Buffer.from(signature).toString('base64') },
     true,
   );
+}
+
+/** relay の DKIM で署名するだけ（割符から利用者への知らせ。中継ではないので ARC は付けない）。 */
+export async function signOnly(raw: Buffer, options: SignOptions): Promise<Buffer> {
+  const { head, body: content } = splitMessage(raw);
+  const dkim = await signLine('DKIM', head, DKIM_SIGNED_HEADERS, options, bodyHash(content));
+  return Buffer.concat([Buffer.from(dkim), CRLF, head, CRLF, content]);
 }
 
 /**
