@@ -41,8 +41,11 @@ const FLAG_BE = 0x08;
 const FLAG_BS = 0x10;
 const FLAG_AT = 0x40;
 
+export type SoftAlgorithm = 'ES256' | 'EdDSA' | 'RS256';
+
 export interface SoftCredential {
   readonly id: Uint8Array;
+  readonly alg: SoftAlgorithm;
   readonly privateKey: KeyObject;
   readonly publicKey: KeyObject;
   readonly userHandle: string;
@@ -54,8 +57,14 @@ export interface SoftCredential {
 export interface CreateOverrides {
   /** 'none' 以外にすると、x5c 付きの packed を作る（ADR 0007 の1）。 */
   readonly fmt?: 'none' | 'packed';
-  /** 'EdDSA' にすると、Ed25519 の鍵（COSE -8）を登録しようとする（ADR 0007 の2）。 */
-  readonly alg?: 'ES256' | 'EdDSA';
+  /** 鍵のアルゴリズム。既定は ES256（P-256）。'EdDSA' は Ed25519（COSE -8）、'RS256' は RSA（COSE -257）。 */
+  readonly alg?: SoftAlgorithm;
+  /** ES256 の曲線を差し替える（P-384 の鍵を -7 として登録しようとする。ADR 0012 の決定10）。 */
+  readonly ecCurve?: 'P-256' | 'P-384';
+  /** EdDSA の曲線を差し替える（Ed448 の鍵を -8 として登録しようとする。ADR 0012 の決定10）。 */
+  readonly okpCurve?: 'Ed25519' | 'Ed448';
+  /** RS256 の鍵長（既定は2048。ADR 0012 の決定6）。 */
+  readonly rsaBits?: number;
   readonly uv?: boolean;
   readonly backupEligible?: boolean;
   readonly origin?: string;
@@ -91,26 +100,41 @@ export class SoftAuthenticator {
   create(options: CreationOptions, overrides: CreateOverrides = {}): Record<string, unknown> {
     const rpId = options.rp.id ?? new URL(this.#origin).hostname;
     const alg = overrides.alg ?? 'ES256';
+    const ed448 = overrides.okpCurve === 'Ed448';
+    const p384 = overrides.ecCurve === 'P-384';
     const pair =
       alg === 'EdDSA'
-        ? generateKeyPairSync('ed25519')
-        : generateKeyPairSync('ec', { namedCurve: 'P-256' });
+        ? ed448
+          ? generateKeyPairSync('ed448')
+          : generateKeyPairSync('ed25519')
+        : alg === 'RS256'
+          ? generateKeyPairSync('rsa', { modulusLength: overrides.rsaBits ?? 2048 })
+          : generateKeyPairSync('ec', { namedCurve: p384 ? 'P-384' : 'P-256' });
     const jwk = pair.publicKey.export({ format: 'jwk' });
+    const b = (value: unknown) => Buffer.from(String(value), 'base64url');
+    // COSE の鍵（kty 1=OKP・2=EC2・3=RSA、crv 1=P-256・2=P-384・6=Ed25519・7=Ed448）。
     const coseKey =
       alg === 'EdDSA'
         ? new Map<CborValue, CborValue>([
             [1, 1],
             [3, -8],
-            [-1, 6],
-            [-2, Buffer.from(String(jwk.x), 'base64url')],
+            [-1, ed448 ? 7 : 6],
+            [-2, b(jwk.x)],
           ])
-        : new Map<CborValue, CborValue>([
-            [1, 2],
-            [3, -7],
-            [-1, 1],
-            [-2, Buffer.from(String(jwk.x), 'base64url')],
-            [-3, Buffer.from(String(jwk.y), 'base64url')],
-          ]);
+        : alg === 'RS256'
+          ? new Map<CborValue, CborValue>([
+              [1, 3],
+              [3, -257],
+              [-1, b(jwk.n)],
+              [-2, b(jwk.e)],
+            ])
+          : new Map<CborValue, CborValue>([
+              [1, 2],
+              [3, -7],
+              [-1, p384 ? 2 : 1],
+              [-2, b(jwk.x)],
+              [-3, b(jwk.y)],
+            ]);
     const id = randomBytes(32);
     const backupEligible = overrides.backupEligible ?? true;
     const flags =
@@ -155,17 +179,16 @@ export class SoftAuthenticator {
         ['authData', authData],
       ]),
     );
-    if (alg === 'ES256') {
-      this.credentials.push({
-        id,
-        privateKey: pair.privateKey,
-        publicKey: pair.publicKey,
-        userHandle: options.user.id,
-        rpId,
-        signCount: 0,
-        backupEligible,
-      });
-    }
+    this.credentials.push({
+      id,
+      alg,
+      privateKey: pair.privateKey,
+      publicKey: pair.publicKey,
+      userHandle: options.user.id,
+      rpId,
+      signCount: 0,
+      backupEligible,
+    });
     return {
       id: b64(id),
       rawId: b64(id),
@@ -207,8 +230,9 @@ export class SoftAuthenticator {
         crossOrigin: false,
       }),
     );
+    // EdDSA はダイジェストを指定しない。RS256 は PKCS#1 v1.5（RSA の鍵の既定）。
     const signature = sign(
-      'sha256',
+      credential.alg === 'EdDSA' ? null : 'sha256',
       Buffer.concat([authData, sha256(clientDataJSON)]),
       credential.privateKey,
     );

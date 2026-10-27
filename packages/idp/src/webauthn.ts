@@ -2,7 +2,8 @@
 //
 // @simplewebauthn/server 14.0.3 の手前と後に、次の検査を置く（ADR 0007 の決定1〜6）。
 // 1. attestation は受け取らない：選択肢で 'none' を求め、応答の fmt が none で attStmt が空でなければ、ライブラリに渡さない。
-// 2. アルゴリズムは ES256 と RS256 だけ：[-7, -257] を、選択肢と検証の両方に渡す。
+// 2. アルゴリズムは ES256、EdDSA、RS256 だけ：[-7, -8, -257] を、選択肢と検証の両方に渡す。登録した公開鍵の
+//    種類・曲線・鍵長も確かめる（ES256 は P-256、EdDSA は Ed25519、RS256 は 2048 ビット以上。ADR 0012 の決定6・10）。
 // 3. アカウントは資格情報 ID だけで引く：allowCredentials を出さず、userHandle（= 利用者 ID）の範囲の中で資格情報 ID が
 //    一致するものだけを使う。見つからなければ、ほかの手がかりでは探さない。
 // 4. UV はサーバーで確かめる：requireUserVerification と、結果の userVerified の両方。
@@ -30,12 +31,23 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from '@simplewebauthn/server';
-import { decodeAttestationObject } from '@simplewebauthn/server/helpers';
-import type { NewCredential, StoredCredential } from './repo.ts';
+import { decodeAttestationObject, decodeCredentialPublicKey } from '@simplewebauthn/server/helpers';
+import type { CredentialAlgorithm, NewCredential, StoredCredential } from './repo.ts';
 import type { MacMemoryStore } from './storage.ts';
 
-/** COSE の ES256（-7）と RS256（-257）だけ（不変条件9）。 */
-export const SUPPORTED_ALGORITHM_IDS: readonly number[] = Object.freeze([-7, -257]);
+/**
+ * COSE の ES256（-7）、EdDSA（-8）、RS256（-257）だけ（不変条件9）。選択肢にはこの順で出す
+ * （RS256 は期限があるので最後。ADR 0012 の決定10）。
+ */
+export const SUPPORTED_ALGORITHM_IDS: readonly number[] = Object.freeze([-7, -8, -257]);
+/** RS256 の鍵長の下限（ADR 0012 の決定6）。 */
+export const RSA_MIN_BITS = 2048;
+// COSE の鍵の種類（kty）と曲線（crv）。
+const KTY_OKP = 1;
+const KTY_EC2 = 2;
+const KTY_RSA = 3;
+const CRV_P256 = 1;
+const CRV_ED25519 = 6;
 export const WEBAUTHN_TIMEOUT_MS = 60_000;
 /** チャレンジの有効期限。ブラウザ側の timeout に少しだけ余裕を足す。 */
 const CEREMONY_TTL_SECONDS = 75;
@@ -127,6 +139,48 @@ export function isNoneAttestation(response: unknown): boolean {
   }
 }
 
+/**
+ * 登録した公開鍵（COSE）が、アルゴリズムに合う種類・曲線・鍵長か（不変条件9、ADR 0012 の決定6・10）。
+ * attestation が none の登録では、ライブラリは公開鍵で署名を確かめないので、ここで確かめる。
+ * - ES256 は P-256、EdDSA は Ed25519 の鍵だけ。
+ * - RS256 は 2048 ビット以上。鍵長を返して、記録する。
+ * 合わなければ undefined。
+ */
+export function inspectPublicKey(
+  publicKey: Uint8Array,
+): { readonly alg: CredentialAlgorithm; readonly rsaBits: number | null } | undefined {
+  let key: ReadonlyMap<number, unknown>;
+  try {
+    key = decodeCredentialPublicKey(new Uint8Array(publicKey)) as unknown as ReadonlyMap<
+      number,
+      unknown
+    >;
+  } catch {
+    return undefined;
+  }
+  const kty = key.get(1);
+  const alg = key.get(3);
+  if (alg === -7 && kty === KTY_EC2 && key.get(-1) === CRV_P256) return { alg: -7, rsaBits: null };
+  if (alg === -8 && kty === KTY_OKP && key.get(-1) === CRV_ED25519) {
+    return { alg: -8, rsaBits: null };
+  }
+  if (alg === -257 && kty === KTY_RSA) {
+    const modulus = key.get(-1);
+    if (!(modulus instanceof Uint8Array)) return undefined;
+    const bits = bitLength(modulus);
+    return bits >= RSA_MIN_BITS ? { alg: -257, rsaBits: bits } : undefined;
+  }
+  return undefined;
+}
+
+/** 符号なしの整数（ビッグエンディアン）のビット数。先頭の0のバイトは数えない。 */
+function bitLength(bytes: Uint8Array): number {
+  let i = 0;
+  while (i < bytes.length && bytes[i] === 0) i += 1;
+  if (i === bytes.length) return 0;
+  return (bytes.length - i - 1) * 8 + (32 - Math.clz32(bytes[i] ?? 0));
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -213,13 +267,18 @@ export class Ceremonies {
       if (!result.verified || !result.registrationInfo.userVerified) return FAILED;
       const info = result.registrationInfo;
       if (info.fmt !== 'none') return FAILED;
+      const publicKey = new Uint8Array(info.credential.publicKey);
+      const key = inspectPublicKey(publicKey);
+      if (key === undefined) return FAILED;
       const credentialId = fromBase64Url(info.credential.id);
       return {
         ok: true,
         userId: ceremony.userId,
         credential: {
           credentialId,
-          publicKey: new Uint8Array(info.credential.publicKey),
+          publicKey,
+          alg: key.alg,
+          rsaBits: key.rsaBits,
           signCount: info.credential.counter,
           transports: (info.credential.transports ?? []).filter((t) => TRANSPORTS.has(t)),
           // AAGUID は保存しない（ADR 0007 の6）。

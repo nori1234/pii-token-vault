@@ -13,9 +13,15 @@ import {
   PASSKEY_REMOVED,
 } from './audit-events.ts';
 
+/** WebAuthn で受け付ける COSE のアルゴリズム：ES256、EdDSA（Ed25519）、RS256（不変条件9）。 */
+export type CredentialAlgorithm = -7 | -8 | -257;
+
 export interface NewCredential {
   readonly credentialId: Uint8Array;
   readonly publicKey: Uint8Array;
+  readonly alg: CredentialAlgorithm;
+  /** RS256 の鍵長（ADR 0012 の決定6）。ほかのアルゴリズムでは null。 */
+  readonly rsaBits: number | null;
   readonly signCount: number;
   readonly transports: readonly string[];
   readonly backupEligible: boolean;
@@ -32,6 +38,8 @@ interface CredentialRow {
   credential_id: Uint8Array;
   user_id: string;
   public_key: Uint8Array;
+  alg: number;
+  rsa_bits: number | null;
   sign_count: string;
   transports: string[];
   backup_eligible: boolean;
@@ -45,6 +53,8 @@ function toCredential(row: CredentialRow): StoredCredential {
     credentialId: new Uint8Array(row.credential_id),
     userId: row.user_id as WarifuUserId,
     publicKey: new Uint8Array(row.public_key),
+    alg: row.alg as CredentialAlgorithm,
+    rsaBits: row.rsa_bits,
     signCount: Number(row.sign_count),
     transports: row.transports,
     backupEligible: row.backup_eligible,
@@ -63,9 +73,10 @@ export interface RepoDeps {
 async function insertCredential(tx: Tx, userId: WarifuUserId, c: NewCredential): Promise<void> {
   await tx.execute(
     sql`INSERT INTO idp.credentials
-          (credential_id, user_id, public_key, sign_count, transports, backup_eligible, backed_up)
-        VALUES (${c.credentialId}, ${userId}, ${c.publicKey}, ${c.signCount}, ${[...c.transports]},
-                ${c.backupEligible}, ${c.backedUp})`,
+          (credential_id, user_id, public_key, alg, rsa_bits, sign_count, transports, backup_eligible,
+           backed_up)
+        VALUES (${c.credentialId}, ${userId}, ${c.publicKey}, ${c.alg}, ${c.rsaBits}, ${c.signCount},
+                ${[...c.transports]}, ${c.backupEligible}, ${c.backedUp})`,
   );
 }
 
@@ -100,8 +111,8 @@ export async function findCredential(
 ): Promise<StoredCredential | undefined> {
   return deps.db.withWarifuUser(userId, async (tx) => {
     const [row] = await tx.query<CredentialRow>(
-      sql`SELECT credential_id, user_id, public_key, sign_count, transports, backup_eligible, backed_up,
-                 created_at, last_used_at
+      sql`SELECT credential_id, user_id, public_key, alg, rsa_bits, sign_count, transports, backup_eligible,
+                 backed_up, created_at, last_used_at
             FROM idp.credentials WHERE credential_id = ${credentialId}`,
     );
     return row === undefined ? undefined : toCredential(row);
@@ -130,8 +141,8 @@ export async function listCredentials(
 ): Promise<StoredCredential[]> {
   return deps.db.withWarifuUser(userId, async (tx) => {
     const rows = await tx.query<CredentialRow>(
-      sql`SELECT credential_id, user_id, public_key, sign_count, transports, backup_eligible, backed_up,
-                 created_at, last_used_at
+      sql`SELECT credential_id, user_id, public_key, alg, rsa_bits, sign_count, transports, backup_eligible,
+                 backed_up, created_at, last_used_at
             FROM idp.credentials ORDER BY created_at, credential_id`,
     );
     return rows.map(toCredential);

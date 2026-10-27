@@ -17,13 +17,17 @@ CREATE TABLE idp.credentials (
   credential_id bytea PRIMARY KEY CHECK (octet_length(credential_id) BETWEEN 16 AND 1023),
   user_id uuid NOT NULL REFERENCES idp.users (user_id),
   public_key bytea NOT NULL CHECK (octet_length(public_key) BETWEEN 1 AND 2048),
+  -- COSE のアルゴリズム（不変条件9）と、RS256 の鍵長（ADR 0012 の決定6。2048 ビット未満は登録で拒否する）。
+  alg smallint NOT NULL CHECK (alg IN (-7, -8, -257)),
+  rsa_bits integer CHECK (rsa_bits >= 2048),
   sign_count bigint NOT NULL CHECK (sign_count >= 0),
   transports text[] NOT NULL DEFAULT '{}'::text[]
     CHECK (transports <@ ARRAY['ble', 'cable', 'hybrid', 'internal', 'nfc', 'smart-card', 'usb']::text[]),
   backup_eligible boolean NOT NULL,
   backed_up boolean NOT NULL,
   created_at timestamptz NOT NULL DEFAULT pg_catalog.now(),
-  last_used_at timestamptz
+  last_used_at timestamptz,
+  CHECK ((alg = -257) = (rsa_bits IS NOT NULL))
 );
 CREATE INDEX credentials_user_id ON idp.credentials (user_id);
 
@@ -127,9 +131,10 @@ GRANT USAGE ON SCHEMA contacts TO warifu_idp, warifu_relay;
 
 -- 列単位の権限。DELETE は表の単位でしか与えられないので、要る表にだけ与える（x-rls-fixed で固定する）。
 GRANT SELECT (user_id, created_at), INSERT (user_id) ON idp.users TO warifu_idp;
-GRANT SELECT (credential_id, user_id, public_key, sign_count, transports, backup_eligible, backed_up,
-              created_at, last_used_at),
-      INSERT (credential_id, user_id, public_key, sign_count, transports, backup_eligible, backed_up),
+GRANT SELECT (credential_id, user_id, public_key, alg, rsa_bits, sign_count, transports, backup_eligible,
+              backed_up, created_at, last_used_at),
+      INSERT (credential_id, user_id, public_key, alg, rsa_bits, sign_count, transports, backup_eligible,
+              backed_up),
       UPDATE (sign_count, backed_up, last_used_at)
   ON idp.credentials TO warifu_idp;
 GRANT DELETE ON idp.credentials TO warifu_idp;

@@ -1,4 +1,5 @@
 // パスキーの検証で、ライブラリの手前と後に置く検査（ADR 0007 の決定1〜5、不変条件1(b)・7・9）。
+// 受け付けるアルゴリズムと鍵の検査（ADR 0012 の決定6・10）は、x-webauthn-algorithms.test.ts で確かめる。
 // ソフトウェアの認証器（test/setup/soft-authenticator.ts）で、わざと違えた応答を作って確かめる。
 
 import { readFileSync } from 'node:fs';
@@ -69,31 +70,16 @@ describe('漏えい：パスキーの検証の守り（ADR 0007）', () => {
     expect((await browser.get('/api/me')).status).toBe(401);
   });
 
-  it('2：選択肢のアルゴリズムは ES256 と RS256 だけで、EdDSA の鍵の登録は拒否する', async () => {
-    // 攻撃者が持っている情報：なし（自分の認証器の応答を作れる）
-    // 試す経路：登録の選択肢の pubKeyCredParams を読む。Ed25519 の鍵（COSE -8）で登録の応答を作って送る
-    // 期待する結果：選択肢は [-7, -257] だけ。EdDSA の登録は 400 { error: 'failed' }
-    // plan 11章：テスト8（ライブラリに渡すアルゴリズムの設定）
-    const browser = new Browser(t.origin);
-    const options = await browser.post('/api/register/options');
-    const params = (options.json.options as { pubKeyCredParams: { alg: number }[] })
-      .pubKeyCredParams;
-    expect(params.map((p) => p.alg)).toEqual([-7, -257]);
-    const result = await registerWith(browser, { alg: 'EdDSA' });
-    expect(result.status).toBe(400);
-    expect(result.json).toEqual({ error: 'failed' });
-  });
-
   it('2：同じアルゴリズムの一覧を、選択肢と検証の両方に渡している（片方だけに渡していない）', () => {
-    // 攻撃者が持っている情報：なし（静的な固定。検証の側に渡し忘れると、ライブラリの既定（EdDSA を含む）で検証される）
+    // 攻撃者が持っている情報：なし（静的な固定。検証の側に渡し忘れると、ライブラリの既定（PQC に対応した実行環境では ML-DSA-44 を含む）で検証される）
     // 試す経路：packages/idp/src/webauthn.ts の、generateRegistrationOptions と verifyRegistrationResponse の呼び出しを読む
-    // 期待する結果：SUPPORTED_ALGORITHM_IDS は [-7, -257]。supportedAlgorithmIDs の指定はちょうど2か所で、どちらも同じ定数
+    // 期待する結果：SUPPORTED_ALGORITHM_IDS は [-7, -8, -257]。supportedAlgorithmIDs の指定はちょうど2か所で、どちらも同じ定数
     // plan 11章：テスト8（ライブラリに渡すアルゴリズムの設定）
     const code = stripComments(
       readFileSync(join(REPO_ROOT, 'packages/idp/src/webauthn.ts'), 'utf8'),
     );
     expect(code).toMatch(
-      /SUPPORTED_ALGORITHM_IDS: readonly number\[\] = Object\.freeze\(\[-7, -257\]\)/,
+      /SUPPORTED_ALGORITHM_IDS: readonly number\[\] = Object\.freeze\(\[-7, -8, -257\]\)/,
     );
     expect(code.match(/supportedAlgorithmIDs:/g)).toHaveLength(2);
     expect(code.match(/supportedAlgorithmIDs: \[\.\.\.SUPPORTED_ALGORITHM_IDS\]/g)).toHaveLength(2);

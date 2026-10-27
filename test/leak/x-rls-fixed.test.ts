@@ -63,21 +63,25 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
   'idp.credentials': {
     warifu_idp: {
       INSERT: [
+        'alg',
         'backed_up',
         'backup_eligible',
         'credential_id',
         'public_key',
+        'rsa_bits',
         'sign_count',
         'transports',
         'user_id',
       ],
       SELECT: [
+        'alg',
         'backed_up',
         'backup_eligible',
         'created_at',
         'credential_id',
         'last_used_at',
         'public_key',
+        'rsa_bits',
         'sign_count',
         'transports',
         'user_id',

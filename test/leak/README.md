@@ -24,6 +24,7 @@ M3 で、idp のテストを足した（ADR 0018）。
 | `t04-pairwise` | テスト4の前半（A社とB社で sub と別名が違い、同じテナントの2つのクライアントで sub が同じ。企業に渡る値の一覧。別名から relay の解決関数で戻ること） |
 | `t10-email-registration` | テスト10（メールの登録の応答が、登録済みかどうかで変わらない）。宛先確認、DB に暗号文だけが残ること、試行の上限、旧アドレスへの知らせ、step-up |
 | `x-webauthn-guards` | ADR 0007 の決定1〜5（attestation、アルゴリズム、userHandle、UV、理由を出さない）とチャレンジの結び付き |
+| `x-webauthn-algorithms` | 受け付けるアルゴリズム（ES256、EdDSA、RS256）と、登録した公開鍵の種類・曲線・RSA の鍵長（ADR 0012 の決定6・10） |
 | `x-idp-oidc` | discovery の方式、step-up（max_age=0、prompt=login）、受け付けない項目、PKCE、クライアント認証、接続しない、別のテナントの同意 |
 | `x-idp-routes` | idp のルート一覧、Host と Origin、CSP と Trusted Types、PWA のクッキー |
 | `x-idp-passkeys` | パスキーの追加と削除の step-up、削除でセッションが消えること、最後の1つは消せないこと |
