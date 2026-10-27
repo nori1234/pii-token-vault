@@ -161,7 +161,7 @@
 | 保存 | AES-256-GCM（IV は96ビットの乱数） |
 | MAC と照合用の索引（Message-ID などの「ハッシュ」も含む） | HMAC-SHA-256 |
 | JWS（ID トークン、SET、操作ごとの承認、テナントの JWT、企業の client assertion の検証） | ES256 だけ。oidc-provider の設定で固定する |
-| WebAuthn | ES256 と RS256 だけを受け付ける。それ以外は登録時に拒否する |
+| WebAuthn | ES256、EdDSA（曲線は Ed25519）、RS256 だけを受け付ける。それ以外は登録時に拒否する。RS256 は、登録のときに RSA の鍵長を確かめて記録し、2048 ビット未満は拒否する（ADR 0012） |
 | プロトコルで決まる例外（CRYPTREC への掲載を問わない） | Web Push（RFC 8291、VAPID は ES256）。DKIM と ARC の署名（rsa-sha256）。受け取ったメールの DKIM の検証（rsa-sha256 と ed25519-sha256。rsa-sha1 は不合格） |
 
 ## 7. 平文で扱ってよいもの
