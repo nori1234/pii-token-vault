@@ -5,8 +5,9 @@
 // - ヘッダーの encoded-word（RFC 2047）と、パラメータの %xx（RFC 2231）を戻す。
 // - HTML の文字参照（数値と、アドレスに使う記号の名前）を戻し、タグを除いたものも見る。URL の %xx を戻したものも見る。
 // - NFKC で全角を半角にし、書式の文字（ゼロ幅の空白、ソフトハイフンなど）を除き、大文字と小文字を区別しない。
-// 中身を確かめられない部分（text/* と multipart/* と message/rfc822 以外の形式、知らない文字コードや転送符号化、
-// HTML の中の data: URI、境界のない multipart、深すぎる入れ子、多すぎる部分）があれば、確かめられないとして扱う。
+// 中身を確かめられない部分（text/* と multipart/* と message/rfc822 以外の形式、添付ファイル（attachment の指定か、
+// ファイル名の付いた部分。形式によらない）、知らない文字コードや転送符号化、HTML の中の data: URI、境界のない
+// multipart、終わりの境界のない multipart、深すぎる入れ子、多すぎる部分）があれば、確かめられないとして扱う。
 // 利用者が意図して崩した書き方（「at」と書く、画像にする）は、検出の対象にしない（ADR 0021 の残るリスク）。
 
 import {
@@ -201,20 +202,40 @@ function transferDecoded(body: Buffer, headers: readonly HeaderField[]): Buffer 
   }
 }
 
+/** 部分に分ける。始まりの境界がない、終わりの境界がない（途中で切れた）ものは、確かめられないとして扱う。 */
 function splitParts(body: Buffer, boundary: string): Buffer[] {
   const lines = body.toString('latin1').split('\r\n');
   const parts: Buffer[] = [];
   let current: string[] | undefined;
+  let closed = false;
   for (const line of lines) {
     const trimmed = line.replace(/[ \t]+$/, '');
     if (trimmed === `--${boundary}` || trimmed === `--${boundary}--`) {
       if (current !== undefined) parts.push(Buffer.from(current.join('\r\n'), 'latin1'));
-      current = trimmed === `--${boundary}` ? [] : undefined;
+      closed = trimmed !== `--${boundary}`;
+      current = closed ? undefined : [];
       continue;
     }
     current?.push(line);
   }
+  if (!closed || parts.length === 0) throw new Uninspectable();
   return parts;
+}
+
+/** 添付ファイルか（attachment の指定、または部分にファイル名が付いている）。形式によらず差し戻す（O-27）。 */
+function isAttachment(headers: readonly HeaderField[]): boolean {
+  const cd = fieldsNamed(headers, 'content-disposition')[0];
+  if (cd !== undefined) {
+    const { type, params } = headerParameters(headerValue(cd));
+    if (type === 'attachment' || [...params.keys()].some((k) => k.startsWith('filename'))) {
+      return true;
+    }
+  }
+  const ct = fieldsNamed(headers, 'content-type')[0];
+  return (
+    ct !== undefined &&
+    [...headerParameters(headerValue(ct)).params.keys()].some((k) => k.startsWith('name'))
+  );
 }
 
 function parsePart(raw: Buffer): ParsedMessage {
@@ -235,6 +256,7 @@ function inspectEntity(
   if (depth > MAX_DEPTH || finder.parts > MAX_PARTS) throw new Uninspectable();
   // 前置きと後置き、部分のヘッダーも企業へ届くので、生のまま一度見る。
   finder.bytes(body);
+  if (isAttachment(headers)) throw new Uninspectable();
   const ct = fieldsNamed(headers, 'content-type')[0];
   const { type, params } = headerParameters(ct === undefined ? 'text/plain' : headerValue(ct));
   if (type.startsWith('multipart/')) {

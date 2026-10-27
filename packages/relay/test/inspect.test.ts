@@ -63,4 +63,29 @@ describe('返信の検査（ADR 0021）', () => {
     const html = '<p>R&amp;D: metadata: none <a href="https://company.example/a?b=c">x</a></p>';
     expect(inspectReply([], message('text/html; charset=utf-8', html), ADDRESS)).toBe('clean');
   });
+
+  it('終わりの境界がない multipart は、最後の部分を含めて確かめられないとして扱う', () => {
+    const hidden = Buffer.from(ADDRESS).toString('base64');
+    const truncated = `--b\r\nContent-Type: text/plain\r\n\r\nhi\r\n--b\r\nContent-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\n\r\n${hidden}\r\n`;
+    expect(inspectReply([], message('multipart/mixed; boundary="b"', truncated), ADDRESS)).toBe(
+      'uninspectable',
+    );
+    const noDelimiter = 'hi\r\n';
+    expect(inspectReply([], message('multipart/mixed; boundary="b"', noDelimiter), ADDRESS)).toBe(
+      'uninspectable',
+    );
+  });
+
+  it('添付ファイル（attachment の指定か、ファイル名の付いた部分）は、文字の形式でも確かめられないとして扱う', () => {
+    for (const headers of [
+      'Content-Type: text/plain\r\nContent-Disposition: attachment',
+      'Content-Type: text/plain\r\nContent-Disposition: inline; filename="memo.txt"',
+      'Content-Type: text/plain; name="memo.txt"',
+    ]) {
+      const body = `--b\r\nContent-Type: text/plain\r\n\r\nhi\r\n--b\r\n${headers}\r\n\r\nmemo\r\n--b--\r\n`;
+      expect(inspectReply([], message('multipart/mixed; boundary="b"', body), ADDRESS)).toBe(
+        'uninspectable',
+      );
+    }
+  });
 });

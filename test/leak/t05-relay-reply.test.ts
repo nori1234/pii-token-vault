@@ -503,6 +503,37 @@ describe('漏えい：返信の中継（plan 11章 テスト5）', () => {
       () => ({ contentHeaders: ['Content-Type: multipart/mixed'], body: 'x\r\n' }),
     ],
     [
+      '終わりの境界がない multipart（最後の部分に base64 の本物のアドレス）',
+      () => {
+        const boundary = `b${randomBytes(6).toString('hex')}`;
+        return {
+          contentHeaders: [`Content-Type: multipart/mixed; boundary="${boundary}"`],
+          body: [
+            `--${boundary}`,
+            ...plainPart(),
+            `--${boundary}`,
+            'Content-Type: text/plain; charset=utf-8',
+            'Content-Transfer-Encoding: base64',
+            '',
+            base64Lines(Buffer.from(`連絡先：${user.email}`)),
+          ].join('\r\n'),
+        };
+      },
+    ],
+    [
+      '文字の添付ファイル（attachment）',
+      () =>
+        multipart('mixed', [
+          plainPart(),
+          [
+            'Content-Type: text/plain; charset=utf-8',
+            'Content-Disposition: attachment; filename="memo.txt"',
+            '',
+            'メモです。',
+          ],
+        ]),
+    ],
+    [
       '件名の知らない文字コードの encoded-word',
       () => ({ subject: 'Re: =?x-unknown-charset?B?YWJj?=' }),
     ],
