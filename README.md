@@ -86,12 +86,13 @@
 
 - **Node 22.18 以上**と npm。`.ts` のファイルは、ビルドせずに Node の型の除去（type stripping）でそのまま動かします。
 - **Postgres 16 のバイナリ**。既定では `/usr/lib/postgresql/16/bin` を使います。別の場所にあるときは、環境変数 `PG_BIN` で指定します。システムのクラスタ（5432 番）は使いません。
-- **Playwright 用の Chromium**。`npx playwright install --with-deps chromium` で入れます（ブラウザがすでに入っている環境では不要です）。`@playwright/test` は 1.56.1 に固定しています。
+- **Playwright 用の Chromium**。下の「コマンド」のとおり、`npm ci` の後に入れます（ブラウザがすでに入っている環境では不要です）。`@playwright/test` は 1.56.1 に固定しています。
 
 ### コマンド
 
 ```sh
 npm ci
+npx --no playwright install --with-deps chromium   # 初回だけ。--no で、npm ci で入れた版だけを使う
 npm run lint        # Biome。不変条件7と9に反する import も止める
 npm run typecheck   # tsc --noEmit
 npm test            # Vitest（一時的な Postgres と鍵サービスを自動で起動して止める）
