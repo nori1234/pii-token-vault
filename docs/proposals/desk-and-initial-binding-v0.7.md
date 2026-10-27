@@ -2,9 +2,9 @@
 
 作成日：2026-10-22。更新日：2026-10-27。状態：共有された判断を反映した文書案。文書PRへの反映・実装はまだ行っていない。v0.1〜v0.6は履歴として残す。指定されたレビュー全文はこの環境に見つからず、この版は会話に記載された指摘を反映する。
 
-2026-10-27時点の公開mainの確認基準は`29debc824db7cbed6181366be5534d00a0b6af59`。PR #25は未マージ、#24・#26はmainへマージ済み。v0.5までの基準`d7fd5be1eee2283d3258f004378329972d8fbcd9`から更新した。現行mainは引き続き窓口をCIBAとするため、この案を解釈だけで実装へ適用しない。
+2026-10-27時点の公開mainの確認基準は`b7f7ae9bcc4b3b99af59a6c535fa11706c03a313`。PR #24・#25・#26はmainへマージ済み。v0.5までの基準`d7fd5be1eee2283d3258f004378329972d8fbcd9`から更新した。現行mainは引き続き窓口をCIBAとするため、この案を解釈だけで実装へ適用しない。
 
-**共有された判断：窓口は操作別step-upへ一本化し、初回紐付けは適格な旧パスキー等と割符の操作別承認を組み合わせる案(a)を採る。パスワードによる案(b)は採らない。提示済みの数値は、根拠のない仮置きとして扱う。** P0の書き込み範囲など、§0に示す4点は引き続きオーナー確認待ちとする。
+**共有された判断：窓口は操作別step-upへ一本化し、初回紐付けは適格な旧パスキーまたは FIDO2 の資格情報と割符の操作別承認を組み合わせる案(a)を採る。パスワードによる案(b)は採らない。提示済みの数値は、根拠のない仮置きとして扱う。** P0の書き込み範囲など、§0に示す4点は引き続きオーナー確認待ちとする。
 
 ## 0. 判断とレビューへの回答
 
@@ -263,7 +263,7 @@ company-apiは署名・issuer・audience・期限・クライアントとテナ�
 
 単に「暗号化して保存する」と書いて、idpやsenderへ新しい復号権限を与えない。不変条件3と能力表では、復号権限を持つのはrelayだけである。上の再導出方式に必要なMAC用途・ACL・鍵の版管理を文書で決め、保留中の再送に必要な鍵を先に破棄しない。別の可逆な保存方式が必要なら、その能力変更を別途明示して判断する。保存形式の未決定を、平文保存や揮発性キューでの代替の理由にはしない。
 
-**ログは許可リスト方式を維持する。** 確認した公開PR #25のADR 0017と`packages/warifu-core/src/log/redact.ts`は、許可された名前と値の形だけを出す方式である。「伏せ字の一覧に4項目追加」だけで対応済みとはしない。新しい値と操作確認画面のデータ・`authorization_details`を許可リストへ足さず、ログへの入力は固定した事象・理由コードと無関係な診断用IDに限定する。
+**ログは許可リスト方式を維持する。** mainのADR 0017と`packages/warifu-core/src/log/redact.ts`は、許可された名前と値の形だけを出す方式である。「伏せ字の一覧に4項目追加」だけで対応済みとはしない。新しい値と操作確認画面のデータ・`authorization_details`を許可リストへ足さず、ログへの入力は固定した事象・理由コードと無関係な診断用IDに限定する。
 
 現状の汎用`reason`・`target`等は、識別子の形をした秘密値を通しうる。新しい経路では、単なる文字種の検査だけに頼らず、出力可能なコードを列挙し、`reqId`や数値の`count`にも業務IDや受付番号を転用しない。規則とシリアライザはwarifu-coreに集約する。oidc-providerのモデル・フック・adapter・例外、HTTP本文、監査、ジョブの失敗記録、外部のエラー報告まで確認し、共通ロガーを通らないデバッグ出力を有効にしない。受け入れテストでは通常・拒否・失敗・再送の各経路に目印の値を入れ、DB・ログ・キュー・エラー報告に原値が出ないことを確かめる。
 
@@ -389,7 +389,7 @@ pending_link / awaiting_final_confirmation
 
 **これはCLAUDE.mdの不変条件1(a)の変更である。** 会話で限定追加の判断が共有された。文書PRに記録し、現行文書に反映する前に実装しない。 現行のPRN-10〜13とRP-02〜04の解釈だけで、旧企業のパスキー等を新たな確認根拠として実装しない。ADR 0010の経路内の例外も、紐付けとsubの扱いにはそのまま流用できない。
 
-[CLAUDE.md](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/CLAUDE.md)には「破る必要がありそうなら、実装せずに止まってオーナーに確認する」とある。不変条件とplanの食い違いについても「文書を直すPRを先に出す」と定める。本件では、新ADRとCLAUDE.md・plan・仕様書・レビュー基準の変更を文書PRにまとめ、共有された判断を記録してから実装へ進む。会員ごとの追加条件など4点は別途オーナー確認待ちである。
+[CLAUDE.md](https://github.com/nori1234/pii-token-vault/blob/b7f7ae9bcc4b3b99af59a6c535fa11706c03a313/CLAUDE.md)には「破る必要がありそうなら、実装せずに止まってオーナーに確認する」とある。不変条件とplanの食い違いについても「文書を直すPRを先に出す」と定める。本件では、新ADRとCLAUDE.md・plan・仕様書・レビュー基準の変更を文書PRにまとめ、共有された判断を記録してから実装へ進む。会員ごとの追加条件など4点は別途オーナー確認待ちである。
 
 新ADRの決定文として、次を提案する。公開PR #24で0013〜0017、#25で0018が使われているため、今回は0019以降を候補とする。公開時に衝突を再確認する。公開PR #26でmainに入った0012も再利用しない。
 
@@ -506,14 +506,14 @@ ADR 0019の決定文案：
 
 ## 6. 確認した参照元
 
-2026-10-27にmainのコミット`29debc824db7cbed6181366be5534d00a0b6af59`を確認。以下の公開PRの状態はこの確認時点のもの。採用判断とmainへのマージを区別する。
+2026-10-27にmainのコミット`b7f7ae9bcc4b3b99af59a6c535fa11706c03a313`を確認。以下の公開PRの状態はこの確認時点のもの。採用判断とmainへのマージを区別する。
 
-- [実装計画](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/docs/plan.md)：3-1の操作別承認とCIBA、10章のP0とM7、11章のテスト、企業の認証方式。
-- [CLAUDE.md](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/CLAUDE.md)、[RP接続要件](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/docs/spec/02-rp-requirements.md)、[DESIGN.md](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/DESIGN.md)：不変条件、RP-20〜28・73、画面と警告文。
-- [ADR 0010](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/docs/adr/0010-staged-participation.md)：移行中の参加。初回移行の証明方法と本案の会員別追加条件は別判断。
-- [公開PR #26](https://github.com/nori1234/pii-token-vault/pull/26)、[ADR 0012](https://github.com/nori1234/pii-token-vault/blob/29debc824db7cbed6181366be5534d00a0b6af59/docs/adr/0012-primary-source-review.md)：mainにマージ済み。
+- [実装計画](https://github.com/nori1234/pii-token-vault/blob/b7f7ae9bcc4b3b99af59a6c535fa11706c03a313/docs/plan.md)：3-1の操作別承認とCIBA、10章のP0とM7、11章のテスト、企業の認証方式。
+- [CLAUDE.md](https://github.com/nori1234/pii-token-vault/blob/b7f7ae9bcc4b3b99af59a6c535fa11706c03a313/CLAUDE.md)、[RP接続要件](https://github.com/nori1234/pii-token-vault/blob/b7f7ae9bcc4b3b99af59a6c535fa11706c03a313/docs/spec/02-rp-requirements.md)、[DESIGN.md](https://github.com/nori1234/pii-token-vault/blob/b7f7ae9bcc4b3b99af59a6c535fa11706c03a313/DESIGN.md)：不変条件、RP-20〜28・73、画面と警告文。
+- [ADR 0010](https://github.com/nori1234/pii-token-vault/blob/b7f7ae9bcc4b3b99af59a6c535fa11706c03a313/docs/adr/0010-staged-participation.md)：移行中の参加。初回移行の証明方法と本案の会員別追加条件は別判断。
+- [公開PR #26](https://github.com/nori1234/pii-token-vault/pull/26)、[ADR 0012](https://github.com/nori1234/pii-token-vault/blob/b7f7ae9bcc4b3b99af59a6c535fa11706c03a313/docs/adr/0012-primary-source-review.md)：mainにマージ済み。
 - [公開PR #24](https://github.com/nori1234/pii-token-vault/pull/24)：mainにマージ済み。ADR 0013〜0017を使用。
-- [公開PR #25](https://github.com/nori1234/pii-token-vault/pull/25)：未マージ、headはf8339828a8449e0afa892f5641cc146f2f756b6c。0018を使用。[ADR 0017](https://github.com/nori1234/pii-token-vault/blob/f8339828a8449e0afa892f5641cc146f2f756b6c/docs/adr/0017-log-allowlist.md)と[ロガー](https://github.com/nori1234/pii-token-vault/blob/f8339828a8449e0afa892f5641cc146f2f756b6c/packages/warifu-core/src/log/redact.ts)の許可リスト、[能力表](https://github.com/nori1234/pii-token-vault/blob/f8339828a8449e0afa892f5641cc146f2f756b6c/docs/spec/04-capabilities.md)の保存・鍵境界を参照。
+- [公開PR #25](https://github.com/nori1234/pii-token-vault/pull/25)：mainにマージ済み。ADR 0018を使用。[ADR 0017](https://github.com/nori1234/pii-token-vault/blob/b7f7ae9bcc4b3b99af59a6c535fa11706c03a313/docs/adr/0017-log-allowlist.md)と[ロガー](https://github.com/nori1234/pii-token-vault/blob/b7f7ae9bcc4b3b99af59a6c535fa11706c03a313/packages/warifu-core/src/log/redact.ts)の許可リスト、[能力表](https://github.com/nori1234/pii-token-vault/blob/b7f7ae9bcc4b3b99af59a6c535fa11706c03a313/docs/spec/04-capabilities.md)の保存・鍵境界を参照。
 - [OIDC Core](https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest)、[RFC 9396](https://www.rfc-editor.org/rfc/rfc9396.html#section-3)：認可要求とRAR。操作への結び付けと承認内容は本案の製品プロファイル。
 - [RFC 7523 §2.2](https://www.rfc-editor.org/rfc/rfc7523.html#section-2.2)：JWTによるクライアント認証。company-apiの呼び出しは現行RP-73のトークン利用に合わせる。
 - [RFC 8417 §2.2](https://www.rfc-editor.org/rfc/rfc8417.html#section-2.2)、[RFC 8935 §2](https://www.rfc-editor.org/rfc/rfc8935.html#section-2)：SETと配送応答。取消の業務完了報告は別の製品API。

@@ -14,7 +14,7 @@ oidc-provider 9.12.2 には、`ExternalSigningKey`（`keyObject()` と `sign(dat
 - ES256 の ID トークンの署名の鍵（`id_token`）を、鍵サービスの中で作り、`sign` と `public_keys` の2つの操作を足す。呼べるのは idp だけ（ADR 0013 の能力の表）。
   - `sign`：`{ keyId: 'id_token', message }` → `{ kid, signature }`。署名は JWS の形（ieee-p1363、64バイト）。入力は 8192 バイトまで。
   - `public_keys`：`{ keyId: 'id_token' }` → `{ keys: Es256PublicJwk[] }`。秘密鍵の項目は持たない。入れ替えの間は、有効な鍵をすべて返す。
-- M3 で、oidc-provider の `ExternalSigningKey` を継いだクラスで、`sign` を鍵サービスに、`keyObject()` を `public_keys` から作る。実験的な機能に頼るので、oidc-provider の版を固定し、M3 のテストで署名の往復を確かめる。
+- M3 で、oidc-provider の `ExternalSigningKey` を継いだクラスで、`sign` を鍵サービスに、公開鍵の座標を `public_keys` から返す（ADR 0018。`keyObject()` は node:crypto が要るので使わない）。実験的な機能に頼るので、oidc-provider の版を固定し、M3 のテストで署名の往復を確かめる。
 - SET（M5）、操作ごとの承認（M7）、テナントの JWT（M5）の鍵は、同じ操作の keyId として、各マイルストーンで足す。DKIM と ARC の鍵（rsa-sha256）の置き場所は M4 で決める。
 - 入れ替え：新しい鍵を作り、古い公開鍵を、発行済みのトークンの期限まで `public_keys` に残す。
 
@@ -26,7 +26,7 @@ oidc-provider 9.12.2 には、`ExternalSigningKey`（`keyObject()` と `sign(dat
 ## 結果
 
 - t08-crypto-allowlist と t08-key-client-surface で、署名が64バイトで、公開鍵で検証できることを確かめる。
-- M3 で、oidc-provider の実験的な機能が使えないと分かったら、idp が起動時にメモリの中で作る鍵に切り替える。その場合は CAP-04 の例外になるので、改めてオーナーに確認する。
+- M3 で、oidc-provider の実験的な機能が使えないと分かったら、idp が起動時にメモリの中で作る鍵に切り替える。その場合は CAP-04 の例外になるので、改めてオーナーに確認する。→ M3 で使えることを確かめた（ADR 0018。`test/leak/t04-pairwise` と `x-idp-oidc` で、鍵サービスが署名した ID トークンを `/oidc/jwks` の鍵で検証している）。鍵は oidc-provider を作るときに固定されるので、鍵を入れ替えたら idp を再起動する。
 
 ## オーナーの確認
 

@@ -58,8 +58,8 @@ grep -rniE '\b(e-?mail|phone|telephone|msisdn|postal|zip|birth|dob|kana|order_?(
 # （warifu-core の keys/relay.ts は relay のクライアントで、keys/protocol.ts は操作の名前。エラーの名前 decrypt_failed は除く）
 grep -rniE 'decrypt|decipher' packages/ spikes/ | grep -vE '^packages/(relay|keysvc)/|^packages/warifu-core/src/keys/(relay|protocol)\.ts:' | grep -vE 'decrypt_failed'
 
-# 観点6：受け付けてはならない hint（login_hint_token は許可。拒否を確かめるテストもヒットする）
-grep -rnE 'login_hint([^_]|$)|id_token_hint|user_code' packages/ spikes/
+# 観点6：P0の窓口でCIBAを公開していないか、受付番号と用途deskを認可にどう使うかを確認する（履歴のスパイクもヒットする）
+rg -n 'CIBA|ciba|login_hint|receiptCode|desk' packages/ spikes/
 
 # 観点7：sender 以外からの外向きの通信
 grep -rnE "fetch\(|https?\.(request|get)\(|net\.connect|tls\.connect|dns\.|from ['\"](undici|got|axios|node-fetch|ky|web-push)['\"]|createTransport" packages/ spikes/ | grep -v '^packages/sender/'
@@ -97,7 +97,7 @@ git ls-files -s | awk '$1 == "120000"'   # 追跡しているシンボリック�
 - 制限を外しているファイル（テスト、`scripts/`、`test/`、ルートの `*.config.ts`。`public/` の中ではグローバルの制限）に、上の検索がヒットしないか。ヒットしたら、宛先がテストの中で立てたローカルのサーバーだけかを確かめる。
 - `CLAUDE.md`、`AGENTS.md`、`.claude/`（settings.json、hooks、skills）、`.npmrc`、`package.json` の scripts、ルートの `*.config.ts`、テストと `scripts/`・`test/` のコード、`.github/`（workflows、dependabot.yml、CODEOWNERS）の差分。フックや設定は、Claude Code でそのブランチを開いただけで動き、テストと設定は `npm test` で動く。メンテナー以外が作った PR は、GitHub の上で読むだけにし、checkout も、セッションでの実行もしない（CLAUDE.md「進め方」）。
 
-観点2は、ルート一覧のスナップショットのテストの差分を必ず読む。観点8は、全テーブルが RLS の ENABLE と FORCE の両方を持つことを `pg_class` の `relrowsecurity` と `relforcerowsecurity` で確かめる固定テスト（`test/leak/x-rls-fixed.test.ts`）が通っていることを見る。マイグレーションを足したら、その固定テストの期待の一覧（ポリシー、列単位の GRANT）の差分を必ず読む。
+観点2は、ルート一覧のスナップショットのテスト（idp は `test/leak/x-idp-routes.test.ts`）の差分を必ず読む。ルートを足したら、その一覧も同じ PR で直す。idp の画面の配信物（`packages/*/public/` の HTML、JavaScript、CSS）は、資格情報、鍵、API キーの文字列を含まないこと、HTML として文字列を解釈させる書き方（`innerHTML`、`insertAdjacentHTML`、`document.write`）がないこと、インラインのスクリプトがないことを読む（CAP-37、Trusted Types は `'none'`。ADR 0018）。観点8は、全テーブルが RLS の ENABLE と FORCE の両方を持つことを `pg_class` の `relrowsecurity` と `relforcerowsecurity` で確かめる固定テスト（`test/leak/x-rls-fixed.test.ts`）が通っていることを見る。マイグレーションを足したら、その固定テストの期待の一覧（ポリシー、列単位の GRANT）の差分を必ず読む。
 
 ## 3. 報告する
 

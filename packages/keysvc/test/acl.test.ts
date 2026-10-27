@@ -28,6 +28,15 @@ describe('能力の表の性質（不変条件3）', () => {
     expect(allowedTarget('idp', 'mac', undefined)).toBe(false);
   });
 
+  it('sub の導出、保存の id、確認コードの MAC は idp だけ', () => {
+    for (const purpose of ['pairwise_sub', 'oidc_storage_id', 'email_verify_code']) {
+      const callers = ACL.filter(([, op, target]) => op === 'mac' && target === purpose).map(
+        ([caller]) => caller,
+      );
+      expect(callers).toEqual(['idp']);
+    }
+  });
+
   it('同じ行が2回ない', () => {
     const keys = ACL.map((row) => row.join('/'));
     expect(new Set(keys).size).toBe(keys.length);

@@ -37,5 +37,6 @@ idp（M3）では、`@simplewebauthn/server` を呼ぶ前と後に、次の検�
 
 ## 結果
 
-- 1〜5を、M3 で `test/leak/` のテストにする。手段はスパイクで確かめたもの（`spikes/passkey/passkey.e2e.ts`）を使う：仮想認証器の `setResponseOverrideBits`（UV が 0 のアサーション）と `addCredential`（持ち主と違う userHandle）、attestation を `direct` に書き換えた要求（x5c 付きの packed）。
+- 1〜5を、M3 で `test/leak/x-webauthn-guards.test.ts` にした（ADR 0018）。2のうち、EdDSA を足した後のアルゴリズムと、登録した公開鍵の検査（ADR 0012 の決定6・10）は、`test/leak/x-webauthn-algorithms.test.ts` で確かめる。ブラウザの仮想認証器の代わりに、テストの中のソフトウェアの認証器（`test/setup/soft-authenticator.ts`）で、x5c 付きの packed、Ed25519 の鍵、UV が 0 の応答、持ち主と違う userHandle を作る。4（UV）は、E2E（`test/leak/x-idp-browser.e2e.ts`）でも CDP の仮想認証器で確かめる。捨てスパイク1（`spikes/passkey`）は消した。
+- 3 の実装：userHandle は利用者 ID の16バイトにし、その利用者の範囲（withWarifuUser）の中で資格情報 ID が一致するものだけを使う（ADR 0018）。資格情報 ID で引き、userHandle が持ち主と一致することを確かめるのと、結果は同じになる。
 - ライブラリを更新するときは、`fetch` の呼び出しが増えていないかを点検する（`grep -rn "fetch(" node_modules/@simplewebauthn/server/esm`）。

@@ -17,6 +17,19 @@ M2 で、テスト8（`t08-*`）と、RLS の固定テストなど番号のな�
 | `x-db-boundary` | テナントと利用者の境界、境界なしの生の接続、権限の昇格、`sql` タグ |
 | `x-relay-resolver` | relay の解決関数（2つの ID だけを返す、廃番の区別がない、relay だけが呼べる） |
 
+M3 で、idp のテストを足した（ADR 0018）。
+
+| ファイル | 確かめること |
+|---|---|
+| `t04-pairwise` | テスト4の前半（A社とB社で sub と別名が違い、同じテナントの2つのクライアントで sub が同じ。企業に渡る値の一覧。別名から relay の解決関数で戻ること） |
+| `t10-email-registration` | テスト10（メールの登録の応答が、登録済みかどうかで変わらない）。宛先確認、DB に暗号文だけが残ること、試行の上限、旧アドレスへの知らせ、step-up |
+| `x-webauthn-guards` | ADR 0007 の決定1〜5（attestation、アルゴリズム、userHandle、UV、理由を出さない）とチャレンジの結び付き |
+| `x-webauthn-algorithms` | 受け付けるアルゴリズム（ES256、EdDSA、RS256）と、登録した公開鍵の種類・曲線・RSA の鍵長（ADR 0012 の決定6・10） |
+| `x-idp-oidc` | discovery の方式、step-up（max_age=0、prompt=login）、受け付けない項目、PKCE、クライアント認証、接続しない、別のテナントの同意 |
+| `x-idp-routes` | idp のルート一覧、Host と Origin、CSP と Trusted Types、PWA のクッキー |
+| `x-idp-passkeys` | パスキーの追加と削除の step-up、削除でセッションが消えること、最後の1つは消せないこと |
+| `x-idp-browser`（E2E） | CDP の仮想認証器で、企業の認可から ID トークンまで、PWA のメールの登録、UV のないログインの拒否。CSP の違反がないこと |
+
 ## いつ足すか
 
 - 新しいルートを足したとき。
@@ -32,6 +45,11 @@ M2 で、テスト8（`t08-*`）と、RLS の固定テストなど番号のな�
   - `rawRoleClient(role)`：境界を設定しない、アプリのロールの生の接続。盗んだ資格情報や SQL インジェクションを模すときに使う（権限はアプリのロールと同じ）。
   - ワーカーの DB は、同じワーカーのファイルの間で共有する。偽の行を足すテストは、境界の中で足して、例外を投げて ROLLBACK する（DB を汚さない）。値は、テストごとの乱数のテナント ID と利用者 ID で分ける。
   - ブートストラップのロール（`workerDatabase()`）で、DB の中身を読み書きしない（不変条件8の例外は、マイグレーションとテスト用の DB の作成だけ）。
+- idp を使うテストは、`test/setup/idp.ts` を使う。
+  - `startTestIdp`：ワーカーの DB と globalSetup の鍵サービスで、idp をファイルの中に起動する（テナントとクライアントは乱数）。時計を渡せる。
+  - `Browser`：クッキーを持つブラウザ役。`registerAccount`、`stepUp`。認証器は `test/setup/soft-authenticator.ts` のソフトウェアの認証器（わざと違えた応答も作れる）。
+  - `codeFlow`：企業の役。認可コード、PKCE、private_key_jwt で ID トークンを受け取り、`/oidc/jwks` の鍵で検証する。
+  - E2E（`*.e2e.ts`）は、一時的なクラスタ、鍵サービス、idp を、そのファイルのワーカーの中で起動する（`x-idp-browser.e2e.ts`）。
 - 鍵サービスを使うテストは、`test/setup/keys.ts` を使う。
   - `keysvcConnection(service)`：globalSetup の鍵サービスへの接続。DB を使うテストは、これを使う（監査ログのチェーンを、実行全体で同じ鍵で検証するため）。
   - `rawKeysvcCall`：型を通さない生の要求。攻撃の段で使う。
@@ -51,27 +69,23 @@ M2 で、テスト8（`t08-*`）と、RLS の固定テストなど番号のな�
 ## ひな形
 
 ```ts
-// 攻撃者が持っている情報：利用者の A社での sub と、A社が受け取った本物の ID トークン（A社が侵害された場面）
-// 試す経路：A社の資格情報で CIBA を始め、login_hint に sub を、id_token_hint に ID トークンを入れる
-// 期待する結果：どちらも 400 invalid_request で拒否する。利用者の端末の受信箱には何も届かない
-// plan 11章：テスト2
+// 攻撃者が持っている情報：他の応対を指す受付番号だけ
+// 試す経路：企業の窓口 API で受付番号を提示し、承認なしで個別情報を照会する
+// 期待する結果：403 forbidden、個別情報を返さず、業務変更や権限発行もない
+// plan 11章：テスト1・2
 import { describe, expect, it } from 'vitest';
 
-describe('漏えい：CIBA の hint（plan 11章 テスト2）', () => {
-  it('sub を login_hint に入れた要求を、400 invalid_request で拒否する', async () => {
-    // 準備：テナント、クライアント、利用者を作る。値は、テストの中で乱数から作る。
-    // 攻撃：攻撃者が持っている情報だけを使って、試す経路を呼ぶ。
-    const response = await startCiba({ login_hint: leakedSub });
-    // 拒否：ステータスと本文を確かめる。
-    expect(response.status).toBe(400);
-    expect(response.body.error).toBe('invalid_request');
-    // 副作用：受信箱、監査ログ、DB に、攻撃の結果が残っていないことを確かめる。
-    expect(await inboxCount(user)).toBe(0);
+describe('漏えい：受付番号だけでは許可しない（テスト1・2）', () => {
+  it('承認のない照会を403で拒否する', async () => {
+    const response = await requestDeskOperation({ receiptCode: leakedReceiptCode });
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('forbidden');
+    expect(await authorizedOperationCount()).toBe(0);
   });
 });
 ```
 
-`startCiba`、`leakedSub`、`inboxCount`、`user` は、説明のための仮の名前。
+`requestDeskOperation`、`leakedReceiptCode`、`authorizedOperationCount` は説明のための仮の名前。実際のルートと応答は実装時に確定し、この例を通過済みのテストとは扱わない。
 
 ## 書き方の決まり
 
@@ -92,7 +106,7 @@ describe('漏えい：CIBA の hint（plan 11章 テスト2）', () => {
 | M3 | テスト4の前半、テスト10（登録時の応答） |
 | M4（Gate A） | テスト5、テスト10（SMTP の RCPT への応答） |
 | M5 | テスト4の後半、テスト6、テスト11 |
-| M7（Gate B） | テスト1、テスト2、テスト4（CIBA のクライアントの sub）、テスト6（窓口コードと CIBA のレート制限） |
+| M7（Gate B） | テスト1、テスト2、テスト4、テスト6（受付番号と窓口の承認のレート制限） |
 | M8（Gate C） | テスト3、テスト6（回復のレート制限）、テスト10（回復時の応答） |
 | M9 | テスト9（移行中の参加の表示と、検査の分け方を含む。ADR 0010）、テスト12 |
 | M10（Gate D） | テスト7、SSRF、利用者どうしの BOLA |

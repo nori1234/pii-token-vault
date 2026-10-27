@@ -28,8 +28,19 @@ export const ENCRYPTION_KEY_IDS: readonly EncryptionKeyId[] = Object.freeze([
 ]);
 
 /** MAC の用途。用途ごとに独立した鍵を持つ（HMAC-SHA-256）。使うマイルストーンで足す。 */
-export type MacPurpose = 'alias_lookup' | 'audit_chain';
-export const MAC_PURPOSES: readonly MacPurpose[] = Object.freeze(['alias_lookup', 'audit_chain']);
+export type MacPurpose =
+  | 'alias_lookup'
+  | 'audit_chain'
+  | 'pairwise_sub'
+  | 'oidc_storage_id'
+  | 'email_verify_code';
+export const MAC_PURPOSES: readonly MacPurpose[] = Object.freeze([
+  'alias_lookup',
+  'audit_chain',
+  'pairwise_sub',
+  'oidc_storage_id',
+  'email_verify_code',
+]);
 
 /** 署名の鍵（ES256）。SET、操作ごとの承認、テナントの JWT の鍵は、各マイルストーンで足す（ADR 0014）。 */
 export type SigningKeyId = 'id_token';

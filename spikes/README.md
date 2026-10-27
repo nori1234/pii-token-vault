@@ -6,7 +6,6 @@ M1 で、ライブラリが不変条件を守れるかを、本実装の前に�
 
 | ディレクトリ | 確かめること | 動かし方 | 分かったこと | 置き換え先 |
 |---|---|---|---|---|
-| `passkey/` | CDP の仮想認証器で、パスキーの登録とログインを通す（Fastify と `@simplewebauthn`） | `npm run e2e`（サーバーは 4101 番。[passkey/README.md](passkey/README.md)） | [ADR 0007](../docs/adr/0007-webauthn-library-guards.md) | M3 の `packages/idp` |
 | `ciba-poll/` | oidc-provider の CIBA を poll で1往復させる | `npm test`（単独では `npx vitest run spikes/ciba-poll`） | [ADR 0006](../docs/adr/0006-ciba-spike-findings.md) | M7 の `packages/idp` |
 
 ## 本番で使わない（DO NOT USE IN PRODUCTION）
@@ -19,7 +18,6 @@ M1 で、ライブラリが不変条件を守れるかを、本実装の前に�
 - ciba-poll の approve と deny は、テストから呼ぶための関数で、利用者を認証しない（本番は、UV 付きのパスキーで要求に結び付けて承認する。M6、M7）。HTTP のルートにつながない。
 - 窓口コードの発行では、UV 付きのパスキーを省いている。試行の上限とレート制限もない（M7）。
 - 保存はメモリだけ。`dump()` は漏えいの確認のために、保存した内容をそのまま返す。
-- passkey は http://localhost だけを想定する。セッション、レート制限、複数のパスキーはない（M3）。
 
 ## 決まり
 

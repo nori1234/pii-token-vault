@@ -6,6 +6,7 @@
 // - relay は derive_alias と sign を持たない。relay の encrypt は relay_queue だけ（連絡先の暗号文を作れない）。
 // - company-api は encrypt と decrypt を持たない。
 // - sender、rp-kit、demo-rp の行はない（資格情報もない）。
+// - sub の導出（pairwise_sub）、idp の保存の id（oidc_storage_id）、確認コード（email_verify_code）の MAC は idp だけ（ADR 0018）。
 //
 // 行を足すときは、warifu-core の keys/protocol.ts、各クライアントの型、t08-keysvc-acl と t08-key-client-surface の
 // 期待の表を同じ PR で直す。
@@ -25,6 +26,9 @@ export const ACL: ReadonlyArray<readonly [KeysvcCaller, KeysvcOp, AclTarget]> = 
   ['idp', 'encrypt', 'contact'],
   ['idp', 'mac', 'alias_lookup'],
   ['idp', 'mac', 'audit_chain'],
+  ['idp', 'mac', 'pairwise_sub'],
+  ['idp', 'mac', 'oidc_storage_id'],
+  ['idp', 'mac', 'email_verify_code'],
   ['idp', 'derive_alias', 'alias_derive'],
   ['idp', 'sign', 'id_token'],
   ['idp', 'public_keys', 'id_token'],
