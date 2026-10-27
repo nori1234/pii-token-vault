@@ -4,47 +4,48 @@
 
 - **未確認**：根拠として挙げているが、抜粋もまだ確かめていない。
 - **抜粋のみ**：公式ドメインに絞った検索で抜粋を確認しただけで、原文は通読していない。報道の抜粋を含むものは、その旨を表の後の注に書く。
-- **原文で確認済み**：原文を読み、版・節番号・文言を照合した。
+- **原文で確認済み**：原文を読み、版・節番号・文言を照合した。状態の後に、照合した日を書く。
 
-この開発環境のネットワークでは、政府系サイトなどへの接続がポリシーで拒否されるため、2026-10-17 時点で「原文で確認済み」のものはない。原文の照合はイシュー #2（M0）で行い、照合したら状態を更新する。抜粋と原文が食い違った場合は、設計を見直して ADR に記録する。
+2026-10-22 に、イシュー #2（M0）で優先するとした6件と、その途中で取得できた資料の原文を照合した。同じ日に、残りの行も、接続できたものは照合した。2026-10-23 に、拒否されていた行のうち、接続できるようになったもの（CYNEX、日本郵便、ヤマト運輸の2件、AWS）を照合した。食い違った点と、設計への反映は [ADR 0012](adr/0012-primary-source-review.md) に書いた。出口のプロキシに拒否されて原文を取得できなかった行は、「抜粋のみ」のまま残し、その旨を書いた。抜粋と原文が食い違った場合は、設計を見直して ADR に記録する。
+
+照合の手順：公式のサイトから原文（HTML か PDF）を取得し、テキストにして、この表に書いた節番号と文言を探して読む。版と日付は、原文の表紙か改定履歴で確かめる。
 
 ## 本人確認・認証
 
 | 基準 | 版・日付 | この製品が根拠にしている点 | 反映先 | 状態 |
 |---|---|---|---|---|
-| [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b.html) | 2025-07 確定 | KBA は認証として認めない（3.1.1.2）。メールを OOB 認証に使ってはならない（3.1.3.1）。PSTN は制限付き（3.2.9）。同期パスキーは AAL2 まで。回復（4.2）の手段は保存型・発行型の回復コード、recovery contacts（指定した人の連絡先にコードを送る方式）、身元確認のやり直しで、メールや SMS で回復コードを送ることを条件付きで認めている（この製品はそれより厳しくする） | 原則、回復 | 抜粋のみ |
-| [NIST SP 800-63A-4](https://pages.nist.gov/800-63-4/sp800-63a.html) | 2025-07 確定 | KBV を身元確認に使ってはならない（SHALL NOT） | 原則 | 抜粋のみ |
-| [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html) | errata set 2 | §5.7：email や phone_number を一意の識別子にしてはならない。§8.1：pairwise | 接続要件、idp | 抜粋のみ |
-| [OpenID CIBA Core 1.0](https://openid.net/specs/openid-client-initiated-backchannel-authentication-core-1_0.html) | 2021-09 Final | poll、ping、push。login_hint_token、binding_message、user_code | 窓口 | 抜粋のみ |
-| [FAPI-CIBA](https://openid.net/specs/openid-financial-api-ciba-ID1.html) | Implementer's Draft | push の禁止。広く知られた識別子を hint にする危険 | 窓口 | 抜粋のみ |
-| [RFC 9470](https://www.rfc-editor.org/info/rfc9470/)、[RFC 9396](https://www.rfc-editor.org/info/rfc9396/) | 2023 | step-up と、操作に結び付いた承認（RAR） | 高リスクの操作 | 抜粋のみ |
-| [RFC 8417（SET）](https://www.rfc-editor.org/info/rfc8417/) | 2018 | iss、aud、jti、iat を持つ署名付きのイベント | 企業への知らせ | 未確認 |
-| [OpenID RISC 1.0 と SSF](https://openid.net/specs/openid-risc-1_0-final.html) | 2025-09 Final | 回復や識別子の変更を企業に知らせる | 企業への知らせ | 抜粋のみ |
-| [W3C WebAuthn Level 3](https://www.w3.org/TR/webauthn-3/) | — | BE/BS フラグ（同期できるか、同期されているか） | 回復の予防 | 未確認 |
-| [FIDO Alliance：回復のベストプラクティス](https://fidoalliance.org/wp-content/uploads/2019/02/FIDO_Account_Recovery_Best_Practices-1.pdf) | 2019-02 | 回復手段は、取り戻す認証情報より弱くてはならない | 回復（P0 が満たすかは未評価） | 抜粋のみ |
-| [OWASP ASVS 5.0.0](https://github.com/OWASP/ASVS/tree/v5.0.0/5.0) | 2025-05-30 | 6.4.2（秘密の質問を置かない）、6.4.3（リセットで MFA を迂回させない）、6.4.4（要素を失ったら登録時と同じ水準で確認し直す。P0 の回復が満たすかは未評価）、6.6.1（L3 では SMS を使わせない） | 全体 | 抜粋のみ |
-| [デジタル庁 DS-511](https://www.digital.go.jp/assets/contents/node/basic_page/field_ref_resources/e2a06143-ed29-4f1d-9c31-0f06fca67afc/12cb1a6c/20250930_resources_standard_guideline_identityverification_01.pdf) と [DS-512](https://www.digital.go.jp/assets/contents/node/basic_page/field_ref_resources/e2a06143-ed29-4f1d-9c31-0f06fca67afc/c7edc43c/20260224_resources_standard_guideline_identityverification_1.pdf) | 2025-09-30 / 2026-02-24 | AAL2 以上ではパスキーかマイナンバーカード。回復は認証と同等以上の強さ | 原則、回復（P0 が満たすかは未評価） | 抜粋のみ |
-| [金融庁 監督指針の改正（証券）](https://www.fsa.go.jp/news/r7/shouken/20251015/01.pdf)、[（銀行）](https://www.fsa.go.jp/news/r7/sonota/20260227/20260227.html) | 2025-10-15 / 2026-02-27 | フィッシング耐性のある多要素認証を、初期設定で必須にする | 原則 | 抜粋のみ |
-| [日本証券業協会 ガイドライン](https://www.jsda.or.jp/about/hatten/inv_alerts/alearts04/files/20251015_internetgl.pdf) | 2025-10-15 | 同上。SMS やメールの OTP では、リアルタイムのフィッシングを防げない | 原則 | 抜粋のみ |
-| [Apple：iCloud キーチェーンのエスクローのセキュリティ](https://support.apple.com/guide/security/escrow-security-for-icloud-keychain-sec3e341e75d/web) | — | 同期パスキーの安全性が、同期先アカウントの回復手段に左右されること | 残るリスク | 抜粋のみ |
+| [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b.html) | 2025-07 確定 | パスワードを選ぶときに KBA や秘密の質問を促してはならない（3.1.1.2）。KBA は、AAL ごとに許す認証器の種類（2章）に入っていない。メールを OOB 認証に使ってはならない（3.1.3.1）。PSTN の OOB 認証は、制限付きの認証器（3.1.3.3、3.2.9）。同期パスキーは、取り出せるので AAL3 の要件に反し、AAL2 まで（3.1.7.4、付録 B。付録 B は規範）。回復（4.2）の手段は、保存型・発行型の回復コード、recovery contacts（指定した人のアドレスに発行型のコードを送る方式）、身元確認のやり直しの4つと、リスク分析に基づく独自の方式。メールや SMS で回復コードを送ることを、有効期間を限って認めている（4.2.1.2。この製品はそれより厳しくする）。AAL2 の回復は、方法の違う2つの回復コード、回復コードと単要素の認証器、身元確認のやり直しのどれか（4.2.2.2）。保存型の回復コードは64ビット以上で、3.1.1.2 のとおりハッシュにして保存し、使ったら新しいコードを発行する（4.2.1.1）。回復には長い待ち時間を伴いうる（4.2。数値はない） | 原則、回復 | 原文で確認済み（2026-10-22。HTML 版。割符の回復との関係は ADR 0012） |
+| [NIST SP 800-63A-4](https://pages.nist.gov/800-63-4/sp800-63a.html) | 2025-07 確定 | KBV（と知識ベースの認証）を、身元確認の照合に使ってはならない（SHALL NOT。2.5.1）。不正対策の一部として KBV を使うことは許している（3.2.1） | 原則 | 原文で確認済み（2026-10-22） |
+| [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html) | errata set 2 | 安定した識別子として頼れるのは iss と sub の組だけで、email、phone_number、preferred_username、name などを一意の識別子にしてはならない（MUST NOT。5.7）。pairwise の sub はセクター識別子ごとに計算し、OP 以外が元に戻せてはならない（8.1） | 接続要件、idp | 原文で確認済み（2026-10-22） |
+| [OpenID CIBA Core 1.0](https://openid.net/specs/openid-client-initiated-backchannel-authentication-core-1_0.html) | 2021-09-01 Final | poll、ping、push（5章）。hint は login_hint_token、id_token_hint、login_hint のうち1つだけが必須。binding_message、user_code（7.1） | 窓口 | 原文で確認済み（2026-10-22） |
+| [FAPI-CIBA](https://openid.net/specs/openid-financial-api-ciba-ID1.html) | Implementer's Draft 1（Draft-02、2019-08-15） | 認可サーバーは push を使えない（shall not support）。poll は必須、ping は任意（5.2.2）。電話番号のように広く知られた識別子を login_hint にすると、利用者の知らない認証の開始の危険が増す。login_hint は nonce の性質を持つものを強く推奨（7.2） | 窓口 | 原文で確認済み（2026-10-22） |
+| [RFC 9470](https://www.rfc-editor.org/info/rfc9470/)、[RFC 9396](https://www.rfc-editor.org/info/rfc9396/) | 2023-09 / 2023-05 | step-up（insufficient_user_authentication と、acr_values・max_age）と、操作に結び付いた承認（RAR の authorization_details） | 高リスクの操作 | 原文で確認済み（2026-10-22） |
+| [RFC 8417（SET）](https://www.rfc-editor.org/info/rfc8417/) | 2018-07 | iss、iat、jti、events は必須、aud は推奨、sub は任意（2.2）。RFC は署名を必須にしていない。割符は署名して送る（製品の選択） | 企業への知らせ | 原文で確認済み（2026-10-22） |
+| [OpenID RISC 1.0 と SSF](https://openid.net/specs/openid-risc-1_0-final.html) | 1.0 Final（文書の日付は 2025-08-29） | 回復の開始（recovery-activated。2.9）、回復の情報の変更（2.10）、識別子の変更（identifier-changed）などを企業に知らせる | 企業への知らせ | 原文で確認済み（2026-10-22） |
+| [W3C WebAuthn Level 3](https://www.w3.org/TR/webauthn-3/) | W3C 勧告、2026-08-25 | BE/BS フラグ（認証器データのビット3・4。6.1、6.1.3）。幅広い認証器に対応したい RP は、pubKeyCredParams に EdDSA（-8）、ES256（-7）、RS256（-257）を少なくとも含めるべき（SHOULD。5.4）→ 割符も、2026-10-23 に EdDSA を足した（不変条件9。ADR 0012 の決定10） | 回復の予防、暗号の許可リスト | 原文で確認済み（2026-10-22） |
+| [FIDO Alliance：回復のベストプラクティス](https://fidoalliance.org/wp-content/uploads/2019/02/FIDO_Account_Recovery_Best_Practices-1.pdf) | 2019-02 | 複数の認証器の登録を勧め、それがなければ、最初の登録と同じかそれ以上の保証レベルで身元確認をやり直す。弱い回復手段は推奨しない（not recommended）。仮名のアカウントでは、信頼できる事業者に回復トークンを預ける方式（Delegated Account Recovery）も挙げる | 回復（P0 が満たすかは未評価） | 原文で確認済み（2026-10-22） |
+| [OWASP ASVS 5.0.0](https://github.com/OWASP/ASVS/tree/v5.0.0/5.0) | 2025-05 | 6.4.2（L1：秘密の質問を置かない）、6.4.3（L2：リセットで MFA を迂回させない）、6.4.4（L2：要素を失ったら登録時と同じ水準で身元を確認し直す。P0 の回復が満たすかは未評価）、6.6.1（L2：PSTN の OTP の条件。L3 では電話と SMS を選べないようにする） | 全体 | 原文で確認済み（2026-10-22） |
+| [デジタル庁 DS-511](https://www.digital.go.jp/assets/contents/node/basic_page/field_ref_resources/e2a06143-ed29-4f1d-9c31-0f06fca67afc/12cb1a6c/20250930_resources_standard_guideline_identityverification_01.pdf) と [DS-512](https://www.digital.go.jp/assets/contents/node/basic_page/field_ref_resources/e2a06143-ed29-4f1d-9c31-0f06fca67afc/c7edc43c/20260224_resources_standard_guideline_identityverification_1.pdf) | 2025-09-30 / 2026-02-24 | DS-511（Normative）：当人認証のレベル2は、多要素で、フィッシング耐性のある手法を希望者が選べ、公開鍵認証なら鍵の取り出し・複製に耐えること。レベル3は、一要素が公開鍵認証で、全員がフィッシング耐性のある手法を使うこと（3.2 4) 表3-10）。回復の手段は、採用している当人認証手法と同等以上の強度にする（3.2 5) ウ）。DS-512（Informative）：2026年2月時点では、レベル2以上でマイナンバーカードかパスキーの採用が実質的に必須になると想定（4.4 1)）。回復コードの入力はフィッシングに弱い（3.2 3) ウ）。認証器の追加・変更では、知らせて、有効になるまで一定の時間を置く（3.2 3) イ。数値はない）。同期パスキーは、同期に使うアカウントを奪われた場合の耐性がない（別紙2 1.1 3)） | 原則、回復（P0 の回復が「同等以上」を満たすとは書かない。ADR 0012） | 原文で確認済み（2026-10-22） |
+| 金融庁 監督指針の改正：[証券](https://www.fsa.go.jp/news/r7/shouken/20251015/20251015.html)（[新旧対照表](https://www.fsa.go.jp/news/r7/shouken/20251015/02.pdf)）、[銀行](https://www.fsa.go.jp/news/r7/sonota/20260227/20260227.html)（[主要行等の新旧対照表](https://www.fsa.go.jp/news/r7/sonota/20260227/02.pdf)） | 2025-10-15 / 2026-02-27（どちらも公表の日から適用） | ログイン、出金などの重要な操作時に、フィッシングに耐性のある多要素認証（例：パスキー、PKI）を実装し、必須にする（デフォルトとして設定）。証券は Ⅲ－２－８－２－２、主要行等は Ⅲ－３－８－２ | 原則 | 原文で確認済み（2026-10-22） |
+| [日本証券業協会 ガイドライン](https://www.jsda.or.jp/about/hatten/inv_alerts/alearts04/files/20251015_internetgl.pdf) | 2025-10-15 | 同上（スタンダード①。注4で「フィッシング耐性のある多要素認証」の範囲を示す）。以前この行に書いていた「SMS やメールの OTP では、リアルタイムのフィッシングを防げない」は、原文になかったので削った | 原則 | 原文で確認済み（2026-10-22） |
+| [Apple：iCloud キーチェーンのエスクローのセキュリティ](https://support.apple.com/guide/security/escrow-security-for-icloud-keychain-sec3e341e75d/web) | 2024-05-07 公開 | キーチェーンの回復には、Apple アカウントとパスワード、登録した電話番号への SMS、iCloud セキュリティコードを使う。このページはパスキーに触れていない。「同期パスキーの安全性が、同期先アカウントの回復手段に左右される」は、この製品の推論 | 残るリスク | 原文で確認済み（2026-10-22） |
 
 ## 脅威の動向
 
 | 資料 | 日付 | 根拠にしている点 | 反映先 | 状態 |
 |---|---|---|---|---|
-| [NICT：A2B攻撃の注意喚起](https://www.nict.go.jp/press/2026/10/13-1.html) | 2026-10-13 | App-to-Backend 攻撃。BOLA、SSRF、RCE、SQL インジェクション。相次ぐ漏えいの原因の一つとしている | plan Context、2章 | 抜粋のみ |
-| [総務省：公開アプリの解析情報を悪用した攻撃への注意喚起](https://www.soumu.go.jp/menu_kyotsuu/important/kinkyu02_000680.html) | 2026-10-13 | サーバー側で認証・認可と入力の検証を行う | plan Context、2章 | 抜粋のみ |
-| [JPCERT/CC JPCERT-AT-2026-0030「直近で相次いでいる国内組織における不正アクセスに関する注意喚起」](https://www.jpcert.or.jp/at/2026/at260030.html) | 2026-10-08（10-09 更新） | 2026年9月前後から、国内組織で不正アクセスによる個人情報の漏えいが相次ぐ。一般向けのアプリだけでなく、BI ツールや従業員向けの管理システムなど、外部からの利用を想定していないシステムも被害を受けた。把握している情報は限定的かつ断片的とされる（攻撃の類型は、表の後の注）。推奨する対策：API のレート制限、エンドポイントごとのアクセス制御、最小権限、トークンの有効期限の設定と、漏えいが疑われるものの速やかな無効化、既知の脆弱性の修正の適用、業務上不要な管理機能の公開の停止、保存期間を過ぎたデータの削除、侵害後の横展開への対策、検知の体制と初動対応の点検、地域限定のサービスでのアクセス元の地域の制限 | plan 2章、3-3、8章、9章、10章（地域の制限は反映していない。表の後の注） | 抜粋のみ |
-| [JPCERT/CC Eyes「連続不正アクセス事案の攻撃手法に関する調査」](https://blogs.jpcert.or.jp/ja/2026/10/web_api_attacks.html) | 2026-10 | 攻撃者が AI を使って、既知の脆弱性のスキャンや、API 経由の攻撃をしていた。攻撃元のサーバーに、Android アプリ（APK）を解析した痕跡と、Flutter アプリのリバースエンジニアリングのツールがあった。SSRF への対策と、API の利用の監視を推奨する | plan 2章、03 の ATK-02 | 抜粋のみ |
-| [国家サイバー統括室「不正アクセスによる漏えい等の事案を踏まえた対応について」](https://www.cyber.go.jp/pdf/press/taiou.pdf) | 2026-10-09 | 大量の個人情報や機微な情報を扱う事業者に、対策の徹底を求める。3分野：ウェブシステム等の適切な管理、サプライチェーンを通じた侵害への対策、データの適切な管理。パッチの迅速な適用、多要素認証の導入、委託先・再委託先の管理状況の継続的な確認、ログの監視など | plan 2章、3-3、8章、9章、10章 | 抜粋のみ |
-| [国家サイバー統括室「お知らせ」](https://www.cyber.go.jp/news/20261014.html) | 2026-10-14 | 各機関の注意喚起をまとめている：個人情報保護委員会（10-07「大規模な漏えい等事案を踏まえた対応について」）、警察庁（10-08）、金融庁・経済産業省・IPA（10-09）、NICT（10-13。アプリの解析を足がかりにしたサーバーへの攻撃＝A2B攻撃）、JPCERT/CC。個別の資料をこの表に足すかは、原文の照合のときに決める | — | 抜粋のみ |
-| [株式会社ラック「国内で相次ぐWebシステムからの情報漏えい～ラックの観測から見える変化と、企業が今とるべき対策」](https://www.lac.co.jp/lacwatch/alert/20261015_004996.html) | 2026-10-15 | いまの状況を「特定の製品や脆弱性」または「特定の業種」を狙った問題として捉えるだけでは十分ではない（複数の攻撃経路が幅広い業種にまたがる）。侵入の約7割は、ID の不正利用と Web アプリの脆弱性の悪用。クラウドのアクセスキーや API キーの管理不備も足がかりになる。問題の本質は、自社に攻撃できる弱点が残っていないか。予約・会員・業務のシステムや管理画面も含めて、公開している資産を継続的に点検する。WAF だけに頼らない。IDOR/BOLA には、正規の認証トークンでも、その利用者がそのデータにアクセスしてよいかをサーバー側で確かめる。アプリは解析される前提で、秘密の情報や重要な認証・認可の判断を、できる限りアプリ側に持たせない。多要素認証、アクセスキーや API キーの定期的な入れ替えと失効の手順。公表の件数の増加には、公表の早期化の影響もありうる | plan Context、1-2、2章、3-3、8章、12章 | 抜粋のみ |
-| [個人情報保護委員会：大規模な漏えい等事案を踏まえた注意喚起](https://www.ppc.go.jp/news/careful_information/261007_alert/) | 2026-10-07 | 保有の必要性の見直し、データの最小化。国家サイバー統括室のお知らせ（2026-10-14）では「大規模な漏えい等事案を踏まえた対応について」の題名で挙げられている。題名は原文で確かめる | plan 3-3 | 抜粋のみ |
-| [金融庁：本人確認書類の画像の漏えいを受けた要請](https://www.fsa.go.jp/news/r8/sonota/20261009/20261009.html) | 2026-10-09 | IC チップの読み取りへの前倒しの移行 | — | 抜粋のみ |
+| [NICT：A2B攻撃の注意喚起](https://www.nict.go.jp/press/2026/10/13-1.html) | 2026-10-13 | 公開されている Android アプリを解析し、接続先のバックエンドのサーバーを攻撃する手法を「A2B攻撃（App-to-Backend Attack）」と名付け、相次ぐ漏えいの原因の一つとした。推奨する対策は、侵害の確認、脆弱性の点検、暫定的な緩和策の3種。狙われる脆弱性の詳細は [CYNEX の資料](https://cynex.nict.go.jp/library/261013-01.html)（[PDF](https://cynex.nict.go.jp/pdf/library/lettice/261013-01.pdf)。2026-10-13、LETTICE）にある：「脆弱性の点検」に「APIの認可不備（IDOR/BOLA）、SSRF、RCE、SQLインジェクションなど」。PDF の図「主に狙われている脆弱性」は SSRF、RCE、SQL インジェクション、IDOR の4種類。対策の図には、さらに認証・セッション管理の不備、NoSQL インジェクション、クラウドサービス・ストレージの設定不備、コード実行・ファイル操作の脆弱性が並ぶ | plan Context、2章 | 原文で確認済み（報道発表は 2026-10-22、CYNEX の資料は 2026-10-23） |
+| [総務省：公開アプリの解析情報を悪用した攻撃への注意喚起](https://www.soumu.go.jp/menu_kyotsuu/important/kinkyu02_000680.html) | 2026-10-13 | 利用者側からの通信は信頼できるとは限らない前提で、サーバー側で適切な認証・認可や入力値の検証を行う。認証・認可の不備や不正なデータベース操作などを可能にする脆弱性を点検する。iOS アプリや Web サービスでも同様の問題がありうる | plan Context、2章 | 原文で確認済み（2026-10-22） |
+| [JPCERT/CC JPCERT-AT-2026-0030「直近で相次いでいる国内組織における不正アクセスに関する注意喚起」](https://www.jpcert.or.jp/at/2026/at260030.html) | 2026-10-08（10-09 更新） | 2026年9月前後から、国内組織で不正アクセスによる個人情報の漏えいが相次ぐ。一般向けのアプリだけでなく、BI ツールや従業員向けの管理システムなど、外部からの利用を想定していないシステムも被害を受けた。把握している情報は限定的かつ断片的とされる（攻撃の類型は、表の後の注）。推奨する対策：API のレート制限（ログイン、パスワードリセット、SMS の送信、検索処理などには個別に）、非公開の API を含むエンドポイントごとのアクセス制御（許可した利用者と HTTP メソッドだけ）、最小権限、トークンの有効期限の設定と、漏えいが疑われるものの速やかな無効化、既知の脆弱性の修正の適用、業務上不要な管理機能の公開の停止、保存期間を過ぎたデータや利用目的を終えたデータの削除、侵害後の横展開への対策、検知の体制と初動対応の点検、漏えいに備えた平時からの顧客への二次被害の防止の呼びかけ（多要素認証など）、地域限定のサービスでのアクセス元の地域の制限 | plan 2章、3-3、8章、9章、10章（地域の制限は反映していない。表の後の注） | 原文で確認済み（2026-10-22） |
+| [JPCERT/CC Eyes「連続不正アクセス事案の攻撃手法に関する調査」](https://blogs.jpcert.or.jp/ja/2026/10/web_api_attacks.html) | 2026-10-15 | 攻撃者が AI を使って、既知の脆弱性のスキャンや、API 経由の攻撃をしていた。攻撃元のサーバーに、Android アプリ（APK）を解析し、関連する API に SSRF などの脆弱性がないかを調べた痕跡と、Flutter アプリのリバースエンジニアリングのツールがあった。推奨：秘密鍵や有効期間の長い認証情報をアプリに埋め込まない、サーバー側での認証と認可、レート制限と異常なリクエストの監視、外部の URL を取得する API ではアクセス先を限り、リダイレクト後の宛先も検証する（割符はリダイレクトに従わない。plan 2章） | plan 2章、03 の ATK-02 | 原文で確認済み（2026-10-22） |
+| [国家サイバー統括室「不正アクセスによる漏えい等の事案を踏まえた対応について」](https://www.cyber.go.jp/pdf/press/taiou.pdf) | 2026-10-09 | 大量の個人情報や機微な情報を扱う事業者に、対策の徹底を求める。3分野：ウェブシステム等の適切な管理、サプライチェーンを通じた侵害への対策、データの適切な管理。パッチの迅速な適用、多要素認証の導入、委託先・再委託先の管理状況の継続的な確認、ログの監視、保有情報の最小化、閲覧権限と更新権限の分離、認証情報を平文で保存しないことなど | plan 2章、3-3、8章、9章、10章 | 原文で確認済み（2026-10-22） |
+| [国家サイバー統括室「お知らせ」](https://www.cyber.go.jp/news/20261014.html) | 2026-10-14 | 各機関の注意喚起をまとめている：個人情報保護委員会（10-07「大規模な漏えい等事案を踏まえた対応について（注意喚起）」）、警察庁（10-08）、金融庁・総務省・経済産業省・IPA（10-09）、NICT（10-13。アプリの解析を足がかりにしたサーバーへの攻撃＝A2B攻撃）、JPCERT/CC。この表には、設計の根拠にしている資料だけを載せる（個人情報保護委員会、金融庁、NICT、JPCERT/CC） | — | 原文で確認済み（2026-10-22） |
+| [個人情報保護委員会「大規模な漏えい等事案を踏まえた対応について（注意喚起）」](https://www.ppc.go.jp/news/careful_information/261007_alert/) | 2026-10-07 | 法22条に基づき、利用する必要がなくなった個人データを遅滞なく消去するよう努めること、保管している個人データの必要性を法令等の根拠とともに確かめること。ガイドライン（通則編）別添の技術的安全管理措置の見直しの内容を先取りして示す | plan 3-3 | 原文で確認済み（2026-10-22） |
+| [金融庁：サイバーセキュリティ対策の強化と各種取引申込等における対応について](https://www.fsa.go.jp/news/r8/sonota/20261009/20261009.html) | 2026-10-09 | 本人確認書類の画像の送信を受ける方法は、令和9年4月1日の施行で廃止され、IC チップ情報の読取に原則一本化される。施行日を待たず、可及的速やかに対応すること | — | 原文で確認済み（2026-10-22） |
 | 各社の漏えいの公表（plan の Context） | 2026-09〜10 | 相次ぐ漏えいの規模。個別の原因は事案ごとに異なる | plan Context | 未確認 |
 
-- JPCERT-AT-2026-0030 の抜粋で確かめた攻撃の類型：A（標的ごとに複数のソフトウェアの既知の脆弱性を探索する。設定ファイルやバックアップファイルの窃取など、管理不備を突く攻撃も）、B（公開アプリを解析して API のエンドポイントやキーを特定し、管理用・内部の API に不正なリクエストを送る。利用者の権限の変更、不正なアカウントの作成など）、C（BI ツール Metabase の SQL インジェクションの脆弱性を、API 経由で悪用する）、D（公開 Web サーバーから届くアプリケーションサーバーに、WAR ファイルで Web シェルを設置する）。以前の抜粋にあったレート制限の例（ログイン、リセット、SMS の送信）は、今回の抜粋では確かめられなかった。
-- JPCERT/CC の2つ、国家サイバー統括室の2つ、ラックの行と、個人情報保護委員会の行の題名の注（2026-10-20 に足した行と書き直した行）は、公式のページと報道の、検索結果の抜粋だけによる。報道の抜粋を含むので、上の「抜粋のみ」の定義（公式ドメインに絞った検索）より確かさが低い。原文は、この環境から取得できなかった。
+- JPCERT-AT-2026-0030 の原文で確かめた攻撃の類型：A（標的ごとに複数のソフトウェアの既知の脆弱性を探索する。設定ファイルやバックアップファイルの窃取など、管理不備を突く攻撃も）、B（公開アプリを解析して API のエンドポイントやキーを特定し、画面の操作では実行できない内部の API を攻撃する。利用者の権限の変更、不正なアカウントの作成、ヘッダーや認証トークンの形式を変えて応答の違いを見ること、NoSQL インジェクションによる探索。他のシステムの侵害で盗んだ API キーの使用も）、C（BI ツール Metabase の SQL インジェクションの脆弱性を、API 経由で悪用する）、D（公開 Web サーバーから届くアプリケーションサーバーに、WAR ファイルで Web シェルを設置する）。原文には不審な送信元の IP アドレスも載っているが、この表には写さない。
+- 株式会社ラックの解説（2026-10-15）は、以前この表に載せていたが、2026-10-22 に削った。報道の抜粋を含む検索結果でしか確かめられず、照合のときも原文を取得できなかったため（ADR 0012）。その記事が挙げていた対策は、JPCERT/CC と国家サイバー統括室の資料（原文で確認済み）にもあり、計画の決定（ADR 0008）は、それらで裏付けられる。
 - この表の資料は、どれも個別の事案に結び付けない（plan の Context）。
 - JPCERT-AT-2026-0030 の推奨のうち、地域限定のサービスでのアクセス元の地域の制限は、計画に反映していない。理由は [ADR 0008](adr/0008-october-2026-advisories-review.md) に書いた。
 
@@ -52,60 +53,61 @@
 
 | 基準 | 版・日付 | 根拠にしている点 | 状態 |
 |---|---|---|---|
-| [CRYPTREC 暗号リスト LS-0001-2022R1](https://www.cryptrec.go.jp/list/cryptrec-ls-0001-2022r1.pdf) | 2023-03-30 | AES、GCM（IV は96ビットを推奨）、HMAC、SHA-256、ECDSA が、電子政府推奨暗号リストに掲載されている。WebAuthn で受け付ける RS256（RSASSA-PKCS1-v1_5）の掲載状況は未確認 | 抜粋のみ |
-| [CRYPTREC/IPA TLS 暗号設定ガイドライン](https://www.cryptrec.go.jp/report/cryptrec-gl-3001-3.1.1.pdf) | 2025-04 | 本番の TLS の設定 | 抜粋のみ |
+| [CRYPTREC 暗号リスト LS-0001-2022R2](https://www.cryptrec.go.jp/list/cryptrec-ls-0001-2022r2.pdf) | 初版 2023-03-30、最終更新 2026-03-30（R1 の最終更新は 2024-05-16） | AES、GCM（IV は96ビットを推奨。注7）、HMAC、SHA-256、ECDSA、EdDSA、RSASSA-PKCS1-v1_5（WebAuthn の RS256）が、電子政府推奨暗号リストに掲載されている。SHA-1 は運用監視暗号リスト（互換性の維持のためだけ）。R2 で、耐量子計算機暗号（PQC）のリストが加わった（署名は該当なし） | 原文で確認済み（2026-10-22。R1 と R2 を照合） |
+| [CRYPTREC 暗号強度要件（アルゴリズム及び鍵長選択）に関する設定基準 LS-0003-2022R1](https://www.cryptrec.go.jp/list/cryptrec-ls-0003-2022r1.pdf) | 2022-03（Ver. 1.0） | 設定基準に合わない鍵長では、推奨暗号を使っているとは見なされない。エンティティ認証（表9）では、112ビットの強度（RSA 2048 ビット）は2030年までの移行完遂期間（互換性の維持などに限る）で、2031年からは利用不可。128ビット（P-256、RSA 3072 ビット）は2040年まで利用可 → WebAuthn の RS256 の扱い（ADR 0012） | 原文で確認済み（2026-10-22） |
+| [CRYPTREC/IPA TLS 暗号設定ガイドライン](https://www.cryptrec.go.jp/report/cryptrec-gl-3001-3.1.1.pdf) | 第3.1.1版、2025-04-25 | 本番の TLS の設定（推奨セキュリティ型・高セキュリティ型の要求設定。4章、5章） | 原文で確認済み（2026-10-22） |
 
-プロトコルで方式が決まっているもの（Web Push の RFC 8291、DKIM と ARC の rsa-sha256、受け取ったメールの ed25519-sha256 の検証）は、CRYPTREC への掲載を問わない例外として扱う（plan 8章）。
+プロトコルで方式が決まっているもの（Web Push の RFC 8291、DKIM と ARC の rsa-sha256、受け取ったメールの ed25519-sha256 の検証）は、CRYPTREC への掲載を問わない例外として扱う（plan 8章）。なお、EdDSA と RSASSA-PKCS1-v1_5 は、電子政府推奨暗号リストにも掲載されている。
 
 ## 法令・行政の解釈
 
 | 資料 | 日付 | 根拠にしている点 | 状態 |
 |---|---|---|---|
-| [個人情報保護委員会 Q&A Q1-4](https://www.ppc.go.jp/all_faq_index/faq1-q1-4/)、[Q8-2](https://www.ppc.go.jp/all_faq_index/faq1-q8-2/) | Q&A 令和7年7月更新 | 別名と sub だけなら、企業にとって個人関連情報。氏名や住所を結び付けた時点で個人情報になる。令和8年改正の後は、連絡可能個人関連情報として規制される | 抜粋のみ |
-| [個人情報保護委員会 通則編 2-1](https://www.ppc.go.jp/personalinfo/legal/guidelines_tsusoku/) | 令和8年6月一部改正 | 他の事業者への照会が要るなら、容易に照合できない | 抜粋のみ |
-| [Q&A Q7-43](https://www.ppc.go.jp/all_faq_index/faq1-q7-43/) | — | 委託先は、複数の委託元のデータを本人ごとに突き合わせられない → 割符を委託先にしない | 抜粋のみ |
-| [Q&A Q6-11](https://www.ppc.go.jp/all_faq_index/faq1-q6-11_/) | — | 連絡先だけの漏えいは、ただちには財産的被害の類型（第2号）に当たらない | 抜粋のみ |
-| [Q&A「高度な暗号化等の秘匿化」](https://www.ppc.go.jp/all_faq_index/faq1-q6-19_/) | — | 推奨暗号と鍵の分離管理で、漏えい等報告が不要になりうる。反映先はなし：割符の報告義務は残る前提で設計し、主張には使わない | 抜粋のみ |
-| [個人情報保護法 令和8年改正](https://www.ppc.go.jp/news/press/2026/260717/) | 2026-07-17 公布 | 連絡可能個人関連情報への、不適正な利用と不正な取得の禁止 | 抜粋のみ |
-| [総務省 電気通信事業参入マニュアル［追補版］](https://www.soumu.go.jp/main_content/000477428.pdf) | 令和5年1月30日改定 | 内容を変えずに取り次ぐことは「他人の通信の媒介」に当たり、届出が要る | 抜粋のみ |
-| [総務省：犯収法（電話受付代行業・電話転送サービス事業者向け）](https://www.soumu.go.jp/main_sosiki/joho_tsusin/d_syohi/money/top.html) | 2026-10 時点 | 電話転送サービス事業者の定義（番号の利用許諾と自動転送） | 抜粋のみ |
-| [総務省：電話転送サービス事業者への是正命令](https://www.soumu.go.jp/menu_news/s-news/01kiban18_01000233.html) | 2024-06-03 | 取引時確認の義務違反で是正命令が出た例 | 抜粋のみ |
-| [経済産業省：郵便物受取サービス業者の Q&A](https://www.meti.go.jp/policy/commercial_mail_receiving/pdf/questionandanswer.pdf) | 令和2年4月版 | 自己の所在地で顧客の郵便物を受け取って引き渡す事業は、犯収法の特定事業者 → 割符が荷物を受け取って転送する形は採らない | 抜粋のみ |
-| [総務省：携帯電話不正利用防止法の Q&A（050アプリ電話）](https://www.soumu.go.jp/main_sosiki/joho_tsusin/d_syohi/050526_1.files/Page444.html) | 令和6年4月施行の改正 | 050 のアプリ通話を提供する事業者も、本人確認の義務の対象 | 抜粋のみ |
-| [警察庁：犯収法施行規則の改正 Q&A](https://www.npa.go.jp/sosikihanzai/jafic/hourei/data/25062402qa.pdf) | 2025-06-24 公布、2027-04-01 施行 | 非対面の本人確認を、IC チップと JPKI に原則一本化する | 抜粋のみ |
-| [古物営業法（e-Gov）](https://laws.e-gov.go.jp/law/324AC0000000108) | 現行 | 15条：買受けなどの際に、相手方の住所・氏名・職業・年齢を確認する | 抜粋のみ |
-| [経済産業省：クレジットカード・セキュリティガイドライン 6.0版](https://www.meti.go.jp/press/2024/03/20250305002/20250305002.html) | 2025-03-05 | EC 加盟店への EMV 3-D セキュアと不正ログイン対策の要求。不正対策の「配送先情報」 | 抜粋のみ |
+| [個人情報保護委員会 Q&A Q1-4](https://www.ppc.go.jp/all_faq_index/faq1-q1-4/)、[Q8-2](https://www.ppc.go.jp/all_faq_index/faq1-q8-2/) | Q&A 令和7年7月1日の追加・更新 | 原文：メールアドレスのユーザー名とドメイン名から特定の個人を識別できる場合は、それ単独で個人情報。個人情報に当たらない場合は、通常、アカウントの利用者に関する情報として個人関連情報に当たる（個別の事案ごとに判断）。他の情報と容易に照合して識別できる場合は、あわせて全体として個人情報。この製品の解釈：別名と sub だけなら、企業にとって個人関連情報に当たると考えられ、氏名や住所を結び付けた時点で個人情報になる。令和8年改正の後の扱いは、下の令和8年改正の行による | 原文で確認済み（2026-10-22） |
+| [個人情報保護委員会 通則編 2-1](https://www.ppc.go.jp/personalinfo/legal/guidelines_tsusoku/) | 令和8年6月一部改正 | 「容易に照合することができ」るとは、通常の業務における一般的な方法で照合できる状態をいい、他の事業者への照会を要する場合などで照合が困難な状態は、一般に、容易に照合できない状態と解される（2-1 の※4） | 原文で確認済み（2026-10-22） |
+| [Q&A Q7-43](https://www.ppc.go.jp/all_faq_index/faq1-q7-43/) | 令和3年9月追加 | 複数の委託を受ける委託先は、各委託元から提供を受けた個人データを本人ごとに突合できない（法27条5項1号）→ 割符を委託先にしない | 原文で確認済み（2026-10-22） |
+| [Q&A Q6-11](https://www.ppc.go.jp/all_faq_index/faq1-q6-11_/) | — | 住所、電話番号、メールアドレス、SNS アカウントといった個人データだけの漏えいは、直ちには「不正に利用されることにより財産的被害が生じるおそれがある個人データの漏えい等」（施行規則7条2号）に当たらないと考えられる | 原文で確認済み（2026-10-22） |
+| [Q&A Q6-19「高度な暗号化等の秘匿化」](https://www.ppc.go.jp/all_faq_index/faq1-q6-19_/) | — | 電子政府推奨暗号リストなどに載った暗号技術を適切に実装し、復号の手段を適切に管理する（①暗号化した情報と復号鍵を分離し、鍵の漏えいを防ぐ、②遠隔で削除できる、③第三者が復号鍵を使えない設計、のどれか）場合は、漏えい等報告を要しない場合に当たりうる。反映先はなし：割符の報告義務は残る前提で設計し、主張には使わない | 原文で確認済み（2026-10-22） |
+| [個人情報保護法 令和8年改正](https://www.ppc.go.jp/news/press/2026/260717/)（[法律の本文](https://www.ppc.go.jp/files/pdf/260717_houritsu.pdf)） | 2026-07-17 公布。一部を除き、公布から2年以内で政令で定める日に施行 | 新しい2条8項で「連絡可能個人関連情報」を定める（1号 所在地、2号 電話番号、3号 電子メールアドレス、4号 電気通信の符号。特定の個人への連絡に使えるものに限る）。31条の2で、個人関連情報取扱事業者による不適正な利用（1項）と不正な取得（2項）を禁じる | 原文で確認済み（2026-10-22） |
+| [総務省 電気通信事業参入マニュアル［追補版］](https://www.soumu.go.jp/main_content/000477428.pdf) | 平成17年8月18日策定、令和5年1月30日改定 | 他人の依頼を受けて、情報をその内容を変更することなく伝送・交換することは「他人の通信を媒介する」に当たり、登録又は届出が要る。フォーマット変更やメールヘッダーへの配送情報の追加など、外形的・形式的な改変は「本質的な内容の改変」に当たらない。オンラインサービスでは、加工・編集を行わず、送信時の宛先として受信者を指定している場合に当たる。転送電話サービス（自らが使用・管理する番号への着信を利用者に転送する）も、登録又は届出が要る | 原文で確認済み（2026-10-22） |
+| [総務省：犯収法（電話受付代行業・電話転送サービス事業者向け）](https://www.soumu.go.jp/main_sosiki/joho_tsusin/d_syohi/money/top.html) | 2026-10-22 時点 | 電話転送サービス業務の定義：(1) 自己の電話番号を、顧客が連絡先として利用することを許諾し、(2) その番号に係る電話（FAX を含む）を、顧客が指定する番号に自動的に転送する、の両方を満たすもの | 原文で確認済み（2026-10-22） |
+| [総務省：電話転送サービス事業者への是正命令](https://www.soumu.go.jp/menu_news/s-news/01kiban18_01000233.html) | 2024-06-03 | 電話転送サービス業者に、取引時確認の義務（法4条1項）の違反で、法18条の是正命令が出た例 | 原文で確認済み（2026-10-22） |
+| [経済産業省：郵便物受取サービス業者の Q&A](https://www.meti.go.jp/policy/commercial_mail_receiving/pdf/questionandanswer.pdf) | 令和2年4月版 | 問2：自己の居所や事務所の所在地を顧客の郵便物の受取場所として使わせ、顧客宛ての郵便物を受け取り、引き渡す事業者は、名称を問わず犯収法の特定事業者（法2条2項42号）→ 割符が荷物を受け取って転送する形は採らない | 原文で確認済み（2026-10-22） |
+| [総務省：携帯電話不正利用防止法の Q&A（050アプリ電話）](https://www.soumu.go.jp/main_sosiki/joho_tsusin/d_syohi/050526_1.files/Page444.html) | 令和5年8月の省令改正、令和6年4月1日施行 | 2-1、2-5：050 番号を使うアプリの通話を自ら提供する電気通信事業者も、本人確認の義務の対象 | 原文で確認済み（2026-10-22） |
+| [警察庁：犯収法施行規則の改正 Q&A](https://www.npa.go.jp/sosikihanzai/jafic/hourei/data/25062402qa.pdf) | 2027-04-01 施行（施行日は上の金融庁の資料で確認。Q&A に公布日の記載はない） | 本人確認書類の画像の送信を受ける方法（規則6条1項1号ホ）を廃止し、IC チップ情報の送信を受ける方法と、電子証明書（JPKI）の送信を受ける方法（ル、ヲ、ワ）に寄せる | 原文で確認済み（2026-10-22） |
+| [古物営業法（e-Gov）](https://laws.e-gov.go.jp/law/324AC0000000108) | 現行 | 15条1項：買受けなどの際に、相手方の真偽を確かめるため、住所・氏名・職業・年齢の確認など1〜4号のいずれかの措置をとる。2項：一定額未満の取引などの例外 | 原文で確認済み（2026-10-22） |
+| [経済産業省：クレジットカード・セキュリティガイドライン 6.0版](https://www.meti.go.jp/press/2024/03/20250305002/20250305002.html) | 2025-03-05 | EC 加盟店への EMV 3-D セキュアと不正ログイン対策（ログイン時の本人認証など）の要求（公表のページで確認）。不正対策の「配送先情報」は、本文（`j-credit.or.jp`）を取得できず照合していない（2026-10-22 は接続を拒否され、2026-10-23 は接続できたが、サイト全体がメンテナンスのページに転送された） | 抜粋のみ（公表のページは原文で確認済み。2026-10-22） |
 
 ## メール
 
 | 資料 | 根拠にしている点 | 反映先 | 状態 |
 |---|---|---|---|
-| [Google：Email sender guidelines](https://support.google.com/a/answer/81126) | 送信者の要件（SPF、DKIM、DMARC） | 8章 | 抜粋のみ |
-| [Google：Best practices for forwarding email to Gmail](https://support.google.com/a/answer/175365) | 転送する事業者は ARC を付ける。DKIM で保護されたヘッダーは変えないのが原則。この製品は衛生のために意図して変える（plan 3-2）ので、その影響を plan 8章で扱う | 3-2、8章 | 抜粋のみ |
-| [RFC 6376（DKIM）](https://www.rfc-editor.org/info/rfc6376/) | l= と x= の意味、h= と oversign | 送信元ロック | 未確認 |
-| [RFC 7489（DMARC）](https://www.rfc-editor.org/info/rfc7489/) | 整合の判定 | 返信の中継 | 未確認 |
-| [RFC 8617（ARC）](https://www.rfc-editor.org/info/rfc8617/) | 転送時の封印 | 8章 | 未確認 |
-| [RFC 8058（ワンクリック配信停止）](https://www.rfc-editor.org/info/rfc8058/) | List-Unsubscribe-Post と DKIM の関係 | 中継の衛生 | 未確認 |
-| [RFC 8463（Ed25519 の DKIM）](https://www.rfc-editor.org/info/rfc8463/) | 受け取ったメールの検証方式 | 暗号の許可リスト | 未確認 |
-| [RFC 8291（Web Push の暗号）](https://www.rfc-editor.org/info/rfc8291/) | aes128gcm と ECDH | 暗号の例外 | 未確認 |
+| [Google：Email sender guidelines](https://support.google.com/a/answer/81126) | すべての送信者は SPF か DKIM。1日5,000通を超える送信者は SPF、DKIM、DMARC（p=none でよい）、From と SPF か DKIM のドメインの整合、ワンクリックの配信停止 | 8章 | 原文で確認済み（2026-10-22） |
+| [Google：Best practices for forwarding email to Gmail](https://support.google.com/a/answer/175365) | 転送では、エンベロープの送信者を転送側のドメインにする。DKIM が守る本文とヘッダー（Subject、To、Cc、Date、Message-ID など）を変えない。`X-Forwarded-For` か `X-Forwarded-To` を付ける。このページの現在の版は ARC に触れていない（ARC は製品の選択。RFC 8617）。この製品は衛生のために意図してヘッダーを変える（plan 3-2）ので、その影響を plan 8章で扱う | 3-2、8章 | 原文で確認済み（2026-10-22） |
+| [RFC 6376（DKIM）](https://www.rfc-editor.org/info/rfc6376/) | l= の悪用（8.2）、x= は推奨で、リプレイの防止を意図したものではない（3.5）、h= の重ね署名（5.4.2）。RFC 8301 の更新で、rsa-sha1 は署名にも検証にも使わない | 送信元ロック | 原文で確認済み（2026-10-22） |
+| [RFC 9989（DMARC）](https://www.rfc-editor.org/info/rfc9989/) | 2026-05 に RFC 7489 を置き換えた（集計と失敗の報告は RFC 9990、9991）。整合は relaxed と strict（3.2.10）。組織ドメインは、Public Suffix List ではなく DNS Tree Walk で決める（4.10）。pct タグを廃止 | 返信の中継 | 原文で確認済み（2026-10-22） |
+| [RFC 8617（ARC）](https://www.rfc-editor.org/info/rfc8617/) | 転送時の封印（Experimental、2019-07）。署名の方式は DKIM と同じ | 8章 | 原文で確認済み（2026-10-22） |
+| [RFC 8058（ワンクリック配信停止）](https://www.rfc-editor.org/info/rfc8058/) | List-Unsubscribe と List-Unsubscribe-Post を、DKIM の署名（h=）に含めなければならない（4章） | 中継の衛生 | 原文で確認済み（2026-10-22） |
+| [RFC 8463（Ed25519 の DKIM）](https://www.rfc-editor.org/info/rfc8463/) | 検証側は Ed25519-SHA256 を実装しなければならない（MUST） | 暗号の許可リスト | 原文で確認済み（2026-10-22） |
+| [RFC 8291（Web Push の暗号）](https://www.rfc-editor.org/info/rfc8291/) | aes128gcm と、P-256 の ECDH | 暗号の例外 | 原文で確認済み（2026-10-22） |
 
 ## 配送
 
 | 資料 | 根拠にしている点 | 状態 |
 |---|---|---|
-| [日本郵便：郵便番号・デジタルアドレスAPI](https://www.post.japanpost.jp/notification/pressrelease/2025/00_honsha/0526_02.html) | 事業者はデジタルアドレスから住所を取得できる → 別名としては使えない | 抜粋のみ |
-| [ヤマト運輸：配送連携API の FAQ](https://b-faq.kuronekoyamato.co.jp/app/answers/detail/a_id/678/) | 匿名配送はフリマなど向けで、EC から購入者への発送には使えない | 抜粋のみ |
-| [ヤマト運輸：EC自宅外受け取りAPI](https://business.kuronekoyamato.co.jp/service/lineup/business_members/api/pickup/index.html) | 受け取り場所の指定（第1段階） | 抜粋のみ |
+| [日本郵便：郵便番号・デジタルアドレスAPI](https://www.post.japanpost.jp/notification/pressrelease/2025/00_honsha/0526_02.html) | 2025-05-26 のプレスリリース（[PDF](https://www.post.japanpost.jp/notification/pressrelease/2025/00_honsha/0526_02_01.pdf)）。API は、デジタルアドレスをキーに、住所の全文（郵便番号、都道府県から町域、建物の情報まで）を返す。使うには、ゆうID、郵便番号・デジタルアドレス for Biz のアカウント、法人か個人事業主としての組織の登録が要る（無料）。用途として、デジタルアドレスをキーにした「複数サービスに横断する住所の名寄せ」と、転居届（e転居）の反映による「転居後住所の取得」を挙げている → 事業者が住所を引けるうえ、企業をまたいだ突き合わせのキーになるので、別名としては使えない（plan 5章） | 原文で確認済み（2026-10-23） |
+| [ヤマト運輸：配送連携API の FAQ](https://b-faq.kuronekoyamato.co.jp/app/answers/detail/a_id/678/) | FAQ 番号 678 は「配送連携API フリマ・オークション事業者向け」の分類で、匿名配送を「お受取人様・ご依頼主様が、それぞれお互いの情報を知ることなく、お荷物を輸配送することが可能なサービス」と説明している。以前この行に書いていた「EC から購入者への発送には使えない」は原文になく、分類からの推論だった（ADR 0012）。EC の発送に使えるかは、ヤマト運輸との交渉で確かめる（イシュー #16） | 原文で確認済み（2026-10-23。JavaScript で描画されるページなので、ヘッドレスの Chromium で取得した） |
+| [ヤマト運輸：EC自宅外受け取りAPI](https://business.kuronekoyamato.co.jp/service/lineup/business_members/api/pickup/index.html) | 受け取り場所の指定（第1段階）。受け取り場所（営業所、PUDO、コンビニ）は購入時に選ぶ。購入後の変更と転送はできない。実装できるのは自社で構築したアプリケーションだけで、EC モールやカートのサイトには実装できない | 原文で確認済み（2026-10-23） |
 
 ## スタックの前提
 
 | 資料 | 根拠にしている点 | 状態 |
 |---|---|---|
-| [OpenID 認定の一覧](https://openid.net/certification/) | oidc-provider が認定を受けていること（ADR 0002） | 未確認 |
-| [AWS：SES のメール受信リージョンの拡大](https://aws.amazon.com/about-aws/whats-new/2023/09/amazon-ses-email-service-7-regions) | 東京リージョンで受信できること（ADR 0002） | 抜粋のみ |
+| [OpenID 認定の一覧](https://openid.net/certification/certified-openid-connect-implementations/) | oidc-provider（8.5.0 以上）は、Basic OP や Config OP などの OP の認定を受けている（ADR 0002）。CIBA（FAPI-CIBA）の認定の一覧には載っていない | 原文で確認済み（2026-10-22） |
+| [AWS：SES のメール受信リージョンの拡大](https://aws.amazon.com/about-aws/whats-new/2023/09/amazon-ses-email-service-7-regions) | 東京リージョンで受信できること（ADR 0002）。2023-09-08 の発表で、受信を追加した7リージョンに Asia Pacific (Tokyo) を含む | 原文で確認済み（2026-10-23） |
 
 ## 原文の照合に必要なドメイン
 
-イシュー #2 で、次のドメインへの接続の許可か、PDF の提供が要る。
+イシュー #2 で、次のドメインへの接続の許可か、PDF の提供が要る。2026-10-23 の時点で、次のものは出口のプロキシで拒否される：`nvlpubs.nist.gov` と `csrc.nist.gov`（NIST は `pages.nist.gov` の HTML 版で照合したので要らない）。`www.j-credit.or.jp` は接続できるが、2026-10-23 はサイト全体がメンテナンスのページに転送され、ガイドラインの本文を取得できない（`j-credit.or.jp` は CONNECT が 502）。`b-faq.kuronekoyamato.co.jp` は JavaScript で描画され、curl では 401 が返るので、ヘッドレスの Chromium で取得する。`meti.go.jp` は、ブラウザの User-Agent を付けないと「ページが存在しません」を返す。
 
-`nist.gov`、`openid.net`、`rfc-editor.org`、`w3.org`、`fidoalliance.org`、`github.com`、`digital.go.jp`、`fsa.go.jp`、`jsda.or.jp`、`nict.go.jp`、`soumu.go.jp`、`jpcert.or.jp`（`blogs.jpcert.or.jp` を含む）、`cyber.go.jp`、`lac.co.jp`、`ppc.go.jp`、`cryptrec.go.jp`、`meti.go.jp`、`npa.go.jp`、`e-gov.go.jp`、`support.google.com`、`support.apple.com`、`post.japanpost.jp`、`kuronekoyamato.co.jp`、`aws.amazon.com`
+`nist.gov`、`openid.net`、`rfc-editor.org`、`w3.org`、`fidoalliance.org`、`github.com`、`digital.go.jp`、`fsa.go.jp`、`jsda.or.jp`、`nict.go.jp`、`soumu.go.jp`、`jpcert.or.jp`（`blogs.jpcert.or.jp` を含む）、`cyber.go.jp`、`ppc.go.jp`、`cryptrec.go.jp`、`meti.go.jp`、`npa.go.jp`、`e-gov.go.jp`、`support.google.com`、`support.apple.com`、`post.japanpost.jp`（`www.post.japanpost.jp`）、`kuronekoyamato.co.jp`（`b-faq.kuronekoyamato.co.jp`、`business.kuronekoyamato.co.jp`）、`aws.amazon.com`、`cynex.nict.go.jp`、`www.j-credit.or.jp`（メンテナンス中は本文を取得できない）
