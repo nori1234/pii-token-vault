@@ -1,15 +1,39 @@
 // relay の鍵のクライアント（不変条件3、ADR 0013）。連絡先を復号できる唯一のクライアント。
 // relay だけが import する（t08-key-client-surface で固定する）。
-// 連絡先の暗号化、別名の導出、署名のメソッドはない（鍵サービスも 403 を返す）。
+// 連絡先の暗号化と別名の導出のメソッドはない（鍵サービスも 403 を返す）。署名は DKIM と ARC の鍵（dkim）だけ（ADR 0021）。
 
 import { isUuid, parseWarifuUserId, type WarifuUserId } from '../ids.ts';
 import { macWith } from './common.ts';
 import { KeysvcError } from './errors.ts';
-import { type KeysvcConnection, LIMITS } from './protocol.ts';
-import { bytesFrom, createKeysvcTransport, encodeBytes } from './transport.ts';
+import { type KeysvcConnection, LIMITS, RSA2048_SIGNATURE_BYTES } from './protocol.ts';
+import {
+  arrayFrom,
+  bytesFrom,
+  createKeysvcTransport,
+  encodeBytes,
+  stringFrom,
+} from './transport.ts';
 
-export type RelayMacPurpose = 'alias_lookup' | 'audit_chain';
-const MAC_PURPOSES: readonly RelayMacPurpose[] = ['alias_lookup', 'audit_chain'];
+/**
+ * relay の MAC の用途。relay_replay は DKIM の b= の照合用、relay_thread は返信用のアドレスの照合用、
+ * message_id は配送ログの Message-ID（ADR 0021）。
+ */
+export type RelayMacPurpose =
+  | 'alias_lookup'
+  | 'audit_chain'
+  | 'relay_replay'
+  | 'relay_thread'
+  | 'message_id';
+const MAC_PURPOSES: readonly RelayMacPurpose[] = [
+  'alias_lookup',
+  'audit_chain',
+  'relay_replay',
+  'relay_thread',
+  'message_id',
+];
+const KID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+/** RSA 2048 の SubjectPublicKeyInfo の DER は 294 バイト。 */
+const DKIM_SPKI_BYTES = 294;
 // 暗号文の上限：頭の6バイト、IV の12バイト、平文、タグの16バイト。
 const MAX_CIPHERTEXT_BYTES = 6 + 12 + LIMITS.plaintextBytes + 16;
 
@@ -27,6 +51,10 @@ export interface RelayKeyClient {
     readonly ciphertext: Uint8Array;
   }): Promise<Uint8Array>;
   mac(purpose: RelayMacPurpose, message: Uint8Array): Promise<Uint8Array>;
+  /** DKIM と ARC の署名（rsa-sha256）。message は正規化したヘッダーの列。 */
+  signDkim(message: Uint8Array): Promise<{ readonly kid: string; readonly signature: Uint8Array }>;
+  /** DNS の p= に載せる公開鍵（SubjectPublicKeyInfo の DER）。 */
+  dkimPublicKey(): Promise<{ readonly kid: string; readonly spki: Uint8Array }>;
 }
 
 function queueItemId(value: string): string {
@@ -72,6 +100,27 @@ export function createRelayKeyClient(connection: KeysvcConnection): RelayKeyClie
     },
     mac(purpose: RelayMacPurpose, message: Uint8Array) {
       return macWith(call, MAC_PURPOSES, purpose, message);
+    },
+    async signDkim(message: Uint8Array) {
+      const response = await call('sign', {
+        keyId: 'dkim',
+        message: encodeBytes(message, LIMITS.signMessageBytes),
+      });
+      return {
+        kid: stringFrom(response, 'kid', KID_PATTERN),
+        signature: bytesFrom(response, 'signature', RSA2048_SIGNATURE_BYTES),
+      };
+    },
+    async dkimPublicKey() {
+      const response = await call('public_keys', { keyId: 'dkim' });
+      const keys = arrayFrom(response, 'keys');
+      const key = keys[0];
+      if (keys.length !== 1 || typeof key !== 'object' || key === null) {
+        throw new KeysvcError('internal');
+      }
+      const kid = stringFrom(key, 'kid', KID_PATTERN);
+      if ((key as { kty?: unknown }).kty !== 'RSA') throw new KeysvcError('internal');
+      return { kid, spki: bytesFrom(key, 'spki', DKIM_SPKI_BYTES) };
     },
   });
 }

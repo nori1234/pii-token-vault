@@ -10,6 +10,7 @@ import {
   newSymmetricKey,
 } from '../../packages/keysvc/src/crypto.ts';
 import { createIdpKeyClient } from '../../packages/warifu-core/src/keys/idp.ts';
+import { createRelayKeyClient } from '../../packages/warifu-core/src/keys/relay.ts';
 import { keysvcConnection } from '../setup/keys.ts';
 import {
   importsOf,
@@ -61,8 +62,8 @@ describe('漏えい：暗号の許可リスト（plan 11章 テスト8）', () =
   it('鍵サービスの暗号のファイルに書いた方式は、許可リストのものだけ', () => {
     // 攻撃者が持っている情報：なし（静的な固定）
     // 試す経路：packages/keysvc/src/crypto.ts の、英数字の文字列リテラルを集める
-    // 期待する結果：aes-256-gcm、sha256、ec、P-256、ieee-p1363 と、方式でない語（import 元、jwk、string、
-    //               例外の名前）だけ。
+    // 期待する結果：aes-256-gcm、sha256、ec、P-256、ieee-p1363、rsa（DKIM と ARC だけ。ADR 0021）と、
+    //               方式でない語（import 元、jwk、spki、der、string、例外の名前）だけ。
     //               authTagLength は16、IV は12バイト
     // plan 11章：テスト8
     const source = read('packages/keysvc/src/crypto.ts');
@@ -75,7 +76,10 @@ describe('漏えい：暗号の許可リスト（plan 11章 テスト8）', () =
         'ec',
         'P-256',
         'ieee-p1363',
+        'rsa',
         'jwk',
+        'spki',
+        'der',
         'string',
         'CryptoOpenError',
       ]),
@@ -84,6 +88,9 @@ describe('漏えい：暗号の許可リスト（plan 11章 テスト8）', () =
     expect(code).toMatch(/GCM_IV_BYTES = 12;/);
     expect(code).toMatch(/GCM_TAG_BYTES = 16;/);
     expect(code.match(/authTagLength: GCM_TAG_BYTES/g)).toHaveLength(2);
+    // RSA の鍵は2048ビットだけを作る（DKIM と ARC。CRYPTREC の設定基準の下限。ADR 0012、0021）。
+    expect(code).toMatch(/RSA_MODULUS_BITS = 2048;/);
+    expect(code.match(/modulusLength/g)).toHaveLength(1);
   });
 
   it('弱い方式の名前と Math.random を、どこにも書かない', () => {
@@ -100,6 +107,24 @@ describe('漏えい：暗号の許可リスト（plan 11章 テスト8）', () =
         );
       }
     }
+  });
+
+  it('DKIM と ARC の署名は rsa-sha256（PKCS#1 v1.5、2048ビット）', async () => {
+    // 攻撃者が持っている情報：なし（実行時の固定。不変条件9のプロトコルの例外を、DKIM の鍵だけに限る）
+    // 試す経路：relay の資格情報で signDkim を呼び、公開鍵（SPKI）で RSA-SHA256 として検証する
+    // 期待する結果：検証できる。鍵は RSA の2048ビット。署名は256バイト
+    // plan 11章：テスト8
+    inject('keysvc');
+    const relay = createRelayKeyClient(keysvcConnection('relay'));
+    const message = new Uint8Array(Buffer.from('dkim-signature:v=1; a=rsa-sha256; b='));
+    const { kid, signature } = await relay.signDkim(message);
+    expect(signature.byteLength).toBe(256);
+    const key = await relay.dkimPublicKey();
+    expect(key.kid).toBe(kid);
+    const publicKey = createPublicKey({ key: Buffer.from(key.spki), format: 'der', type: 'spki' });
+    expect(publicKey.asymmetricKeyType).toBe('rsa');
+    expect(publicKey.asymmetricKeyDetails?.modulusLength).toBe(2048);
+    expect(verify('sha256', message, publicKey, signature)).toBe(true);
   });
 
   it('実際の方式：HMAC-SHA-256、AES-256-GCM、ES256', async () => {

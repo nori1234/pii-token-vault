@@ -30,6 +30,7 @@ import {
   GCM_TAG_BYTES,
   hmacSha256,
   signEs256,
+  signRsaSha256,
 } from './crypto.ts';
 import { ENCRYPTION_KEY_NUMBER, type Keyring } from './keyring.ts';
 
@@ -178,7 +179,11 @@ function sign(body: Record<string, unknown>, keyring: Keyring): { kid: string; s
   exactKeys(body, ['keyId', 'message']);
   const message = bytesField(body.message, 1, LIMITS.signMessageBytes);
   const key = keyring.signingKey(body.keyId as SigningKeyId);
-  return { kid: key.kid, signature: toBase64Url(signEs256(key.privateKey, message)) };
+  const signature =
+    key.alg === 'ES256'
+      ? signEs256(key.privateKey, message)
+      : signRsaSha256(key.privateKey, message);
+  return { kid: key.kid, signature: toBase64Url(signature) };
 }
 
 function publicKeys(body: Record<string, unknown>, keyring: Keyring): { keys: readonly object[] } {

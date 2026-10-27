@@ -48,7 +48,7 @@
    - HTTP(S)、SMTP、テナントや利用者が指定した宛先への接続、名前解決を含む。各サービスのコードでも、ライブラリの設定でも、外部へ直接つながない。
    - oidc-provider では `jwks_uri`、`sector_identifier_uri`、`request_uri` を受け付けず、企業の鍵は登録時に `jwks` で受け取る。動的クライアント登録は無効にする。企業のクライアント認証は `private_key_jwt` だけ。
    - DNS は、注入したリゾルバを通してだけ引く（mailauth の `resolver` を使う）。
-   - relay から本物のアドレスへの配送経路は、M4 で ADR に決める。それまでは Mailer のメモリ実装だけを使う。
+   - relay から本物のアドレスへの配送は、署名したメッセージを送信サービスの内部 API に渡す形にする（ADR 0021）。送信サービスの内部 API ができる M5 までは、relay の Outbound のメモリ実装だけを使う。
 8. **DB の境界**：
    - アプリのコードは、`withTenant(tenantId, fn)` か `withWarifuUser(userId, fn)` を通してだけ DB に触れる。どちらも、トランザクションごとに `set_config(…, …, true)` で境界を渡す。
    - 全テーブルに RLS の ENABLE と FORCE の両方を付ける。接続ロールは NOSUPERUSER と NOBYPASSRLS にする。サービスごとにスキーマとログインロールを分け、列単位で GRANT する。

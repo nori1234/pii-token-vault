@@ -15,7 +15,7 @@ oidc-provider 9.12.2 には、`ExternalSigningKey`（`keyObject()` と `sign(dat
   - `sign`：`{ keyId: 'id_token', message }` → `{ kid, signature }`。署名は JWS の形（ieee-p1363、64バイト）。入力は 8192 バイトまで。
   - `public_keys`：`{ keyId: 'id_token' }` → `{ keys: Es256PublicJwk[] }`。秘密鍵の項目は持たない。入れ替えの間は、有効な鍵をすべて返す。
 - M3 で、oidc-provider の `ExternalSigningKey` を継いだクラスで、`sign` を鍵サービスに、公開鍵の座標を `public_keys` から返す（ADR 0018。`keyObject()` は node:crypto が要るので使わない）。実験的な機能に頼るので、oidc-provider の版を固定し、M3 のテストで署名の往復を確かめる。
-- SET（M5）、操作ごとの承認（M7）、テナントの JWT（M5）の鍵は、同じ操作の keyId として、各マイルストーンで足す。DKIM と ARC の鍵（rsa-sha256）の置き場所は M4 で決める。
+- SET（M5）、操作ごとの承認（M7）、テナントの JWT（M5）の鍵は、同じ操作の keyId として、各マイルストーンで足す。DKIM と ARC の鍵（rsa-sha256）の置き場所は M4 で決める。→ 同じ操作の keyId `dkim`（RSA 2048）として鍵サービスに置いた（ADR 0021）。
 - 入れ替え：新しい鍵を作り、古い公開鍵を、発行済みのトークンの期限まで `public_keys` に残す。
 
 ## 採らなかった案
