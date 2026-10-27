@@ -81,6 +81,7 @@ PR を出す前や、迷ったときは、`.claude/skills/principle-review` で�
   - root のときは、TMPDIR を見ずに `/tmp` の下に作る。一時ディレクトリのパスに空白、引用符、カンマ、バックスラッシュ、制御文字があるときと、Unix ソケットのパスとして長すぎるときは、起動せずに失敗する。
   - サーバーのログには、FATAL 以上だけを terse で残す（値をログに残さないため）。
   - stop() を呼ばずにプロセスが終わっても（Vitest は、Ctrl-C などで teardown を呼ばずに process.exit する）、プロセスの `exit` のときに同期でサーバーを止めて、ディレクトリを消す。`npm run pg-up` は、SIGINT、SIGTERM、SIGHUP を受けたら止めて消す。
+- `npm test` の globalSetup は、マイグレーションを流したテンプレートの DB と、鍵サービス（`scripts/keysvc-up.ts`）を1つずつ起動する。鍵サービスは Unix ソケットだけで待ち受け、資格情報は実行ごとの乱数で、標準入力で渡す。鍵は起動のたびに作り直すので、前の暗号文や MAC は使えなくなる（ADR 0013）。
 - Node では `*.localhost` を名前解決できない。各サービスは localhost のポート違いで動かす。ポートが違ってもクッキーは共有されるので、クッキー名をアプリごとに一意にし、Cookie と Authorization のヘッダーをログに出さない。クッキーの分離を前提にした検証は、ローカルでは成り立たない。WebAuthn の RP ID は localhost になるので、`expectedOrigin` はポート込みで固定する。
 - 外部ネットワークは、npm レジストリと、`docs/standards.md` の末尾に挙げた公式サイトの多くに限られる（2026-10-23 時点で拒否されるドメインは、`docs/standards.md` の末尾に書いた）。一次資料の照合は `docs/standards.md` の状態列で管理する（イシュー #2、ADR 0012）。
 
@@ -89,14 +90,15 @@ PR を出す前や、迷ったときは、`.claude/skills/principle-review` で�
 ```
 npm run lint        # Biome
 npm run typecheck   # tsc --noEmit
-npm test            # Vitest。globalSetup が scripts/pg-up.ts で一時的なクラスタを起動して止める
+npm test            # Vitest。globalSetup が一時的なクラスタ（scripts/pg-up.ts）と鍵サービス（scripts/keysvc-up.ts）を起動して止める
 npm run e2e         # Playwright。CDP の仮想認証器を使う
 npm run pg-up       # 一時的なクラスタを手で起動する。接続先を表示し、Ctrl-C で止めて消す
+npm run migrate     # pg-up が表示した接続先と PGDATABASE に、マイグレーションと DB ごとの ACL を流す
 ```
 
 - 4つのコマンド（lint、typecheck、test、e2e）は、各マイルストーンの PR で通す。CI（`.github/workflows/ci.yml`）も同じものを実行する。
 - `npm run lint` は、不変条件7と9に反するものも止める。対象は次のとおり。
-  - `packages/sender` 以外での、外向きの通信のモジュールと `node:child_process` の import、`fetch` などのグローバル。`node:http` は、`createServer`、`Server`、`IncomingMessage`、`ServerResponse`、`STATUS_CODES` だけを許す。
+  - `packages/sender` 以外での、外向きの通信のモジュールと `node:child_process` の import、`fetch` などのグローバル。`node:http` は、`createServer`、`Server`、`IncomingMessage`、`ServerResponse`、`STATUS_CODES` だけを許す。ただし `packages/warifu-core/src/internal/uds-client.ts` だけは、割符の内部の Unix ドメインソケット（鍵サービスなど）につなぐために `request` を許す（ADR 0013。t08-key-client-surface で固定する）。
   - `packages/sender` も含めて、`node:module` の import と、グローバルの `crypto`、`globalThis`、`global`（`packages/sender` で外しているのは、1つ目の項目の制限だけ）。
   - `packages/warifu-core`・`packages/keysvc`・`spikes/` 以外での、`node:crypto` の import。
   - CI は、さらに `packages/` と `spikes/` の中（Markdown を除く）の `biome-ignore` と `getBuiltinModule`（`process.getBuiltinModule` を含む）と、ルートの `biome.json` 以外の Biome の設定ファイル（入れ子のものと、ルートの `biome.jsonc`、`.biome.json`、`.biome.jsonc`）を見つけたら失敗する。本体のコード（`packages/` と `spikes/` の、テスト以外のファイル）から、テスト、`scripts/`、`test/`、ルートの `*.config.ts` に import でたどり着くとき（`scripts/check-entry-imports.ts` が、Node と同じ方法（型の除去と `import.meta.resolve`）でたどった import のグラフで確かめる。副作用だけの import と間接の import も含む）と、本体のコードで、引用符で囲んだ文字列リテラル1つ以外を渡す動的な import（括弧の中の型の構文を含む）や、ファイルと `node:` の組み込み以外を読み込む import を使ったとき、CommonJS として読み込まれるファイルを置いたとき、シンボリックリンクを追跡したとき（依存を入れる前に確かめる）も失敗する。
@@ -131,7 +133,7 @@ packages/rp-kit       企業向け SDK と適合テスト
 packages/demo-rp      デモ用の予約サイトと窓口担当者の画面
 test/leak             漏えいシナリオのテスト（書き方は test/leak/README.md）
 test/setup            Vitest の globalSetup と、ワーカーごとの DB
-scripts               開発用のスクリプト（pg-up など）
+scripts               開発用のスクリプト（pg-up、keysvc-up、migrate）
 spikes                捨てスパイク。本実装に置き換えたら消す（spikes/README.md）
 ```
 

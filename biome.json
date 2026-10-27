@@ -202,6 +202,71 @@
       }
     },
     {
+      "includes": ["packages/warifu-core/src/internal/uds-client.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "node:dns": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:dns/promises": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "dns": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "dns/promises": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:net": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "net": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:tls": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "tls": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:http": {
+                    "message": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。このファイルだけは、割符の内部の Unix ドメインソケット（鍵サービスなど）につなぐために request を許す（ADR 0013）。",
+                    "allowImportNames": [
+                      "createServer",
+                      "Server",
+                      "IncomingMessage",
+                      "ServerResponse",
+                      "STATUS_CODES",
+                      "request"
+                    ]
+                  },
+                  "http": {
+                    "message": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。このファイルだけは、割符の内部の Unix ドメインソケット（鍵サービスなど）につなぐために request を許す（ADR 0013）。",
+                    "allowImportNames": [
+                      "createServer",
+                      "Server",
+                      "IncomingMessage",
+                      "ServerResponse",
+                      "STATUS_CODES",
+                      "request"
+                    ]
+                  },
+                  "node:https": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "https": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:http2": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "http2": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:dgram": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "dgram": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:child_process": "不変条件7：外部のコマンド（curl など）で外へつながせない。外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "child_process": "不変条件7：外部のコマンド（curl など）で外へつながせない。外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:module": "不変条件7、9：createRequire などで、import の制限（外向きの通信と node:crypto）を回避させない。",
+                  "module": "不変条件7、9：createRequire などで、import の制限（外向きの通信と node:crypto）を回避させない。",
+                  "undici": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "axios": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node-fetch": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "got": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "ky": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "web-push": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "nodemailer": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:crypto": "不変条件9：暗号は packages/warifu-core と packages/keysvc を通して使う（許可リストで固定するため）。",
+                  "crypto": "不変条件9：暗号は packages/warifu-core と packages/keysvc を通して使う（許可リストで固定するため）。"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["spikes/**"],
       "linter": {
         "rules": {
