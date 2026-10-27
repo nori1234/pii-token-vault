@@ -250,7 +250,7 @@
 - **スタック**：TypeScript（Node 22、ESM、`module: nodenext`）。
   - `oidc-provider` 9.x：pairwise と CIBA に対応している。Fastify には @fastify/middie で載せ、oidc-provider の経路にはボディ解析を通さない。
   - そのほか：`@simplewebauthn` 14、`smtp-server`、`mailauth` 7、`nodemailer`（テストの送信側）、Fastify 5、`pg`、Vitest、Biome。
-- **Playwright**：`@playwright/test` を **1.56.1 に完全固定**する（この環境の Chromium の revision 1194 に合わせるため）。CDP の仮想認証器を使う。CI では `npx playwright install --with-deps chromium` を実行する。
+- **Playwright**：`@playwright/test` を **1.56.1 に完全固定**する（この環境の Chromium の revision 1194 に合わせるため）。CDP の仮想認証器を使う。CI では、`npm ci` の後に `npx --no playwright install --with-deps chromium` を実行する。
 - **Postgres**：`scripts/pg-up.ts` で起動する。
   - バイナリは `/usr/lib/postgresql/16/bin`（`PG_BIN` で上書きできる）。root で実行されたときだけ `runuser -u postgres` を使い、TMPDIR を見ずに `/tmp` の下に作ったディレクトリを postgres の利用者に chown する。データとソケットは `mktemp -d` 相当で作ったディレクトリに置き、TCP では待ち受けず、空いているポートの番号を使う。テストを速くするため `fsync=off` にする。サーバーのログには FATAL 以上だけを terse で残す（CLAUDE.md「環境の注意」）。
   - Vitest の globalSetup が起動して止める。Playwright は、E2E で DB が要るようになったとき（M3）に、同じ仕組みを使う。Vitest のワーカーごとに、TEMPLATE から DB を作る。監査ログのチェーンへの追記は `pg_advisory_xact_lock` で直列にする。
