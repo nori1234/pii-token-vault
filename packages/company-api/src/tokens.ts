@@ -3,7 +3,8 @@
 // トークンの発行（POST /token）：
 // - grant_type は client_credentials だけ。クライアント認証は private_key_jwt（RFC 7523）だけ。
 // - client assertion は ES256 で、登録した jwks の鍵で検証する。iss と sub は client_id、aud はトークンの
-//   エンドポイントの URL、exp・iat・jti は必須、iat から5分まで。jti は期限まで覚えて、2回目を断る。
+//   エンドポイントの URL の1つだけ（配列は断る。ほかの宛先と兼ねた assertion を通さない。idp と同じ。ADR 0006）、
+//   exp・iat・jti は必須、iat から5分まで。jti は期限まで覚えて、2回目を断る。
 // - 失敗は、理由によらず同じ invalid_client（どの client_id が登録されているかを区別させない）。
 // - 緊急停止したテナントのクライアントには出さない。
 //
@@ -137,7 +138,9 @@ export class TokenService {
     if (payload === undefined) return undefined;
     const nowSeconds = Math.floor(this.#now().getTime() / 1000);
     const { jti, exp } = payload;
+    // jose の audience は、配列の中に含まれていても通す。ここで1つの文字列に絞る。
     if (
+      payload.aud !== this.tokenEndpoint ||
       typeof jti !== 'string' ||
       !JTI_PATTERN.test(jti) ||
       typeof exp !== 'number' ||

@@ -101,7 +101,8 @@ describe('漏えい：企業向け API のテナントの境界（plan 11章 テ
 
   it('client assertion は ES256 で、自分の鍵、自分の client_id、トークンのエンドポイント、1回だけ', async () => {
     // 攻撃者が持っている情報：A社の秘密鍵（侵害されたテナント ATK-03）、B社の client_id、盗み見た A社の assertion
-    // 試す経路：A社の鍵で B社の client_id を名乗る。aud を違える。期限の切れたもの、iat の古いもの、
+    // 試す経路：A社の鍵で B社の client_id を名乗る。aud を違える、または、ほかの宛先と並べた配列にする
+    //           （idp と兼ねた assertion）。期限の切れたもの、iat の古いもの、
     //           ES384 や HS256 で署名したもの、同じ assertion の2回目、知らない client_id、
     //           client_secret を足したもの、client_assertion_type の違うもの
     // 期待する結果：client の認証の失敗は、すべて同じ 401 invalid_client。形の違いは 400 invalid_request
@@ -124,6 +125,12 @@ describe('漏えい：企業向け API のテナントの境界（plan 11章 テ
           aud: 'https://idp.warifu.test/oidc/token',
         }),
       },
+      {
+        client_assertion: await clientAssertion(a.client, {
+          aud: [TOKEN_ENDPOINT, 'https://idp.warifu.test/oidc'],
+        }),
+      },
+      { client_assertion: await clientAssertion(a.client, { aud: [TOKEN_ENDPOINT] }) },
       { client_assertion: await clientAssertion(a.client, { iat: now - 3600, exp: now - 3000 }) },
       { client_assertion: await clientAssertion(a.client, { iat: now - 600, exp: now + 60 }) },
       { client_assertion: await clientAssertion(a.client, { exp: now + 3600 }) },

@@ -50,7 +50,7 @@ M5（plan 10章）で、company-api と送信サービス（sender）を作る�
 ### テナントの JWT（RP-73、CAP-39、O-30・31）
 
 - トークンの発行（`POST /token`）：`grant_type=client_credentials` と、`private_key_jwt`（RFC 7523）の client assertion だけ。
-  - assertion は ES256 で、登録した jwks の鍵で検証する。`iss` と `sub` は client_id、`aud` はトークンのエンドポイントの URL だけ、`exp`・`iat`・`jti` は必須、`iat` から5分まで、`exp` は5分先まで（時刻の許容は30秒）。
+  - assertion は ES256 で、登録した jwks の鍵で検証する。`iss` と `sub` は client_id、`aud` はトークンのエンドポイントの URL だけ（1つの文字列。ほかの宛先と並べた配列は、URL を含んでいても断る。idp と同じ。ADR 0006）、`exp`・`iat`・`jti` は必須、`iat` から5分まで、`exp` は5分先まで（時刻の許容は30秒）。
   - `jti` は期限まで覚えて、2回目を断る。覚えきれないとき（10万件）は、断る側に倒す。
   - 失敗は、理由によらず同じ 401 `invalid_client`。知らない項目、`client_secret`、同じ項目の2回は 400 `invalid_request`。
 - アクセストークン：鍵サービスの `tenant_jwt` の鍵で ES256 の署名をした JWT（`typ` は `at+jwt`。RFC 9068 の形）。
@@ -149,7 +149,7 @@ M5（plan 10章）で、company-api と送信サービス（sender）を作る�
 
 - テスト（`test/leak/`）：
   - `t04-alias-rotation`：入れ替えの後、前の別名あてのメールは届かず、新しい別名あてだけが届くこと。ID トークンの sub で入れ替えると、次の ID トークンの別名が新しい世代になること。照合用の MAC の一意制約で前の値が戻らないこと（UPDATE と DELETE もできない）。企業に渡る値の一覧。
-  - `x-company-api-tenant`：A社のトークンでB社の sub を入れ替えられないこと。トークンの書き換え（テナントの差し替え、自分の鍵、none、HS256、期限切れ）と、client assertion の誤り（他社の client_id、aud、期限、iat、ES384、HS256、再送、知らない client_id）が、同じ 401 になること。緊急停止。レート制限。境界の外で行が見えず、参加の状態の列がないこと。
+  - `x-company-api-tenant`：A社のトークンでB社の sub を入れ替えられないこと。トークンの書き換え（テナントの差し替え、自分の鍵、none、HS256、期限切れ）と、client assertion の誤り（他社の client_id、aud、aud の配列、期限、iat、ES384、HS256、再送、知らない client_id）が、同じ 401 になること。緊急停止。レート制限。境界の外で行が見えず、参加の状態の列がないこと。
   - `x-company-api-routes`：ルート一覧（5つ。GET の HEAD を含む）。企業のトークンで参加の状態や確かめた入り口を変える口がないこと。知らないパスと違う Host の固定の本文。
   - `x-company-api-set`：SET の署名、aud、jti、events。送り直しで jti と iat が同じで、6回で諦めること。ログに URL と SET が出ないこと。送信待ちの表に SET の列がないこと。
   - `t11-sender-ssrf`：アドレスの検査、URL の形、内部を指す名前、DNS rebinding、リダイレクト、証明書の名前、内部を指す MX と null MX、ログ。

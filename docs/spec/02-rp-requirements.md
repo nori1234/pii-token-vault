@@ -156,7 +156,7 @@
 | RP-77 | コードフローと CIBA は、別のクライアントとして登録しなければならない（1つのクライアントで兼ねられない。plan 9章、ADR 0006） | P0 | 登録 |
 
 - M5 で決めたこと（[ADR 0022](../adr/0022-company-api-sender.md)）：
-  - 企業向け API のトークン：`POST /token` で、`grant_type=client_credentials` と private_key_jwt（RFC 7523）の client assertion を送る。assertion は ES256 で、`iss` と `sub` は client_id、`aud` はトークンのエンドポイントの URL、`exp`・`iat`・`jti` は必須、`iat` から5分まで、`jti` は1回だけ。
+  - 企業向け API のトークン：`POST /token` で、`grant_type=client_credentials` と private_key_jwt（RFC 7523）の client assertion を送る。assertion は ES256 で、`iss` と `sub` は client_id、`aud` はトークンのエンドポイントの URL の1つだけ（配列にしない）、`exp`・`iat`・`jti` は必須、`iat` から5分まで、`jti` は1回だけ。
   - テナントの JWT：ES256 で5分、`scope` は `company_api` の1つ（別名の入れ替えと、検証の SET の依頼）、リフレッシュトークンなし。
   - 封じ込め：静的な設定を直して配備し直す（company-api の登録の `suspended` で、トークンを出さず、発行済みのものも断り、SET を送らない。送信は relay、ログインは idp の登録から外す）。管理 API は作らない。
   - テナントの鍵の入れ替え：jwks に新しい鍵を足して（4つまで）切り替えた後、古い鍵を外す。定期的な入れ替えの周期は P1。

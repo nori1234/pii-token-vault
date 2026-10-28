@@ -93,7 +93,7 @@ export async function clientAssertion(
   overrides?: {
     readonly iss?: string;
     readonly sub?: string;
-    readonly aud?: string;
+    readonly aud?: string | string[];
     readonly jti?: string;
     readonly iat?: number;
     readonly exp?: number;
