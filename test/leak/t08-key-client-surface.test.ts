@@ -27,10 +27,12 @@ function typeOnly(idp: IdpKeyClient, companyApi: CompanyApiKeyClient, relay: Rel
   void companyApi.encryptContact({ userId, plaintext: new Uint8Array() });
   // @ts-expect-error relay は別名を導けない
   void relay.deriveAlias({ tenantId: parseTenantId(randomUUID()), userId, generation: 1 });
-  // @ts-expect-error relay は署名できない
+  // @ts-expect-error relay は ID トークンに署名できない（署名は DKIM と ARC の signDkim だけ）
   void relay.sign('id_token', new Uint8Array());
-  // @ts-expect-error まだない MAC の用途は、型にない
+  // @ts-expect-error relay だけの MAC の用途は、idp の型にない
   void idp.mac('message_id', new Uint8Array());
+  // @ts-expect-error idp は DKIM の鍵で署名できない
+  void idp.signDkim(new Uint8Array());
   // @ts-expect-error sub の導出は idp だけ
   void companyApi.mac('pairwise_sub', new Uint8Array());
   // @ts-expect-error 確認コードの MAC は idp だけ
@@ -40,7 +42,14 @@ function typeOnly(idp: IdpKeyClient, companyApi: CompanyApiKeyClient, relay: Rel
 const EXPECTED_METHODS = {
   idp: ['deriveAlias', 'encryptContact', 'mac', 'publicKeys', 'sign'],
   'company-api': ['deriveAlias', 'mac'],
-  relay: ['decryptContact', 'decryptQueueItem', 'encryptQueueItem', 'mac'],
+  relay: [
+    'decryptContact',
+    'decryptQueueItem',
+    'dkimPublicKey',
+    'encryptQueueItem',
+    'mac',
+    'signDkim',
+  ],
 };
 
 describe('漏えい：鍵のクライアントの表面（plan 11章 テスト8）', () => {
@@ -48,7 +57,7 @@ describe('漏えい：鍵のクライアントの表面（plan 11章 テスト8�
     // 攻撃者が持っている情報：なし（不変条件3「型には許した操作だけ」の固定。侵害されたサービスのコードが、
     //                       型の上で decrypt などを呼べない）
     // 試す経路：typeOnly の中で、idp の decryptContact、company-api の encryptContact、relay の deriveAlias と
-    //           sign、idp の mac('message_id')、company-api の mac('pairwise_sub')、relay の
+    //           sign、idp の mac('message_id') と signDkim、company-api の mac('pairwise_sub')、relay の
     //           mac('email_verify_code') を、型の誤りを期待する注記付きで書く
     // 期待する結果：型の検査で誤りになる（ならなければ npm run typecheck が失敗する）。typeOnly は呼ばない
     // plan 11章：テスト8
@@ -108,6 +117,15 @@ describe('漏えい：鍵のクライアントの表面（plan 11章 テスト8�
     const queueItemId = randomUUID();
     const queued = await relay.encryptQueueItem({ queueItemId, plaintext: message });
     expect(await relay.decryptQueueItem({ queueItemId, ciphertext: queued })).toEqual(message);
+    // relay だけの用途。ほかの用途の鍵と違う。
+    const relayOnly = ['relay_replay', 'relay_thread', 'message_id'] as const;
+    const relayMacs = (await Promise.all(relayOnly.map((purpose) => relay.mac(purpose, message))))
+      .concat([await relay.mac('alias_lookup', message)])
+      .map((mac) => Buffer.from(mac).toString('hex'));
+    expect(new Set(relayMacs).size).toBe(relayMacs.length);
+    const dkim = await relay.signDkim(message);
+    expect(dkim.signature.byteLength).toBe(256);
+    expect((await relay.dkimPublicKey()).kid).toBe(dkim.kid);
   });
 
   it('relay の部品を import できるのは relay だけ', () => {

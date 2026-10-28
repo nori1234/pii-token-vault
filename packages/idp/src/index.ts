@@ -1,7 +1,7 @@
-// idp：OIDC、パスキー、step-up、PWA（M3）。CIBA は M7、回復は M8。
+// idp：OIDC、パスキー、step-up、PWA（M3）。窓口の操作別 step-up は M7、回復は M8。
 
 export { createIdp, type Idp, type IdpOptions } from './app.ts';
-export { type Mailer, type MailRequest, MemoryOutbox } from './mailer.ts';
+export { type Mailer, type MailRequest, MemoryOutbox, RelayMailer } from './mailer.ts';
 export { ACR_PASSKEY, OIDC_COOKIES, OIDC_MOUNT, TTL } from './provider.ts';
 export { RATE_LIMITS } from './rate-limit.ts';
 export {

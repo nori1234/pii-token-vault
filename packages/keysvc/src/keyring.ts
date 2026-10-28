@@ -4,6 +4,7 @@
 
 import { toBase64Url } from '@pii-token-vault/warifu-core';
 import {
+  type DkimPublicKey,
   ENCRYPTION_KEY_IDS,
   type EncryptionKeyId,
   type Es256PublicJwk,
@@ -14,6 +15,7 @@ import {
 import {
   type Es256KeyPair,
   generateEs256KeyPair,
+  generateRsa2048KeyPair,
   HMAC_BYTES,
   newSymmetricKey,
   randomId,
@@ -30,11 +32,19 @@ export interface EncryptionKey {
   readonly key: Uint8Array;
 }
 
-export interface SigningKey {
-  readonly kid: string;
-  readonly privateKey: Es256KeyPair['privateKey'];
-  readonly publicJwk: Es256PublicJwk;
-}
+export type SigningKey =
+  | {
+      readonly alg: 'ES256';
+      readonly kid: string;
+      readonly privateKey: Es256KeyPair['privateKey'];
+      readonly publicKey: Es256PublicJwk;
+    }
+  | {
+      readonly alg: 'RS256';
+      readonly kid: string;
+      readonly privateKey: Es256KeyPair['privateKey'];
+      readonly publicKey: DkimPublicKey;
+    };
 
 export interface Keyring {
   /** いま暗号化に使う版。 */
@@ -44,7 +54,7 @@ export interface Keyring {
   macKey(purpose: MacPurpose): Uint8Array;
   aliasDeriveKey(): Uint8Array;
   signingKey(keyId: SigningKeyId): SigningKey;
-  publicKeys(keyId: SigningKeyId): readonly Es256PublicJwk[];
+  publicKeys(keyId: SigningKeyId): readonly (Es256PublicJwk | DkimPublicKey)[];
 }
 
 export function createKeyring(): Keyring {
@@ -59,9 +69,10 @@ export function createKeyring(): Keyring {
   const pair = generateEs256KeyPair();
   const kid = toBase64Url(randomId(16));
   const idToken: SigningKey = {
+    alg: 'ES256',
     kid,
     privateKey: pair.privateKey,
-    publicJwk: Object.freeze({
+    publicKey: Object.freeze({
       kid,
       kty: 'EC',
       crv: 'P-256',
@@ -71,6 +82,19 @@ export function createKeyring(): Keyring {
       use: 'sig',
     }),
   };
+  // relay の DKIM と ARC の鍵（ADR 0021）。ID トークンの鍵とは別に作る。
+  const rsa = generateRsa2048KeyPair();
+  const dkimKid = toBase64Url(randomId(16));
+  const dkim: SigningKey = {
+    alg: 'RS256',
+    kid: dkimKid,
+    privateKey: rsa.privateKey,
+    publicKey: Object.freeze({ kid: dkimKid, kty: 'RSA', spki: toBase64Url(rsa.spki) }),
+  };
+  const signing: Readonly<Record<SigningKeyId, SigningKey>> = Object.freeze({
+    id_token: idToken,
+    dkim,
+  });
 
   const versions = (keyId: EncryptionKeyId): readonly EncryptionKey[] => {
     const list = encryption.get(keyId);
@@ -94,11 +118,15 @@ export function createKeyring(): Keyring {
     aliasDeriveKey() {
       return aliasDerive;
     },
-    signingKey(_keyId: SigningKeyId) {
-      return idToken;
+    signingKey(keyId: SigningKeyId) {
+      const key = signing[keyId];
+      if (key === undefined) throw new Error('鍵がない');
+      return key;
     },
-    publicKeys(_keyId: SigningKeyId) {
-      return Object.freeze([idToken.publicJwk]);
+    publicKeys(keyId: SigningKeyId) {
+      const key = signing[keyId];
+      if (key === undefined) throw new Error('鍵がない');
+      return Object.freeze([key.publicKey]);
     },
   });
 }

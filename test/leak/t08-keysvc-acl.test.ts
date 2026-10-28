@@ -18,9 +18,14 @@ type Combo =
   | 'mac/pairwise_sub'
   | 'mac/oidc_storage_id'
   | 'mac/email_verify_code'
+  | 'mac/relay_replay'
+  | 'mac/relay_thread'
+  | 'mac/message_id'
   | 'derive_alias'
   | 'sign/id_token'
-  | 'public_keys/id_token';
+  | 'public_keys/id_token'
+  | 'sign/dkim'
+  | 'public_keys/dkim';
 
 const COMBOS: readonly Combo[] = [
   'encrypt/contact',
@@ -32,9 +37,14 @@ const COMBOS: readonly Combo[] = [
   'mac/pairwise_sub',
   'mac/oidc_storage_id',
   'mac/email_verify_code',
+  'mac/relay_replay',
+  'mac/relay_thread',
+  'mac/message_id',
   'derive_alias',
   'sign/id_token',
   'public_keys/id_token',
+  'sign/dkim',
+  'public_keys/dkim',
 ];
 
 // plan 8章と spec 04 2章の表を、操作と対象の単位にしたもの。ここにないものは、すべて 403。
@@ -57,6 +67,11 @@ const ALLOWED: Readonly<Record<Caller, readonly Combo[]>> = {
     'decrypt/relay_queue',
     'mac/alias_lookup',
     'mac/audit_chain',
+    'mac/relay_replay',
+    'mac/relay_thread',
+    'mac/message_id',
+    'sign/dkim',
+    'public_keys/dkim',
   ],
 };
 
@@ -118,12 +133,22 @@ function bodyFor(combo: Combo): { op: string; body: unknown } {
       return { op: 'mac', body: { purpose: 'oidc_storage_id', message: b64('m') } };
     case 'mac/email_verify_code':
       return { op: 'mac', body: { purpose: 'email_verify_code', message: b64('m') } };
+    case 'mac/relay_replay':
+      return { op: 'mac', body: { purpose: 'relay_replay', message: b64('m') } };
+    case 'mac/relay_thread':
+      return { op: 'mac', body: { purpose: 'relay_thread', message: b64('m') } };
+    case 'mac/message_id':
+      return { op: 'mac', body: { purpose: 'message_id', message: b64('m') } };
     case 'derive_alias':
       return { op: 'derive_alias', body: { tenantId, userId, generation: 1 } };
     case 'sign/id_token':
       return { op: 'sign', body: { keyId: 'id_token', message: b64('header.payload') } };
     case 'public_keys/id_token':
       return { op: 'public_keys', body: { keyId: 'id_token' } };
+    case 'sign/dkim':
+      return { op: 'sign', body: { keyId: 'dkim', message: b64('dkim-signature:') } };
+    case 'public_keys/dkim':
+      return { op: 'public_keys', body: { keyId: 'dkim' } };
   }
 }
 

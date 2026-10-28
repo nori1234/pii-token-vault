@@ -14,6 +14,8 @@
     "./keys/relay": "./src/keys/relay.ts",
     "./db": "./src/db/index.ts",
     "./db/relay": "./src/db/relay.ts",
+    "./relay/protocol": "./src/relay/protocol.ts",
+    "./relay/delivery": "./src/relay/delivery-client.ts",
     "./audit": "./src/audit/index.ts",
     "./log": "./src/log/index.ts"
   },

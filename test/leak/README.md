@@ -30,6 +30,16 @@ M3 で、idp のテストを足した（ADR 0018）。
 | `x-idp-passkeys` | パスキーの追加と削除の step-up、削除でセッションが消えること、最後の1つは消せないこと |
 | `x-idp-browser`（E2E） | CDP の仮想認証器で、企業の認可から ID トークンまで、PWA のメールの登録、UV のないログインの拒否。CSP の違反がないこと |
 
+M4 で、relay のテストを足した（ADR 0021）。
+
+| ファイル | 確かめること |
+|---|---|
+| `t05-relay-sender-lock` | テスト5の送信元ロック（条件を1つずつ外したメールの拒否と理由、リプレイ、知らない別名、受信側での DKIM・ARC・DMARC の pass） |
+| `t05-relay-hygiene` | テスト5の中継の衛生（開封通知、Cc、Bcc、Sender の削除、To を別名だけに、List-Unsubscribe の書き換え、本文のバイト列、ログに値を出さない） |
+| `t05-relay-reply` | テスト5の返信の中継（DMARC が pass した本物のアドレスからの返信だけ、詐称の拒否、件名と本文の本物のアドレスの差し戻し（文字参照、タグ、%xx、全角、ISO-2022-JP、encoded-word など）、確かめられない部分を含む返信の差し戻し、署名の外の Reply-To、References、テナントと期限） |
+| `t10-relay-rcpt` | テスト10（SMTP の RCPT、VRFY、DATA の応答が、別名の状態によらず同じ。relay のドメインでない宛先。同じ接続の次のトランザクションと RSET） |
+| `x-relay-internal-api` | relay の内部配送 API（idp の資格情報だけ、受け付ける入力、知らない利用者でも 202、ソケットの権限、idp から relay を経た宛先確認と旧アドレスへの知らせ） |
+
 ## いつ足すか
 
 - 新しいルートを足したとき。
@@ -50,6 +60,12 @@ M3 で、idp のテストを足した（ADR 0018）。
   - `Browser`：クッキーを持つブラウザ役。`registerAccount`、`stepUp`。認証器は `test/setup/soft-authenticator.ts` のソフトウェアの認証器（わざと違えた応答も作れる）。
   - `codeFlow`：企業の役。認可コード、PKCE、private_key_jwt で ID トークンを受け取り、`/oidc/jwks` の鍵で検証する。
   - E2E（`*.e2e.ts`）は、一時的なクラスタ、鍵サービス、idp を、そのファイルのワーカーの中で起動する（`x-idp-browser.e2e.ts`）。
+- relay を使うテストは、`test/setup/relay.ts` を使う。
+  - `startTestRelay`：ワーカーの DB と globalSetup の鍵サービスで、relay をファイルの中に起動する（テナントと企業の DKIM の鍵は乱数。外への配送はメモリの送信箱）。返信の DMARC の判定に使う DNS の記録と、時計を渡せる。`dns()` は、受信側の検証に使う模擬の DNS。
+  - `addUser`、`rotateAlias`：idp と company-api と同じ境界で、利用者、暗号化した本物のメール、別名の世代を作る。
+  - `signCompanyMail`、`companyMail`：企業の送信サーバーの代わりに、登録した鍵で署名したメールを作る（条件を外した署名も作れる）。
+  - `SmtpSession`、`sendMail`：生の SMTP の会話（応答とその所要時間をそのまま見る）。宛先はテストの中で立てた relay だけ。
+  - idp から relay の内部配送 API を呼ぶテストは、`startTestIdp` に `RelayMailer` を渡す。
 - 鍵サービスを使うテストは、`test/setup/keys.ts` を使う。
   - `keysvcConnection(service)`：globalSetup の鍵サービスへの接続。DB を使うテストは、これを使う（監査ログのチェーンを、実行全体で同じ鍵で検証するため）。
   - `rawKeysvcCall`：型を通さない生の要求。攻撃の段で使う。
