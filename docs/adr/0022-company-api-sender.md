@@ -29,9 +29,8 @@ M5（plan 10章）で、company-api と送信サービス（sender）を作る�
 ### テナントの登録（O-28）
 
 - テナントの登録は、DB に置かず、配備のときの静的な設定にする（`packages/company-api/src/config.ts`）。起動の時点で検査し、1つでも違えば起動しない。どのルートからも書き換えられない。P0 では管理 API を作らないので、登録を DB に置くと、書き込む経路（管理 API か、不変条件8の新しい例外）が要る。静的な設定なら、どちらも作らずに済む。
-- 登録の中身：テナント ID、relay のドメイン（別名の右側。テナントごとに分ける）、参加の状態、緊急停止、API のクライアント（client_id と jwks。1〜4個）、SET の受け口（任意）。
-- 参加の状態（ADR 0010）：M9 で利用者の画面に出せるようになるまで、`full`（完全な参加）だけを受け付ける。`migrating` と、移行中の期限、割符が確かめた入り口の項目（`migrationDeadline`、`verifiedEntries` など）があれば、起動しない。
-  - ADR 0010 は「後から登録の形を変えずに済むように、M5 で（期限と確かめた項目を）持たせる」とした。登録を静的な設定にしたので、後から項目を足しても、DB の形は変わらない。そこで、移行中の項目は、M9 で移行中の登録を許すときに足す（O-28）。
+- 登録の中身：テナント ID、relay のドメイン（別名の右側。テナントごとに分ける）、参加の状態、移行中の期限、割符が確かめた入り口（と確かめた日）、緊急停止、API のクライアント（client_id と jwks。1〜4個）、SET の受け口（任意）。
+- 参加の状態（ADR 0010）：参加の状態（`participation`）、移行中の期限（`migrationDeadline`）、割符が確かめた入り口（`verifiedEntries`）を、登録の形に持たせた。M9 で利用者の画面に出せるようになるまでは、`full`（完全な参加）、期限なし（`null`）、確かめた入り口は空（すべて「まだ残っている入り口」）だけを受け付け、それ以外なら起動しない。登録は静的な設定なので、企業向けのルートからも、ほかのどのルートからも書き換えられない（DB にこれらの列はない）。
 - 企業の鍵は `jwks` で受け取り、EC の P-256 の公開鍵だけにする（`d`、`x5u`、`jwks_uri` は受け付けない。不変条件7・9）。client_id と relay のドメインは、テナントをまたいで重複させない。
 - idp の登録簿（企業名、OIDC のクライアント）と relay の登録（企業名、送信元ロックの鍵）は、それぞれのサービスの静的な設定のまま残す。1つの登録簿にまとめるかは、M9 で警告文 I を出すときに決める。
 - 企業の DKIM の公開鍵（relay の登録）は、起動の時点で、長さに加えて種類（SubjectPublicKeyInfo の AlgorithmIdentifier が rsaEncryption か Ed25519）を確かめる。RSA-PSS、EC、Ed448 などは起動しない（ADR 0021 の残るリスクを閉じた）。
@@ -151,12 +150,12 @@ M5（plan 10章）で、company-api と送信サービス（sender）を作る�
 - テスト（`test/leak/`）：
   - `t04-alias-rotation`：入れ替えの後、前の別名あてのメールは届かず、新しい別名あてだけが届くこと。ID トークンの sub で入れ替えると、次の ID トークンの別名が新しい世代になること。照合用の MAC の一意制約で前の値が戻らないこと（UPDATE と DELETE もできない）。企業に渡る値の一覧。
   - `x-company-api-tenant`：A社のトークンでB社の sub を入れ替えられないこと。トークンの書き換え（テナントの差し替え、自分の鍵、none、HS256、期限切れ）と、client assertion の誤り（他社の client_id、aud、期限、iat、ES384、HS256、再送、知らない client_id）が、同じ 401 になること。緊急停止。レート制限。境界の外で行が見えず、参加の状態の列がないこと。
-  - `x-company-api-routes`：ルート一覧（5つ。GET の HEAD を含む）と、知らないパスと違う Host の固定の本文。
+  - `x-company-api-routes`：ルート一覧（5つ。GET の HEAD を含む）。企業のトークンで参加の状態や確かめた入り口を変える口がないこと。知らないパスと違う Host の固定の本文。
   - `x-company-api-set`：SET の署名、aud、jti、events。送り直しで jti と iat が同じで、6回で諦めること。ログに URL と SET が出ないこと。送信待ちの表に SET の列がないこと。
   - `t11-sender-ssrf`：アドレスの検査、URL の形、内部を指す名前、DNS rebinding、リダイレクト、証明書の名前、内部を指す MX と null MX、ログ。
   - `x-sender-internal-api`：資格情報、呼び出し元ごとの口、パスとメソッド、本文の形、名前解決の口、ソケットの権限。
   - `x-relay-sender`：relay から sender を通った配送、内部を指す MX への配送を止めること、名前解決の口。
-- `packages/company-api/test/config.test.ts`：移行中の参加とその項目、jwks の鍵、受け口の URL、重複、issuer の検査。
+- `packages/company-api/test/config.test.ts`：参加の状態、移行中の期限、確かめた入り口（M9 までは full・期限なし・空だけ）、jwks の鍵、受け口の URL、重複、issuer の検査。
 - `packages/relay/test/sender-lock.test.ts`：企業の DKIM の公開鍵の種類の検査。
 - 鍵サービス：`tenant_jwt` と `set`（ES256）の鍵と、company-api の `sign`・`public_keys`。t08-keysvc-acl、t08-key-client-surface、keysvc の acl.test の期待の表を直した。
 - マイグレーション 0006：`aliases.subject` と `company_api.set_outbox`。x-rls-fixed の一覧を直した。
@@ -167,7 +166,7 @@ M5（plan 10章）で、company-api と送信サービス（sender）を作る�
 
 | ID | 判断すること | 既定の案 |
 |---|---|---|
-| O-28 | テナントの登録の置き場所と、参加の状態 | 配備のときの静的な設定（DB に置かない）。参加の状態は full だけを受け付け、移行中の期限と確かめた入り口の項目は M9 で足す（ADR 0010 の「M5 で持たせる」から変えた） |
+| O-28 | テナントの登録の置き場所 | 配備のときの静的な設定（DB に置かない）。参加の状態、移行中の期限、確かめた入り口を持たせ、M9 までは full・期限なし・空だけを受け付ける（ADR 0010） |
 | O-29 | sub の扱い | idp が接続の同意のときに sub の索引を置き、company-api は読むだけ。sub は平文で置く |
 | O-30 | テナントの JWT | ES256 の JWT、5分、scope は1つ、リフレッシュトークンなし。緊急停止で発行済みも断る（配備し直した時点から） |
 | O-31 | client assertion | aud はトークンのエンドポイントの URL だけ。iat から5分、exp は5分先まで、jti は1回だけ |

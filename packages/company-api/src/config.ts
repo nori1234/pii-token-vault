@@ -2,8 +2,9 @@
 //
 // - テナントの登録は DB に置かない。企業向けのルートからも、ほかのどのルートからも書き換えられない
 //   （参加の状態を企業に書き換えさせない。ADR 0010、テスト6）。変えるのは、設定を直して配備し直すときだけ。
-// - 参加の状態は、M9 で利用者の画面に出せるようになるまで「完全な参加」（full）だけを受け付ける。移行中（migrating）、
-//   移行中の期限、割符が確かめた入り口の項目は、登録できない（ADR 0010、plan 10章 M5）。
+// - 参加の状態、移行中の期限、割符が確かめた入り口（と確かめた日）を、登録の形に持たせる（ADR 0010）。
+//   M9 で利用者の画面に出せるようになるまでは、参加の状態は「完全な参加」（full）だけを受け付け、移行中の期限は
+//   なし、確かめた入り口は空（すべて「まだ残っている入り口」）だけを受け付ける（ADR 0010、plan 10章 M5）。
 // - 企業の鍵は jwks で受け取り、EC の P-256 の公開鍵に限る（不変条件7・9。jwks_uri は受け付けない）。
 // - 緊急停止（suspended）は、トークンの発行、企業向け API、SET の送信を止める（plan 2章。ADR 0022）。
 
@@ -30,6 +31,10 @@ export interface CompanyTenant {
   readonly relayDomain: string;
   /** 参加の状態。P0（M9 まで）は full だけ（ADR 0010）。 */
   readonly participation: 'full';
+  /** 移行中の期限。M9 までは null だけ（ADR 0010）。 */
+  readonly migrationDeadline: null;
+  /** 割符が確かめた入り口と確かめた日。登録の時点では空。M9 までは空だけ（ADR 0010）。 */
+  readonly verifiedEntries: readonly never[];
   /** 緊急停止。true なら、トークンを出さず、API を断り、SET を送らない。 */
   readonly suspended: boolean;
   readonly apiClients: readonly ApiClient[];
@@ -56,6 +61,8 @@ const TENANT_KEYS: ReadonlySet<string> = new Set([
   'tenantId',
   'relayDomain',
   'participation',
+  'migrationDeadline',
+  'verifiedEntries',
   'suspended',
   'apiClients',
   'webhookUrl',
@@ -67,13 +74,6 @@ const COORDINATE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const KID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const DOMAIN_PATTERN =
   /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
-/** 移行中の参加に使う項目（ADR 0010）。M9 で表示ができるまでは登録させない。 */
-const MIGRATION_FIELDS: readonly string[] = [
-  'migrationDeadline',
-  'verifiedEntries',
-  'verifiedAt',
-  'entries',
-];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -148,18 +148,24 @@ function parseWebhookUrl(tenantId: string, value: unknown): string {
 
 function parseTenant(input: unknown): CompanyTenant {
   if (!isRecord(input)) throw new CompanyApiConfigError('テナントがオブジェクトではない');
-  for (const field of MIGRATION_FIELDS) {
-    if (Object.hasOwn(input, field)) {
-      throw new CompanyApiConfigError(
-        `移行中の参加の項目（${field}）は、M9 で表示ができるまで登録できない（ADR 0010）`,
-      );
-    }
-  }
   onlyKeys(input, TENANT_KEYS, 'テナント');
   const tenantId = parseTenantId(String(input.tenantId));
   if (input.participation !== 'full') {
     throw new CompanyApiConfigError(
       '参加の状態は full だけ（移行中の参加は、M9 で表示ができるまで登録できない。ADR 0010）',
+    );
+  }
+  if (input.migrationDeadline !== undefined && input.migrationDeadline !== null) {
+    throw new CompanyApiConfigError(
+      '移行中の期限は、M9 で表示ができるまで登録できない（ADR 0010）',
+    );
+  }
+  if (
+    input.verifiedEntries !== undefined &&
+    !(Array.isArray(input.verifiedEntries) && input.verifiedEntries.length === 0)
+  ) {
+    throw new CompanyApiConfigError(
+      '割符が確かめた入り口は、登録の時点では空（M9 で表示ができるまで。ADR 0010）',
     );
   }
   if (typeof input.relayDomain !== 'string' || !DOMAIN_PATTERN.test(input.relayDomain)) {
@@ -180,6 +186,8 @@ function parseTenant(input: unknown): CompanyTenant {
     tenantId,
     relayDomain: input.relayDomain,
     participation: 'full',
+    migrationDeadline: null,
+    verifiedEntries: Object.freeze([]) as readonly never[],
     suspended: input.suspended === true,
     apiClients,
     ...(input.webhookUrl === undefined

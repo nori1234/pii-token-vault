@@ -20,13 +20,24 @@ const parse = (tenants: unknown[], issuer = 'https://api.warifu.example') =>
   parseCompanyApiConfig({ issuer, tenants });
 
 describe('company-api の登録簿（ADR 0010、ADR 0022）', () => {
-  it('完全な参加のテナントだけを受け付ける。移行中の参加と、その項目は M9 まで登録できない', () => {
+  it('参加の状態、移行中の期限、確かめた入り口を持つ。M9 までは、完全な参加で、期限なし、確かめた入り口は空だけ', () => {
+    const [parsed] = [
+      ...parse([tenant({ migrationDeadline: null, verifiedEntries: [] })]).tenants.values(),
+    ];
+    expect([parsed?.participation, parsed?.migrationDeadline, parsed?.verifiedEntries]).toEqual([
+      'full',
+      null,
+      [],
+    ]);
     expect(parse([tenant()]).tenants.size).toBe(1);
     expect(() => parse([tenant({ participation: 'migrating' })])).toThrow('参加の状態は full だけ');
     expect(() => parse([tenant({ participation: undefined })])).toThrow('参加の状態は full だけ');
-    for (const field of ['migrationDeadline', 'verifiedEntries', 'verifiedAt', 'entries']) {
-      expect(() => parse([tenant({ [field]: '2027-01-01' })])).toThrow('移行中の参加の項目');
-    }
+    expect(() => parse([tenant({ migrationDeadline: '2027-01-01' })])).toThrow('移行中の期限');
+    expect(() =>
+      parse([tenant({ verifiedEntries: [{ entry: 'ENT-01', verifiedAt: '2026-10-28' }] })]),
+    ).toThrow('確かめた入り口');
+    expect(() => parse([tenant({ verifiedEntries: 'ENT-01' })])).toThrow('確かめた入り口');
+    expect(() => parse([tenant({ verifiedAt: '2026-10-28' })])).toThrow('許可していない項目');
   });
 
   it('企業の鍵は jwks の ES256 だけ。外へ取りに行く項目と秘密鍵は受け付けない', () => {

@@ -30,6 +30,44 @@ describe('漏えい：企業向け API のルート一覧（plan 11章 テスト
     ]);
   });
 
+  it('企業のトークンで、参加の状態、移行中の期限、確かめた入り口を変えようとしても、変える口がない', async () => {
+    // 攻撃者が持っている情報：企業向け API の正規のトークン（移行中のふりをしたい、または確かめた入り口を
+    //                         書き換えたい企業。ATK-03）
+    // 試す経路：参加の状態や登録を変えそうなパスに、POST・PUT・PATCH・DELETE で送る
+    // 期待する結果：すべて 404 で、固定の本文。登録は配備のときの静的な設定で、どのルートからも変わらない
+    // plan 11章：テスト6（ADR 0010）
+    const [tenant] = api.tenants;
+    if (tenant === undefined) throw new Error('準備に失敗した');
+    const token = await api.accessToken(tenant);
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+      for (const path of [
+        '/v1/tenant',
+        '/v1/tenants/participation',
+        `/v1/tenants/${tenant.tenantId}`,
+        '/v1/participation',
+        '/v1/entries/verified',
+      ]) {
+        const res = await api.request({
+          method,
+          path,
+          token,
+          json: {
+            participation: 'migrating',
+            migrationDeadline: '2099-01-01',
+            verifiedEntries: ['ENT-01'],
+          },
+        });
+        expect([method, path, res.status, res.text]).toEqual([
+          method,
+          path,
+          404,
+          '{"error":"not_found"}',
+        ]);
+      }
+    }
+    expect(api.api.config.tenants.get(tenant.tenantId)?.participation).toBe('full');
+  });
+
   it('知らないパス、違う Host は、受け取った値を返さない固定の本文で断る', async () => {
     // 攻撃者が持っている情報：なし（公開の入口を探る）
     // 試す経路：sub や別名を載せたパス、管理用らしいパス、違う Host（DNS リバインディング）
