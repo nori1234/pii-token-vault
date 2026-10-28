@@ -19,7 +19,7 @@
 // - エラーの応答に、受け取った値もライブラリのメッセージも入れない。ログは warifu-core の許可リスト（ADR 0017）。
 // - 登録済みかどうかで、応答の本文・ステータスを変えない（不変条件10。メールの登録）。
 
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { createServer, type Server } from 'node:http';
 import middie from '@fastify/middie';
 import {
   fromBase64Url,
@@ -234,13 +234,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
   });
   const assets: Assets = loadAssets();
 
-  // 承認用のオリジンを別のポートで待ち受けるために、Fastify の処理（handler）を受け取っておく。
-  let handler: ((req: IncomingMessage, res: ServerResponse) => void) | undefined;
   const app = fastify({
-    serverFactory: (h) => {
-      handler = h;
-      return createServer(h);
-    },
     loggerInstance: createLogger({
       component: 'idp',
       ...(options.logLevel === undefined ? {} : { level: options.logLevel }),
@@ -988,10 +982,10 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
     requestApproval: (input) => requestApproval(inboxDeps, input),
     async listenApproval(input) {
       await app.ready();
-      if (handler === undefined || approvalServer !== undefined) {
-        throw new Error('承認用のオリジンは、すでに待ち受けているか、準備ができていない');
-      }
-      const server = createServer(handler);
+      if (approvalServer !== undefined) throw new Error('承認用のオリジンは、すでに待ち受けている');
+      // Fastify の処理（app.routing）に渡す。serverFactory は使わない（使うと、Fastify が localhost の
+      // 2つ目以降のアドレス（::1 と 127.0.0.1 など）で待ち受けなくなる）。
+      const server = createServer((req, res) => app.routing(req, res));
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
         server.listen(input.port, input.host, () => resolve());
