@@ -59,10 +59,12 @@ import {
   type RepoDeps,
   recordConnection,
   recordCredentialUse,
+  recordSubject,
 } from './repo.ts';
 import { PWA_SESSION_COOKIE, type PwaSession, PwaSessions } from './sessions.ts';
 import { loadSigningKey } from './signing-key.ts';
 import { MacMemoryStore, StorageFullError } from './storage.ts';
+import { deriveSub } from './subject.ts';
 import { Ceremonies } from './webauthn.ts';
 
 export interface IdpOptions {
@@ -615,7 +617,9 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
       return { redirectTo };
     }
     await ensureFirstAlias(repo, keys, found.tenant, userId);
-    await recordConnection(repo, userId, found.tenant.tenantId as TenantId);
+    const tenantId = found.tenant.tenantId as TenantId;
+    await recordSubject(repo, tenantId, userId, await deriveSub(keys, tenantId, userId));
+    await recordConnection(repo, userId, tenantId);
     const grant = new provider.Grant({
       accountId: userId,
       clientId: String(found.details.params.client_id),

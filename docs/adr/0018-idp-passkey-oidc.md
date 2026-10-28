@@ -142,7 +142,7 @@ ADR 0007（パスキーの検証の守り）と ADR 0006（oidc-provider の調�
 
 ### 静的な登録簿（M3 だけ）
 
-- テナント（ID、企業名、relay のドメイン）とクライアント（client_id、テナント、redirect_uris、jwks、aliasClaim）を、起動の設定で受け取る（`packages/idp/src/registry.ts`）。M5 で company-api の登録に置き換える。
+- テナント（ID、企業名、relay のドメイン）とクライアント（client_id、テナント、redirect_uris、jwks、aliasClaim）を、起動の設定で受け取る（`packages/idp/src/registry.ts`）。M5 で company-api の登録に置き換える。→ M5 では、登録をサービスごとの静的な設定のまま残した（company-api の登録は ADR 0022）。1つの登録簿にまとめるかは M9 で決める。
 - 許す項目を肯定リストで決める。redirect_uris は https（開発では http://localhost と 127.0.0.1）で、ホストは1つ（sector_identifier_uri を使わないため。ADR 0006）。企業名に制御文字と書式の制御文字（双方向の制御など）を入れさせない。relay のドメインはテナントごとに違う。
 
 ### 企業のモバイルアプリ（plan 3-3）

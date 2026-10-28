@@ -93,6 +93,39 @@ describe('送信元ロックの方式（不変条件9）', () => {
     ).toThrow('公開鍵の長さが足りない');
   });
 
+  it('設定は、RSA と Ed25519 のほかの種類の公開鍵（RSA-PSS、EC）を、起動の時点で拒否する（ADR 0022）', () => {
+    for (const [type, options] of [
+      ['rsa-pss', { modulusLength: 2048 }],
+      ['ec', { namedCurve: 'P-256' }],
+      ['ed448', {}],
+    ] as const) {
+      const { publicKey } = generateKeyPairSync(type as 'rsa-pss', options as never) as unknown as {
+        publicKey: KeyObject;
+      };
+      expect(() =>
+        parseRelayConfig({
+          tenants: [tenantWith(publicKey)],
+          selector: 'warifu1',
+          authservId: 'mx.relay.example',
+          noticeDomain: 'notice.relay.example',
+        }),
+      ).toThrow(/公開鍵の(長さが足りない|種類が違う)/);
+    }
+    for (const key of [
+      generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey,
+      generateKeyPairSync('ed25519').publicKey,
+    ]) {
+      expect(() =>
+        parseRelayConfig({
+          tenants: [tenantWith(key)],
+          selector: 'warifu1',
+          authservId: 'mx.relay.example',
+          noticeDomain: 'notice.relay.example',
+        }),
+      ).not.toThrow();
+    }
+  });
+
   it('設定は、ヘッダーに差し込める企業名を拒否する', () => {
     const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 });
     for (const displayName of ['A\r\nBcc: x@example.com', 'A" <x@example.com>', 'A‮B', '']) {

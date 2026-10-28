@@ -66,22 +66,26 @@ export function createKeyring(): Keyring {
   for (const purpose of MAC_PURPOSES) mac.set(purpose, randomId(HMAC_BYTES));
   // 別名を導く鍵は、どの MAC の用途の鍵とも別にする（CAP-05、ADR 0005）。
   const aliasDerive = randomId(HMAC_BYTES);
-  const pair = generateEs256KeyPair();
-  const kid = toBase64Url(randomId(16));
-  const idToken: SigningKey = {
-    alg: 'ES256',
-    kid,
-    privateKey: pair.privateKey,
-    publicKey: Object.freeze({
-      kid,
-      kty: 'EC',
-      crv: 'P-256',
-      x: pair.publicJwk.x,
-      y: pair.publicJwk.y,
+  // ES256 の鍵は用途ごとに別に作る（ID トークン、テナントの JWT、SET。ADR 0014、ADR 0022）。
+  const es256 = (): SigningKey => {
+    const pair = generateEs256KeyPair();
+    const kid = toBase64Url(randomId(16));
+    return {
       alg: 'ES256',
-      use: 'sig',
-    }),
+      kid,
+      privateKey: pair.privateKey,
+      publicKey: Object.freeze({
+        kid,
+        kty: 'EC',
+        crv: 'P-256',
+        x: pair.publicJwk.x,
+        y: pair.publicJwk.y,
+        alg: 'ES256',
+        use: 'sig',
+      }),
+    };
   };
+  const idToken = es256();
   // relay の DKIM と ARC の鍵（ADR 0021）。ID トークンの鍵とは別に作る。
   const rsa = generateRsa2048KeyPair();
   const dkimKid = toBase64Url(randomId(16));
@@ -94,6 +98,8 @@ export function createKeyring(): Keyring {
   const signing: Readonly<Record<SigningKeyId, SigningKey>> = Object.freeze({
     id_token: idToken,
     dkim,
+    tenant_jwt: es256(),
+    set: es256(),
   });
 
   const versions = (keyId: EncryptionKeyId): readonly EncryptionKey[] => {

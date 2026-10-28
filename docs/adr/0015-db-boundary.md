@@ -28,9 +28,9 @@
 | `contacts` | 暗号化した本物のメール（M3 で作った。下） | idp、relay |
 | `public` | 使わない。PUBLIC の権限をすべて外す | — |
 
-- sender のロールとスキーマは M5 で決める。鍵サービスは DB を使わない（ADR 0013）。BI ツールなどのロールは作らない（CAP-18）。
+- sender のロールとスキーマは M5 で決める。→ sender は DB を使わない（ADR 0022）。鍵サービスは DB を使わない（ADR 0013）。BI ツールなどのロールは作らない（CAP-18）。
 - `CREATE DATABASE … TEMPLATE` は DB の ACL を写さないので、マイグレーションとは別に、DB ごとに `REVOKE ALL ON DATABASE … FROM PUBLIC` と、アプリのロールへの `CONNECT` だけをかける（PUBLIC の TEMP を外し、一時テーブルや `pg_temp` の関数で名前を乗っ取らせない）。
-- テナント ID と利用者 ID は、小文字の UUID にする。表示用のテナントの名前は M5 の登録簿で持つ。
+- テナント ID と利用者 ID は、小文字の UUID にする。表示用のテナントの名前は M5 の登録簿で持つ。→ テナントの登録は、サービスごとの静的な設定にした（企業名は idp と relay の登録。ADR 0022）。
 
 ### ポリシーと GRANT（M2 の分）
 

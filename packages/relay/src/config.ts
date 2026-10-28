@@ -1,5 +1,5 @@
-// relay の設定（ADR 0021）。テナントごとの登録（送信元ロックの d=、s=、公開鍵）は、M4 では静的な設定で受け取り、
-// 起動の時点で検査する。M5 で company-api の登録に移す。値は企業のもので、利用者の連絡先は入らない。
+// relay の設定（ADR 0021、ADR 0022）。テナントごとの登録（送信元ロックの d=、s=、公開鍵）は、静的な設定で受け取り、
+// 起動の時点で検査する（鍵は長さと種類）。値は企業のもので、利用者の連絡先は入らない。
 
 import { fromBase64Url, parseTenantId, type TenantId } from '@pii-token-vault/warifu-core';
 
@@ -44,6 +44,21 @@ export const DEFAULT_MAX_MESSAGE_BYTES = 10 * 1024 * 1024;
 /** Ed25519 の SubjectPublicKeyInfo の DER は44バイト。RSA は 2048 ビットで294バイト以上。 */
 const ED25519_SPKI_BYTES = 44;
 const RSA2048_SPKI_MIN_BYTES = 294;
+/** 鍵の種類（AlgorithmIdentifier）。Ed25519（1.3.101.112）と rsaEncryption（1.2.840.113549.1.1.1）だけ（ADR 0022）。 */
+const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
+const RSA_ALGORITHM_ID = Buffer.from('300d06092a864886f70d0101010500', 'hex');
+
+/** DKIM の公開鍵が、不変条件9で受け付ける種類（Ed25519 か、2048 ビット以上の RSA）か。 */
+function acceptableDkimKey(spki: Uint8Array): boolean {
+  const der = Buffer.from(spki);
+  if (der.byteLength === ED25519_SPKI_BYTES) return der.subarray(0, 12).equals(ED25519_SPKI_PREFIX);
+  return (
+    der.byteLength >= RSA2048_SPKI_MIN_BYTES &&
+    der[0] === 0x30 &&
+    der[1] === 0x82 &&
+    der.subarray(4, 4 + RSA_ALGORITHM_ID.byteLength).equals(RSA_ALGORITHM_ID)
+  );
+}
 
 function domain(value: unknown): string {
   if (typeof value !== 'string' || !DOMAIN_PATTERN.test(value)) {
@@ -94,6 +109,9 @@ export function parseRelayConfig(config: RelayConfig): ParsedRelayConfig {
     }
     if (spki.byteLength !== ED25519_SPKI_BYTES && spki.byteLength < RSA2048_SPKI_MIN_BYTES) {
       throw new RelayConfigError('公開鍵の長さが足りない');
+    }
+    if (!acceptableDkimKey(spki)) {
+      throw new RelayConfigError('公開鍵の種類が違う（RSA か Ed25519 だけ）');
     }
     byRelayDomain.set(
       relayDomain,

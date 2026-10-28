@@ -1,13 +1,17 @@
-// company-api の鍵のクライアント（不変条件3、ADR 0013）。照合用の MAC と、別名の導出だけ。
-// 暗号化と復号のメソッドはない（鍵サービスも 403 を返す）。
+// company-api の鍵のクライアント（不変条件3、ADR 0013、ADR 0022）。照合用の MAC、別名の導出、
+// テナントの JWT と SET の署名（ES256）だけ。暗号化と復号のメソッドはない（鍵サービスも 403 を返す）。
 
 import type { TenantId, WarifuUserId } from '../ids.ts';
-import { deriveAliasWith, macWith } from './common.ts';
-import type { KeysvcConnection } from './protocol.ts';
+import { deriveAliasWith, macWith, publicKeysWith, signEs256With } from './common.ts';
+import type { Es256PublicJwk, KeysvcConnection } from './protocol.ts';
 import { createKeysvcTransport } from './transport.ts';
 
 export type CompanyApiMacPurpose = 'alias_lookup' | 'audit_chain';
 const MAC_PURPOSES: readonly CompanyApiMacPurpose[] = ['alias_lookup', 'audit_chain'];
+
+/** tenant_jwt：企業向け API のアクセストークン。set：企業に送る SET（ADR 0022）。 */
+export type CompanyApiSigningKeyId = 'tenant_jwt' | 'set';
+const SIGNING_KEY_IDS: readonly CompanyApiSigningKeyId[] = ['tenant_jwt', 'set'];
 
 export interface CompanyApiKeyClient {
   mac(purpose: CompanyApiMacPurpose, message: Uint8Array): Promise<Uint8Array>;
@@ -16,6 +20,11 @@ export interface CompanyApiKeyClient {
     readonly userId: WarifuUserId;
     readonly generation: number;
   }): Promise<string>;
+  sign(
+    keyId: CompanyApiSigningKeyId,
+    message: Uint8Array,
+  ): Promise<{ readonly kid: string; readonly signature: Uint8Array }>;
+  publicKeys(keyId: CompanyApiSigningKeyId): Promise<readonly Es256PublicJwk[]>;
 }
 
 export function createCompanyApiKeyClient(connection: KeysvcConnection): CompanyApiKeyClient {
@@ -30,6 +39,12 @@ export function createCompanyApiKeyClient(connection: KeysvcConnection): Company
       readonly generation: number;
     }) {
       return deriveAliasWith(call, input);
+    },
+    sign(keyId: CompanyApiSigningKeyId, message: Uint8Array) {
+      return signEs256With(call, SIGNING_KEY_IDS, keyId, message);
+    },
+    publicKeys(keyId: CompanyApiSigningKeyId) {
+      return publicKeysWith(call, SIGNING_KEY_IDS, keyId);
     },
   });
 }

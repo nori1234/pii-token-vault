@@ -50,10 +50,16 @@ export const MAC_PURPOSES: readonly MacPurpose[] = Object.freeze([
 
 /**
  * 署名の鍵。id_token は ES256。dkim は relay の DKIM と ARC の署名の鍵（RSA 2048、rsa-sha256。不変条件9の
- * プロトコルの例外。ADR 0021）。SET、操作ごとの承認、テナントの JWT の鍵は、各マイルストーンで足す（ADR 0014）。
+ * プロトコルの例外。ADR 0021）。tenant_jwt（企業向け API のアクセストークン）と set（企業に送る SET）は
+ * company-api の ES256 の鍵（ADR 0022）。操作ごとの承認の鍵は M7 で足す（ADR 0014）。
  */
-export type SigningKeyId = 'id_token' | 'dkim';
-export const SIGNING_KEY_IDS: readonly SigningKeyId[] = Object.freeze(['id_token', 'dkim']);
+export type SigningKeyId = 'id_token' | 'dkim' | 'tenant_jwt' | 'set';
+export const SIGNING_KEY_IDS: readonly SigningKeyId[] = Object.freeze([
+  'id_token',
+  'dkim',
+  'tenant_jwt',
+  'set',
+]);
 
 /** RSA 2048 の署名の長さ（バイト）。 */
 export const RSA2048_SIGNATURE_BYTES = 256;

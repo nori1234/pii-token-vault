@@ -1,5 +1,5 @@
 // 静的な登録簿（M3）。テナントとクライアントを設定で受け取り、起動の時点で検査する（ADR 0018）。
-// M5 で company-api の登録に置き換える。
+// company-api の登録も静的な設定にした（ADR 0022）。1つの登録簿にまとめるかは M9 で決める。
 //
 // - 不変条件7：割符から外へ取りに行く項目（jwks_uri、sector_identifier_uri、request_uris など）は、肯定リストで止める。
 //   oidc-provider 9.12.2 は、認識した項目をそのまま受け入れる（lib/helpers/client_schema.js）。

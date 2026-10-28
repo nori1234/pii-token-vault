@@ -161,6 +161,8 @@ v0.2の`desk.case.category.update`と`desk.case.language.update`は、P0の許�
 
 [RFC 8417 §4.1](https://www.rfc-editor.org/rfc/rfc8417.html#section-4.1)に従って、SETをIDトークン等として受け付ける取り違えも防ぐ。SETの型（`secevent+jwt`）と用途別の検証を行い、OIDCのIDトークンや操作別承認をSET受信口へ渡したり、SETをログイン・窓口権限へ流用したりしても拒否する。ランダムな遅延だけで統計的な相関がなくなるとは主張しない。送信遅延の上限・再送・到着時の検証はテスト12にも対応付ける。
 
+**M5との境界：** ADR 0022の既存SETは検証イベントのみで、6回の失敗で送信待ちを削除し、再送でiat・jtiを変えない。このままでは、取消意思を完了まで保持し、受信時間超過後に新しいiat・jtiで再発行する本案を満たせない。M7で取消用に耐障害性と結果確認を拡張し、既存SET署名鍵・sender・登録先検査と整合させる。初回紐付けの取消配送も同様にM9で確かめる。M5のscope `company_api` だけで以下の用途別scopeを実現済みとは扱わない。
+
 #### 2.4.1 SETの配送応答と取消の完了確認
 
 P0のWebhookは、[RFC 8935 §2](https://www.rfc-editor.org/rfc/rfc8935.html#section-2)の配送形式を使う案とする。TLS上のPOST本文にSETを載せ、`Content-Type: application/secevent+jwt`、`Accept: application/json`を送る。割符からの送信はsenderだけが行い、登録済みの相手先・証明書を検証する。応答内のURLやリダイレクト先へ送信先を切り替えない。planの「P0はWebhook、SSFへの完全対応はP1」を維持し、SSFの管理API等をこの追加で作らない。
@@ -558,7 +560,7 @@ ADR 0019の決定文案：
 
 ## 6. 確認した参照元
 
-2026-10-28にmainのコミット`cb60f34b6cea8c35b44ecc31232fa24f28219d82`を確認。以下の公開PRの状態はこの確認時点のもの。採用判断とmainへのマージを区別する。
+2026-10-28に参照したmainのコミットは`cb60f34b6cea8c35b44ecc31232fa24f28219d82`。その後M5のPR #36が`fc68e90634b2e9e4274d83df1fba3586bbd37558`でマージされた。M5で実装した範囲と本案の未実装の範囲は§2.4・§2.5.1に区別して記す。以下の公開PRの状態はこの確認時点のもの。採用判断とmainへのマージを区別する。
 
 - [実装計画](https://github.com/nori1234/pii-token-vault/blob/cb60f34b6cea8c35b44ecc31232fa24f28219d82/docs/plan.md)：3-1の操作別承認とCIBA、10章のP0とM7、11章のテスト、企業の認証方式。
 - [CLAUDE.md](https://github.com/nori1234/pii-token-vault/blob/cb60f34b6cea8c35b44ecc31232fa24f28219d82/CLAUDE.md)、[RP接続要件](https://github.com/nori1234/pii-token-vault/blob/cb60f34b6cea8c35b44ecc31232fa24f28219d82/docs/spec/02-rp-requirements.md)、[DESIGN.md](https://github.com/nori1234/pii-token-vault/blob/cb60f34b6cea8c35b44ecc31232fa24f28219d82/DESIGN.md)：不変条件、RP-20〜28・73、画面と警告文。
@@ -566,6 +568,7 @@ ADR 0019の決定文案：
 - [公開PR #26](https://github.com/nori1234/pii-token-vault/pull/26)、[ADR 0012](https://github.com/nori1234/pii-token-vault/blob/cb60f34b6cea8c35b44ecc31232fa24f28219d82/docs/adr/0012-primary-source-review.md)：mainにマージ済み。
 - [公開PR #24](https://github.com/nori1234/pii-token-vault/pull/24)：mainにマージ済み。ADR 0013〜0017を使用。
 - [公開PR #25](https://github.com/nori1234/pii-token-vault/pull/25)：mainにマージ済み。ADR 0018を使用。[ADR 0017](https://github.com/nori1234/pii-token-vault/blob/cb60f34b6cea8c35b44ecc31232fa24f28219d82/docs/adr/0017-log-allowlist.md)と[ロガー](https://github.com/nori1234/pii-token-vault/blob/cb60f34b6cea8c35b44ecc31232fa24f28219d82/packages/warifu-core/src/log/redact.ts)の許可リスト、[能力表](https://github.com/nori1234/pii-token-vault/blob/cb60f34b6cea8c35b44ecc31232fa24f28219d82/docs/spec/04-capabilities.md)の保存・鍵境界を参照。
+- [公開PR #36](https://github.com/nori1234/pii-token-vault/pull/36)、[ADR 0022](https://github.com/nori1234/pii-token-vault/blob/fc68e90634b2e9e4274d83df1fba3586bbd37558/docs/adr/0022-company-api-sender.md)：M5のテナント登録、SET、送信サービス。O-28〜O-40はオーナー確認待ち。
 - [公開PR #31](https://github.com/nori1234/pii-token-vault/pull/31)：mainにマージ済み。脅威モデルの信頼する前提を追加。
 - [OIDC Core](https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest)、[RFC 9396](https://www.rfc-editor.org/rfc/rfc9396.html#section-3)：認可要求とRAR。操作への結び付けと承認内容は本案の製品プロファイル。
 - [RFC 7523 §2.2](https://www.rfc-editor.org/rfc/rfc7523.html#section-2.2)：JWTによるクライアント認証。company-apiの呼び出しは現行RP-73のトークン利用に合わせる。
