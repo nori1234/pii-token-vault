@@ -30,5 +30,9 @@
     "pg": "8.23.1",
     "typescript": "7.0.2",
     "vitest": "5.0.5"
+  },
+  "overrides": {
+    "nodemailer": "10.1.7",
+    "undici": "8.12.3"
   }
 }

@@ -33,18 +33,30 @@ export type MacPurpose =
   | 'audit_chain'
   | 'pairwise_sub'
   | 'oidc_storage_id'
-  | 'email_verify_code';
+  | 'email_verify_code'
+  | 'relay_replay'
+  | 'relay_thread'
+  | 'message_id';
 export const MAC_PURPOSES: readonly MacPurpose[] = Object.freeze([
   'alias_lookup',
   'audit_chain',
   'pairwise_sub',
   'oidc_storage_id',
   'email_verify_code',
+  'relay_replay',
+  'relay_thread',
+  'message_id',
 ]);
 
-/** 署名の鍵（ES256）。SET、操作ごとの承認、テナントの JWT の鍵は、各マイルストーンで足す（ADR 0014）。 */
-export type SigningKeyId = 'id_token';
-export const SIGNING_KEY_IDS: readonly SigningKeyId[] = Object.freeze(['id_token']);
+/**
+ * 署名の鍵。id_token は ES256。dkim は relay の DKIM と ARC の署名の鍵（RSA 2048、rsa-sha256。不変条件9の
+ * プロトコルの例外。ADR 0021）。SET、操作ごとの承認、テナントの JWT の鍵は、各マイルストーンで足す（ADR 0014）。
+ */
+export type SigningKeyId = 'id_token' | 'dkim';
+export const SIGNING_KEY_IDS: readonly SigningKeyId[] = Object.freeze(['id_token', 'dkim']);
+
+/** RSA 2048 の署名の長さ（バイト）。 */
+export const RSA2048_SIGNATURE_BYTES = 256;
 
 /** 利用者 U の本物のメール。U の文脈でしか復号できない（AAD に入れる）。 */
 export interface ContactContext {
@@ -70,6 +82,13 @@ export interface Es256PublicJwk {
   readonly y: string;
   readonly alg: 'ES256';
   readonly use: 'sig';
+}
+
+/** DKIM の公開鍵。spki は SubjectPublicKeyInfo の DER を base64url にしたもの（DNS の p= に載せる値の元）。 */
+export interface DkimPublicKey {
+  readonly kid: string;
+  readonly kty: 'RSA';
+  readonly spki: string;
 }
 
 /** 鍵サービスのソケットのファイル名。 */

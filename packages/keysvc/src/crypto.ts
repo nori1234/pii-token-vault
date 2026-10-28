@@ -1,5 +1,6 @@
 // 鍵を使う暗号の処理のすべて。keysvc で node:crypto を import するのは、このファイルだけ（不変条件9、ADR 0013）。
 // 使う方式は許可リストのものだけ：保存は AES-256-GCM（IV は96ビットの乱数）、MAC は HMAC-SHA-256、署名は ES256。
+// relay の DKIM と ARC の署名だけは、プロトコルで決まる rsa-sha256（RSA 2048、PKCS#1 v1.5。不変条件9の例外。ADR 0021）。
 
 import {
   createCipheriv,
@@ -16,6 +17,7 @@ export const GCM_IV_BYTES = 12;
 export const GCM_TAG_BYTES = 16;
 export const HMAC_BYTES = 32;
 export const ES256_SIGNATURE_BYTES = 64;
+export const RSA_MODULUS_BITS = 2048;
 
 /** 復号の失敗。理由（鍵、IV、タグ、AAD、本文）を区別しない。 */
 export class CryptoOpenError extends Error {
@@ -99,4 +101,22 @@ export function generateEs256KeyPair(): Es256KeyPair {
 /** JWS の ES256 の形（r‖s の64バイト）で署名する。 */
 export function signEs256(privateKey: KeyObject, message: Uint8Array): Uint8Array {
   return new Uint8Array(sign('sha256', message, { key: privateKey, dsaEncoding: 'ieee-p1363' }));
+}
+
+export interface RsaKeyPair {
+  readonly privateKey: KeyObject;
+  /** SubjectPublicKeyInfo の DER。 */
+  readonly spki: Uint8Array;
+}
+
+/** DKIM と ARC の署名の鍵（RSA 2048）。 */
+export function generateRsa2048KeyPair(): RsaKeyPair {
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: RSA_MODULUS_BITS });
+  return { privateKey, spki: new Uint8Array(publicKey.export({ type: 'spki', format: 'der' })) };
+}
+
+/** rsa-sha256（RSASSA-PKCS1-v1_5 と SHA-256）で署名する。DKIM と ARC の署名だけに使う。 */
+export function signRsaSha256(privateKey: KeyObject, message: Uint8Array): Uint8Array {
+  if (privateKey.asymmetricKeyType !== 'rsa') throw new RangeError('鍵の種類が違う');
+  return new Uint8Array(sign('sha256', message, privateKey));
 }

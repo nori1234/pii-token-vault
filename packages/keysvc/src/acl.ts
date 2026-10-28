@@ -3,7 +3,8 @@
 //
 // 表の性質（keysvc/test/acl.test.ts と t08-keysvc-acl で固定する）：
 // - decrypt を持つのは relay だけ。
-// - relay は derive_alias と sign を持たない。relay の encrypt は relay_queue だけ（連絡先の暗号文を作れない）。
+// - relay は derive_alias を持たない。relay の sign と public_keys は dkim の鍵だけ（DKIM と ARC。ADR 0021）。
+//   relay の encrypt は relay_queue だけ（連絡先の暗号文を作れない）。
 // - company-api は encrypt と decrypt を持たない。
 // - sender、rp-kit、demo-rp の行はない（資格情報もない）。
 // - sub の導出（pairwise_sub）、idp の保存の id（oidc_storage_id）、確認コード（email_verify_code）の MAC は idp だけ（ADR 0018）。
@@ -42,6 +43,11 @@ export const ACL: ReadonlyArray<readonly [KeysvcCaller, KeysvcOp, AclTarget]> = 
   ['relay', 'decrypt', 'relay_queue'],
   ['relay', 'mac', 'alias_lookup'],
   ['relay', 'mac', 'audit_chain'],
+  ['relay', 'mac', 'relay_replay'],
+  ['relay', 'mac', 'relay_thread'],
+  ['relay', 'mac', 'message_id'],
+  ['relay', 'sign', 'dkim'],
+  ['relay', 'public_keys', 'dkim'],
 ] as const);
 
 /** (サービス, 操作) が表にあるか。未知の操作の名前も false。 */

@@ -7,5 +7,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "mailauth": "7.3.1",
+    "smtp-server": "3.20.2"
   }
 }
