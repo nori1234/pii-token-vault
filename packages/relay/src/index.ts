@@ -13,3 +13,4 @@ export {
   startRelay,
   THREAD_LOCAL_PART_PATTERN,
 } from './relay.ts';
+export { OutboundRejectedError, SenderOutbound, senderResolver } from './sender-outbound.ts';

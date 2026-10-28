@@ -263,6 +263,24 @@ export async function recordConnection(
   });
 }
 
+/**
+ * 企業別ID（sub）の索引を置く（ADR 0022）。企業が sub で別名の入れ替えを頼むときに、company-api がテナントの中で
+ * 利用者を引く。すでにあれば何もしない（sub はテナントと利用者から決まるので、同じ値になる）。
+ */
+export async function recordSubject(
+  deps: RepoDeps,
+  tenantId: TenantId,
+  userId: WarifuUserId,
+  sub: string,
+): Promise<void> {
+  await deps.db.withTenant(tenantId, async (tx) => {
+    await tx.execute(
+      sql`INSERT INTO aliases.subject (tenant_id, user_id, sub) VALUES (${tenantId}, ${userId}, ${sub})
+          ON CONFLICT (tenant_id, user_id) DO NOTHING`,
+    );
+  });
+}
+
 /** テナントの中で、この利用者の最新の別名の世代（なければ undefined）。 */
 export async function latestAliasGeneration(
   deps: RepoDeps,

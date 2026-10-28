@@ -40,6 +40,18 @@ M4 で、relay のテストを足した（ADR 0021）。
 | `t10-relay-rcpt` | テスト10（SMTP の RCPT、VRFY、DATA の応答が、別名の状態によらず同じ。relay のドメインでない宛先。同じ接続の次のトランザクションと RSET） |
 | `x-relay-internal-api` | relay の内部配送 API（idp の資格情報だけ、受け付ける入力、知らない利用者でも 202、ソケットの権限、idp から relay を経た宛先確認と旧アドレスへの知らせ） |
 
+M5 で、company-api と送信サービスのテストを足した（ADR 0022）。
+
+| ファイル | 確かめること |
+|---|---|
+| `t04-alias-rotation` | テスト4の後半（入れ替えの後、前の別名あては届かず新しい別名あてだけが届く。ID トークンの sub で入れ替えると次の ID トークンの別名が変わる。一意制約で前の値が戻らない。企業に渡る値の一覧） |
+| `t11-sender-ssrf` | テスト11（公開でないアドレスの拒否、URL の形、内部を指す名前、DNS rebinding、リダイレクト、証明書の名前、内部を指す MX と null MX、ログに宛先を出さない） |
+| `x-company-api-tenant` | テスト6（A社のトークンでB社に触れない、トークンと client assertion の書き換えが同じ 401、緊急停止、レート制限、境界の外で行が見えない、参加の状態の列がない） |
+| `x-company-api-routes` | テスト6（company-api のルート一覧、知らないパスと違う Host の固定の本文） |
+| `x-company-api-set` | SET の署名、aud、jti、events、同じ jti での送り直しと諦め、ログと DB に SET を残さない |
+| `x-sender-internal-api` | 送信サービスの内部 API（呼び出し元ごとの資格情報と口、パスとメソッド、本文の形、名前解決の口、ソケットの権限） |
+| `x-relay-sender` | relay から送信サービスを通った配送、内部を指す MX への配送を止めること、名前解決の口 |
+
 ## いつ足すか
 
 - 新しいルートを足したとき。

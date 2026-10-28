@@ -1,6 +1,6 @@
 // relay から外への配送の出口（不変条件7、ADR 0021）。relay は外へつながない。
-// M4 では、メモリの送信箱だけを使う（開発とテスト用）。M5 で、送信サービス（packages/sender）の内部 API に差し替える。
-// 送信サービスが MX を引き、内部の IP を指す宛先を拒否し、接続する（plan 2章）。
+// 開発とテストでは、メモリの送信箱（MemoryOutbound）を使う。送信サービス（packages/sender）の内部 API に渡すものは
+// sender-outbound.ts（M5。ADR 0022）。送信サービスが MX を引き、内部の IP を指す宛先を拒否し、接続する（plan 2章）。
 // 渡すのは、封筒（MAIL FROM、RCPT TO）と、署名済みのメッセージだけ。本物のアドレスは、メモリの中だけで扱う。
 
 export interface OutboundMessage {

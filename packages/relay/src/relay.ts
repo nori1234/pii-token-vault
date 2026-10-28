@@ -7,7 +7,7 @@
 // - 内部配送 API（Unix ドメインソケットの HTTP。idp だけ。internal-api.ts）。
 //
 // 受け取ったメールの件名と本文は DB に置かない。DATA の応答を返した後に、メモリの中で処理する
-// （別名が生きているかどうかで、応答と所要時間を変えないため）。外への配送は Outbound（M4 はメモリだけ）。
+// （別名が生きているかどうかで、応答と所要時間を変えないため）。外への配送は Outbound（メモリか、送信サービスの内部 API。ADR 0022）。
 // テナントの範囲の表（relay.replay、relay.threads、relay.delivery_log）は withTenant で、本物のアドレスは
 // withWarifuUser で読む。テナントを横断するのは、解決関数（relay.resolve_alias）だけ（不変条件8）。
 
@@ -77,7 +77,7 @@ export interface RelayOptions {
   readonly keysvc: KeysvcConnection;
   readonly outbound: Outbound;
   /**
-   * 返信の DMARC の検証に使う DNS のリゾルバ。M5 で送信サービスの名前解決につなぐ。
+   * 返信の DMARC の検証に使う DNS のリゾルバ。送信サービスの名前解決の口（senderResolver。ADR 0022）。
    * ないときは、利用者からの返信を中継しない（確かめられないものは通さない）。
    */
   readonly resolver?: DNSResolver;
