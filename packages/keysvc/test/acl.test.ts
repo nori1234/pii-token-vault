@@ -34,9 +34,24 @@ describe('能力の表の性質（不変条件3）', () => {
     }
   });
 
-  it('company-api は encrypt と decrypt を持たない', () => {
+  it('company-api は encrypt と decrypt を持たない。sign と public_keys は tenant_jwt と set だけ', () => {
     expect(allowedOp('company-api', 'encrypt')).toBe(false);
     expect(allowedOp('company-api', 'decrypt')).toBe(false);
+    expect(allowedTarget('company-api', 'sign', 'id_token')).toBe(false);
+    expect(allowedTarget('company-api', 'sign', 'dkim')).toBe(false);
+    const targets = (op: string) =>
+      ACL.filter(([caller, o]) => caller === 'company-api' && o === op).map(([, , t]) => t);
+    expect(targets('sign')).toEqual(['tenant_jwt', 'set']);
+    expect(targets('public_keys')).toEqual(['tenant_jwt', 'set']);
+  });
+
+  it('tenant_jwt と set の鍵で署名できるのは company-api だけ', () => {
+    for (const key of ['tenant_jwt', 'set']) {
+      const signers = ACL.filter(([, op, target]) => op === 'sign' && target === key).map(
+        ([caller]) => caller,
+      );
+      expect(signers).toEqual(['company-api']);
+    }
   });
 
   it('知らない呼び出し元、操作、対象は false', () => {

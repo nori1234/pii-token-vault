@@ -5,7 +5,7 @@
 // - decrypt を持つのは relay だけ。
 // - relay は derive_alias を持たない。relay の sign と public_keys は dkim の鍵だけ（DKIM と ARC。ADR 0021）。
 //   relay の encrypt は relay_queue だけ（連絡先の暗号文を作れない）。
-// - company-api は encrypt と decrypt を持たない。
+// - company-api は encrypt と decrypt を持たない。company-api の sign と public_keys は、tenant_jwt と set の鍵だけ（ADR 0022）。
 // - sender、rp-kit、demo-rp の行はない（資格情報もない）。
 // - sub の導出（pairwise_sub）、idp の保存の id（oidc_storage_id）、確認コード（email_verify_code）の MAC は idp だけ（ADR 0018）。
 //
@@ -37,6 +37,10 @@ export const ACL: ReadonlyArray<readonly [KeysvcCaller, KeysvcOp, AclTarget]> = 
   ['company-api', 'mac', 'alias_lookup'],
   ['company-api', 'mac', 'audit_chain'],
   ['company-api', 'derive_alias', 'alias_derive'],
+  ['company-api', 'sign', 'tenant_jwt'],
+  ['company-api', 'public_keys', 'tenant_jwt'],
+  ['company-api', 'sign', 'set'],
+  ['company-api', 'public_keys', 'set'],
 
   ['relay', 'encrypt', 'relay_queue'],
   ['relay', 'decrypt', 'contact'],

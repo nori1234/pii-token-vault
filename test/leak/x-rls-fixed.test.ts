@@ -22,6 +22,32 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
       SELECT: ['created_at', 'generation', 'tenant_id', 'user_id'],
     },
   },
+  // sub の索引（0006。ADR 0022）。idp は sub を置けるが読めない。company-api は sub から利用者を引くだけ。
+  'aliases.subject': {
+    warifu_company_api: { SELECT: ['sub', 'tenant_id', 'user_id'] },
+    warifu_idp: {
+      INSERT: ['sub', 'tenant_id', 'user_id'],
+      SELECT: ['created_at', 'tenant_id', 'user_id'],
+    },
+  },
+  // SET の送信待ち（0006。ADR 0022）。署名した SET の列はない。
+  'company_api.set_outbox': {
+    warifu_company_api: {
+      INSERT: ['deliver_after', 'event_id', 'event_type', 'state', 'tenant_id'],
+      SELECT: [
+        'attempts',
+        'created_at',
+        'deliver_after',
+        'event_id',
+        'event_type',
+        'issued_at',
+        'jti',
+        'state',
+        'tenant_id',
+      ],
+      UPDATE: ['attempts', 'deliver_after', 'issued_at', 'jti'],
+    },
+  },
   'audit.chain': Object.fromEntries(
     APP_ROLES.map((role) => [
       role,
@@ -137,10 +163,17 @@ const POLICIES = [
   'aliases.generation|idp_insert|INSERT|{warifu_idp}||((tenant_id = warifu.current_tenant_id()) AND (generation = 1))',
   'aliases.generation|idp_select|SELECT|{warifu_idp}|((tenant_id = warifu.current_tenant_id()) OR (user_id = warifu.current_user_id()))|',
   'aliases.generation|resolver_select|SELECT|{warifu_alias_resolver}|true|',
+  `aliases.subject|company_api_select|SELECT|{warifu_company_api}|${TENANT}|`,
+  `aliases.subject|idp_insert|INSERT|{warifu_idp}||${TENANT}`,
+  `aliases.subject|idp_select|SELECT|{warifu_idp}|${TENANT}|`,
   `audit.chain|chain_insert|INSERT|${APP}||warifu.has_boundary()`,
   `audit.chain|chain_select|SELECT|${APP}|warifu.has_boundary()|`,
   `audit.events|events_insert|INSERT|${APP}||((service = warifu.service_of(CURRENT_USER)) AND (((tenant_id = warifu.current_tenant_id()) AND (user_id IS NULL)) OR ((user_id = warifu.current_user_id()) AND (tenant_id IS NULL))))`,
   `audit.events|events_select|SELECT|${APP}|((tenant_id = warifu.current_tenant_id()) OR (user_id = warifu.current_user_id()))|`,
+  `company_api.set_outbox|company_api_delete|DELETE|{warifu_company_api}|${TENANT}|`,
+  `company_api.set_outbox|company_api_insert|INSERT|{warifu_company_api}||${TENANT}`,
+  `company_api.set_outbox|company_api_select|SELECT|{warifu_company_api}|${TENANT}|`,
+  `company_api.set_outbox|company_api_update|UPDATE|{warifu_company_api}|${TENANT}|${TENANT}`,
   ...['email', 'email_pending', 'email_previous'].flatMap((t) => [
     ...(t === 'email_previous' || t === 'email_pending'
       ? [`contacts.${t}|idp_delete|DELETE|{warifu_idp}|${OWN}|`]
@@ -169,6 +202,7 @@ const POLICIES = [
 
 // 表の単位の権限（DELETE は列の単位で与えられない）。これ以外は0件（UPDATE は列の単位だけ）。
 const TABLE_GRANTS = [
+  'company_api.set_outbox|warifu_company_api|DELETE',
   'contacts.email_pending|warifu_idp|DELETE',
   'contacts.email_previous|warifu_idp|DELETE',
   'idp.credentials|warifu_idp|DELETE',
@@ -207,7 +241,9 @@ describe('漏えい：RLS とロールの固定（plan 10章 M2）', () => {
     expect(tables.map((t) => t.t)).toEqual(
       expect.arrayContaining([
         'aliases.generation',
+        'aliases.subject',
         'audit.chain',
+        'company_api.set_outbox',
         'audit.events',
         'contacts.email',
         'contacts.email_pending',

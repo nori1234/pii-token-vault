@@ -37,11 +37,15 @@ function typeOnly(idp: IdpKeyClient, companyApi: CompanyApiKeyClient, relay: Rel
   void companyApi.mac('pairwise_sub', new Uint8Array());
   // @ts-expect-error 確認コードの MAC は idp だけ
   void relay.mac('email_verify_code', new Uint8Array());
+  // @ts-expect-error company-api は ID トークンに署名できない（tenant_jwt と set だけ。ADR 0022）
+  void companyApi.sign('id_token', new Uint8Array());
+  // @ts-expect-error idp は SET に署名できない
+  void idp.sign('set', new Uint8Array());
 }
 
 const EXPECTED_METHODS = {
   idp: ['deriveAlias', 'encryptContact', 'mac', 'publicKeys', 'sign'],
-  'company-api': ['deriveAlias', 'mac'],
+  'company-api': ['deriveAlias', 'mac', 'publicKeys', 'sign'],
   relay: [
     'decryptContact',
     'decryptQueueItem',
@@ -114,6 +118,16 @@ describe('漏えい：鍵のクライアントの表面（plan 11章 テスト8�
     expect(await companyApi.deriveAlias({ tenantId, userId, generation: 1 })).toBe(alias);
     expect((await idp.sign('id_token', message)).signature.byteLength).toBe(64);
     expect(await idp.publicKeys('id_token')).toHaveLength(1);
+    // company-api の ES256 の鍵は、用途ごとに別（ID トークンの鍵とも別。ADR 0022）。
+    const kids = new Set([(await idp.publicKeys('id_token'))[0]?.kid]);
+    for (const keyId of ['tenant_jwt', 'set'] as const) {
+      const signed = await companyApi.sign(keyId, message);
+      expect(signed.signature.byteLength).toBe(64);
+      const [key] = await companyApi.publicKeys(keyId);
+      expect(key?.kid).toBe(signed.kid);
+      kids.add(signed.kid);
+    }
+    expect(kids.size).toBe(3);
     const queueItemId = randomUUID();
     const queued = await relay.encryptQueueItem({ queueItemId, plaintext: message });
     expect(await relay.decryptQueueItem({ queueItemId, ciphertext: queued })).toEqual(message);

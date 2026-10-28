@@ -25,7 +25,11 @@ type Combo =
   | 'sign/id_token'
   | 'public_keys/id_token'
   | 'sign/dkim'
-  | 'public_keys/dkim';
+  | 'public_keys/dkim'
+  | 'sign/tenant_jwt'
+  | 'public_keys/tenant_jwt'
+  | 'sign/set'
+  | 'public_keys/set';
 
 const COMBOS: readonly Combo[] = [
   'encrypt/contact',
@@ -45,6 +49,10 @@ const COMBOS: readonly Combo[] = [
   'public_keys/id_token',
   'sign/dkim',
   'public_keys/dkim',
+  'sign/tenant_jwt',
+  'public_keys/tenant_jwt',
+  'sign/set',
+  'public_keys/set',
 ];
 
 // plan 8章と spec 04 2章の表を、操作と対象の単位にしたもの。ここにないものは、すべて 403。
@@ -60,7 +68,15 @@ const ALLOWED: Readonly<Record<Caller, readonly Combo[]>> = {
     'sign/id_token',
     'public_keys/id_token',
   ],
-  'company-api': ['mac/alias_lookup', 'mac/audit_chain', 'derive_alias'],
+  'company-api': [
+    'mac/alias_lookup',
+    'mac/audit_chain',
+    'derive_alias',
+    'sign/tenant_jwt',
+    'public_keys/tenant_jwt',
+    'sign/set',
+    'public_keys/set',
+  ],
   relay: [
     'encrypt/relay_queue',
     'decrypt/contact',
@@ -149,6 +165,14 @@ function bodyFor(combo: Combo): { op: string; body: unknown } {
       return { op: 'sign', body: { keyId: 'dkim', message: b64('dkim-signature:') } };
     case 'public_keys/dkim':
       return { op: 'public_keys', body: { keyId: 'dkim' } };
+    case 'sign/tenant_jwt':
+      return { op: 'sign', body: { keyId: 'tenant_jwt', message: b64('header.payload') } };
+    case 'public_keys/tenant_jwt':
+      return { op: 'public_keys', body: { keyId: 'tenant_jwt' } };
+    case 'sign/set':
+      return { op: 'sign', body: { keyId: 'set', message: b64('header.payload') } };
+    case 'public_keys/set':
+      return { op: 'public_keys', body: { keyId: 'set' } };
   }
 }
 
@@ -250,10 +274,13 @@ describe('漏えい：鍵サービスの能力の表（plan 11章 テスト8）'
     ['mac', { purpose: 'sub', message: b64('m') }],
     ['encrypt', { keyId: 'alias_derive', plaintext: b64('x'), context: {} }],
     ['sign', { keyId: 'set', message: b64('x') }],
+    ['sign', { keyId: 'tenant_jwt', message: b64('x') }],
+    ['sign', { keyId: 'op_approval', message: b64('x') }],
     ['mac', { message: b64('m') }],
-  ])('未知・未来の対象（%s %j）は 403', async (op, body) => {
+  ])('未知・未来の対象、ほかのサービスの鍵（%s %j）は 403', async (op, body) => {
     // 攻撃者が持っている情報：侵害した idp の資格情報（ATK-07。mac、encrypt、sign の権限を持つ）
-    // 試す経路：まだ作っていない用途や鍵（窓口コード、sub、別名の導出鍵、SET）を対象にして呼ぶ
+    // 試す経路：まだ作っていない用途や鍵（窓口コード、sub、別名の導出鍵、操作ごとの承認）と、company-api の鍵
+    //           （SET、テナントの JWT。ADR 0022）を対象にして呼ぶ
     // 期待する結果：すべて 403
     // plan 11章：テスト8
     const response = await call('idp', op, body);

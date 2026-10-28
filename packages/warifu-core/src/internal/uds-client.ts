@@ -12,10 +12,11 @@ import { lstat } from 'node:fs/promises';
 import { request } from 'node:http';
 import { basename, dirname, resolve } from 'node:path';
 
-/** 割符の内部のソケットの名前。閉じた一覧（relay の内部配送 API は M4。M5 で sender を足す見込み）。 */
+/** 割符の内部のソケットの名前。閉じた一覧（relay の内部配送 API は M4、sender の内部 API は M5。ADR 0022）。 */
 export const INTERNAL_SOCKET_NAMES: readonly string[] = Object.freeze([
   'keysvc.sock',
   'relay.sock',
+  'sender.sock',
 ]);
 
 export interface UdsPostInput {

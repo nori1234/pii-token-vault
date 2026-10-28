@@ -7,5 +7,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@pii-token-vault/warifu-core": "0.0.0",
+    "nodemailer": "10.1.7"
   }
 }

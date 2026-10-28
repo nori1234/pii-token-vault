@@ -17,7 +17,7 @@ import { connect, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dkimSign } from 'mailauth/lib/dkim/sign.js';
-import { MemoryOutbound } from '../../packages/relay/src/outbound.ts';
+import { MemoryOutbound, type Outbound } from '../../packages/relay/src/outbound.ts';
 import { type RelayHandle, startRelay } from '../../packages/relay/src/relay.ts';
 import { aliasLookupMessage } from '../../packages/warifu-core/src/aliases.ts';
 import { sql } from '../../packages/warifu-core/src/db/sql.ts';
@@ -76,6 +76,8 @@ export async function startTestRelay(options?: {
   readonly now?: () => Date;
   /** 返信の DMARC の検証に使う DNS の記録（`TXT:名前` → 値）。なければリゾルバを渡さない。 */
   readonly replyDns?: Readonly<Record<string, string>>;
+  /** 外への配送の出口を差し替える（sender の内部 API に渡すときなど）。既定はメモリの送信箱。 */
+  readonly outbound?: Outbound;
 }): Promise<TestRelay> {
   const companies: TestCompany[] = Array.from({ length: options?.companies ?? 1 }, (_, i) => {
     const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -115,7 +117,7 @@ export async function startTestRelay(options?: {
     },
     db: { host: String(db.host), port: Number(db.port), database: String(db.database) },
     keysvc: keysvcConnection('relay'),
-    outbound,
+    outbound: options?.outbound ?? outbound,
     ...(replyDns === undefined ? {} : { resolver: resolverOf(replyDns) }),
     internalApi: { socketPath: join(dir, 'relay.sock'), credentials: { idp: idpSecret } },
     ...(options?.now === undefined ? {} : { now: options.now }),

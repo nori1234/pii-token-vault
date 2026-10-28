@@ -80,7 +80,11 @@
               "web-push": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
               "nodemailer": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
               "node:crypto": "不変条件9：暗号は packages/warifu-core と packages/keysvc を通して使う（許可リストで固定するため）。",
-              "crypto": "不変条件9：暗号は packages/warifu-core と packages/keysvc を通して使う（許可リストで固定するため）。"
+              "crypto": "不変条件9：暗号は packages/warifu-core と packages/keysvc を通して使う（許可リストで固定するため）。",
+              "jose": {
+                "message": "不変条件7：鍵を外から取りに行く createRemoteJWKSet などは使わない。企業の鍵は登録時の jwks で受け取る（ADR 0022）。",
+                "importNames": ["createRemoteJWKSet", "customFetch", "jwksCache"]
+              }
             }
           }
         },
@@ -122,7 +126,11 @@
                   "node:crypto": "不変条件9：暗号は packages/warifu-core と packages/keysvc を通して使う（許可リストで固定するため）。",
                   "crypto": "不変条件9：暗号は packages/warifu-core と packages/keysvc を通して使う（許可リストで固定するため）。",
                   "node:module": "不変条件7、9：createRequire などで、import の制限（外向きの通信と node:crypto）を回避させない。",
-                  "module": "不変条件7、9：createRequire などで、import の制限（外向きの通信と node:crypto）を回避させない。"
+                  "module": "不変条件7、9：createRequire などで、import の制限（外向きの通信と node:crypto）を回避させない。",
+                  "jose": {
+                    "message": "不変条件7：鍵を外から取りに行く createRemoteJWKSet などは使わない。企業の鍵は登録時の jwks で受け取る（ADR 0022）。",
+                    "importNames": ["createRemoteJWKSet", "customFetch", "jwksCache"]
+                  }
                 }
               }
             },
@@ -193,7 +201,11 @@
                   "got": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
                   "ky": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
                   "web-push": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
-                  "nodemailer": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。"
+                  "nodemailer": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "jose": {
+                    "message": "不変条件7：鍵を外から取りに行く createRemoteJWKSet などは使わない。企業の鍵は登録時の jwks で受け取る（ADR 0022）。",
+                    "importNames": ["createRemoteJWKSet", "customFetch", "jwksCache"]
+                  }
                 }
               }
             }
@@ -258,7 +270,11 @@
                   "web-push": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
                   "nodemailer": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
                   "node:crypto": "不変条件9：暗号は packages/warifu-core と packages/keysvc を通して使う（許可リストで固定するため）。",
-                  "crypto": "不変条件9：暗号は packages/warifu-core と packages/keysvc を通して使う（許可リストで固定するため）。"
+                  "crypto": "不変条件9：暗号は packages/warifu-core と packages/keysvc を通して使う（許可リストで固定するため）。",
+                  "jose": {
+                    "message": "不変条件7：鍵を外から取りに行く createRemoteJWKSet などは使わない。企業の鍵は登録時の jwks で受け取る（ADR 0022）。",
+                    "importNames": ["createRemoteJWKSet", "customFetch", "jwksCache"]
+                  }
                 }
               }
             }
@@ -319,7 +335,11 @@
                   "got": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
                   "ky": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
                   "web-push": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
-                  "nodemailer": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。"
+                  "nodemailer": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "jose": {
+                    "message": "不変条件7：鍵を外から取りに行く createRemoteJWKSet などは使わない。企業の鍵は登録時の jwks で受け取る（ADR 0022）。",
+                    "importNames": ["createRemoteJWKSet", "customFetch", "jwksCache"]
+                  }
                 }
               }
             }

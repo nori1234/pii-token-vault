@@ -27,3 +27,4 @@ export {
   uuidBytes,
 } from './ids.ts';
 export { constantTimeEqual, randomBytesOf, randomUuid } from './random.ts';
+export { type LimitRule, RateLimiter } from './rate-limit.ts';
