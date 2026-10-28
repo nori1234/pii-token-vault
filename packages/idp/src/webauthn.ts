@@ -10,8 +10,12 @@
 // 5. 理由を外に出さない：失敗は種類によらず { ok: false }。ライブラリの例外は、応答にもログにも載せない。
 // 6. AAGUID は保存しない。BE と BS のフラグは記録する。
 //
-// チャレンジ（ceremony）は使い捨てで、目的（作成、ログイン、step-up、追加）と、結び付く相手（インタラクションの uid、
-// PWA のセッション）を持つ。別の目的や別の相手のチャレンジでは検証しない。
+// チャレンジ（ceremony）は使い捨てで、目的（作成、ログイン、step-up、追加、承認用のオリジンでのログイン、承認と拒否）と、
+// 結び付く相手（インタラクションの uid、PWA や承認用のセッション）を持つ。別の目的や別の相手のチャレンジでは検証しない。
+//
+// オリジン（expectedOrigin）は目的ごとに固定する。承認用のオリジンでのログインと、承認と拒否は、承認用のオリジン
+// だけで通す（DESIGN.md 原則8、ADR 0023）。PWA の画面から同じ RP ID で取ったアサーションでは、承認できない。
+// 承認と拒否のチャレンジは乱数ではなく、要求の内容と決定から鍵サービスの MAC で作った値にする（inbox.ts）。
 
 import {
   fromBase64Url,
@@ -67,10 +71,13 @@ export interface WebAuthnConfig {
   readonly rpName: string;
   /** ポート込みで固定する（CLAUDE.md「環境の注意」）。 */
   readonly origin: string;
+  /** 承認用のオリジン（DESIGN.md 原則8）。承認用のログインと、承認と拒否だけに使う。 */
+  readonly approvalOrigin: string;
 }
 
 export type RegistrationPurpose = 'create' | 'add';
-export type AuthenticationPurpose = 'login' | 'stepup';
+export type AuthenticationPurpose = 'login' | 'stepup' | 'approval_login';
+export type ApprovalCeremonyDecision = 'approved' | 'denied';
 
 interface RegistrationCeremony {
   readonly kind: 'registration';
@@ -88,7 +95,18 @@ interface AuthenticationCeremony {
   readonly bind: string;
 }
 
-type Ceremony = RegistrationCeremony | AuthenticationCeremony;
+/** 承認か拒否。チャレンジは要求の内容と決定から作った値（base64url）。 */
+interface ApprovalCeremony {
+  readonly kind: 'approval';
+  readonly challenge: string;
+  readonly bind: string;
+  readonly userId: WarifuUserId;
+  readonly itemId: string;
+  readonly decision: ApprovalCeremonyDecision;
+  readonly nonce: string;
+}
+
+type Ceremony = RegistrationCeremony | AuthenticationCeremony | ApprovalCeremony;
 
 export type RegistrationResult =
   | { readonly ok: true; readonly userId: WarifuUserId; readonly credential: NewCredential }
@@ -103,6 +121,23 @@ export type AuthenticationResult =
       readonly backedUp: boolean;
     }
   | { readonly ok: false };
+
+export type ApprovalVerifyResult =
+  | {
+      readonly ok: true;
+      readonly userId: WarifuUserId;
+      readonly credentialId: Uint8Array;
+      readonly newSignCount: number;
+      readonly backedUp: boolean;
+      readonly itemId: string;
+      readonly decision: ApprovalCeremonyDecision;
+    }
+  | { readonly ok: false };
+
+type CredentialFinder = (
+  userId: WarifuUserId,
+  credentialId: Uint8Array,
+) => Promise<StoredCredential | undefined>;
 
 const FAILED = Object.freeze({ ok: false }) as { readonly ok: false };
 
@@ -310,6 +345,11 @@ export class Ceremonies {
     return { ceremonyId, options };
   }
 
+  /** 目的ごとの expectedOrigin。承認用のログインだけ、承認用のオリジン。 */
+  #originOf(purpose: AuthenticationPurpose): string {
+    return purpose === 'approval_login' ? this.#config.approvalOrigin : this.#config.origin;
+  }
+
   /**
    * アサーションを検証する。find は、userHandle の利用者の範囲で、資格情報 ID の資格情報を返す（repo.findCredential）。
    * expectedUserId を渡したとき（step-up）は、その利用者でなければ失敗にする。
@@ -320,10 +360,7 @@ export class Ceremonies {
     readonly purpose: AuthenticationPurpose;
     readonly bind: string;
     readonly expectedUserId?: WarifuUserId;
-    readonly find: (
-      userId: WarifuUserId,
-      credentialId: Uint8Array,
-    ) => Promise<StoredCredential | undefined>;
+    readonly find: CredentialFinder;
     /** userHandle の利用者が分かった時点で呼ぶ（利用者ごとのレート制限）。false なら失敗にする。 */
     readonly admit?: (userId: WarifuUserId) => boolean;
   }): Promise<AuthenticationResult> {
@@ -335,6 +372,99 @@ export class Ceremonies {
     ) {
       return FAILED;
     }
+    return this.#verifyAssertion({
+      response: input.response,
+      challenge: ceremony.challenge,
+      origin: this.#originOf(ceremony.purpose),
+      ...(input.expectedUserId === undefined ? {} : { expectedUserId: input.expectedUserId }),
+      find: input.find,
+      ...(input.admit === undefined ? {} : { admit: input.admit }),
+    });
+  }
+
+  /**
+   * 承認か拒否の選択肢。challenge は、要求の内容と決定から作った MAC（inbox.ts の approvalChallengeMessage）。
+   * 発見可能な資格情報だけで、allowCredentials は出さない（ほかのアサーションと同じ）。
+   */
+  async approvalOptions(input: {
+    readonly challenge: Uint8Array;
+    readonly bind: string;
+    readonly userId: WarifuUserId;
+    readonly itemId: string;
+    readonly decision: ApprovalCeremonyDecision;
+    readonly nonce: string;
+  }): Promise<{ ceremonyId: string; options: PublicKeyCredentialRequestOptionsJSON }> {
+    if (input.challenge.byteLength < 32) throw new RangeError('チャレンジが短い');
+    const options = await generateAuthenticationOptions({
+      rpID: this.#config.rpId,
+      timeout: WEBAUTHN_TIMEOUT_MS,
+      userVerification: 'required',
+      challenge: new Uint8Array(input.challenge),
+    });
+    const ceremonyId = await this.#put({
+      kind: 'approval',
+      challenge: options.challenge,
+      bind: input.bind,
+      userId: input.userId,
+      itemId: input.itemId,
+      decision: input.decision,
+      nonce: input.nonce,
+    });
+    return { ceremonyId, options };
+  }
+
+  /**
+   * 承認か拒否のアサーションを検証する。recompute は、選択肢を出したときと同じ材料（DB の要求の内容と、儀式に覚えた
+   * 決定と乱数）から、チャレンジを作り直して返す（base64url）。要求が決まった後、期限切れ、ほかの利用者のもの
+   * なら undefined を返す。作り直した値が儀式のチャレンジと違えば（内容が変わった）、検証しない。
+   */
+  async verifyApproval(input: {
+    readonly ceremonyId: unknown;
+    readonly response: unknown;
+    readonly bind: string;
+    readonly expectedUserId: WarifuUserId;
+    readonly find: CredentialFinder;
+    readonly admit?: (userId: WarifuUserId) => boolean;
+    readonly recompute: (ceremony: {
+      readonly itemId: string;
+      readonly decision: ApprovalCeremonyDecision;
+      readonly nonce: string;
+    }) => Promise<string | undefined>;
+  }): Promise<ApprovalVerifyResult> {
+    const ceremony = await this.#take(input.ceremonyId);
+    if (
+      ceremony?.kind !== 'approval' ||
+      ceremony.bind !== input.bind ||
+      ceremony.userId !== input.expectedUserId
+    ) {
+      return FAILED;
+    }
+    const recomputed = await input.recompute({
+      itemId: ceremony.itemId,
+      decision: ceremony.decision,
+      nonce: ceremony.nonce,
+    });
+    if (recomputed === undefined || recomputed !== ceremony.challenge) return FAILED;
+    const result = await this.#verifyAssertion({
+      response: input.response,
+      challenge: recomputed,
+      origin: this.#config.approvalOrigin,
+      expectedUserId: input.expectedUserId,
+      find: input.find,
+      ...(input.admit === undefined ? {} : { admit: input.admit }),
+    });
+    if (!result.ok) return FAILED;
+    return { ...result, itemId: ceremony.itemId, decision: ceremony.decision };
+  }
+
+  async #verifyAssertion(input: {
+    readonly response: unknown;
+    readonly challenge: string;
+    readonly origin: string;
+    readonly expectedUserId?: WarifuUserId;
+    readonly find: CredentialFinder;
+    readonly admit?: (userId: WarifuUserId) => boolean;
+  }): Promise<AuthenticationResult> {
     if (!isRecord(input.response)) return FAILED;
     const response = input.response as unknown as AuthenticationResponseJSON;
     try {
@@ -349,8 +479,8 @@ export class Ceremonies {
       if (stored === undefined || stored.userId !== userId) return FAILED;
       const result = await verifyAuthenticationResponse({
         response,
-        expectedChallenge: ceremony.challenge,
-        expectedOrigin: this.#config.origin,
+        expectedChallenge: input.challenge,
+        expectedOrigin: input.origin,
         expectedRPID: this.#config.rpId,
         expectedType: 'webauthn.get',
         credential: {

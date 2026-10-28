@@ -17,6 +17,7 @@ import {
 } from 'jose';
 import pg from 'pg';
 import { createIdp, type Idp } from '../../packages/idp/src/app.ts';
+import { type ApprovalType, DEVICE_KINDS, deviceKindOf } from '../../packages/idp/src/inbox.ts';
 import { MemoryOutbox } from '../../packages/idp/src/mailer.ts';
 import { type KeysvcProcess, startKeysvc } from '../../scripts/keysvc-up.ts';
 import { applyDatabaseAcl, migrate } from '../../scripts/migrate.ts';
@@ -32,11 +33,25 @@ const TENANT = {
   relayDomain: 'e2e.relay.warifu.test',
 };
 const CLIENT_ID = 'rp-e2e';
+/** M6 には製品の承認待ちの型がまだないので、E2E の型を使う（ADR 0023）。 */
+const E2E_APPROVAL: ApprovalType = {
+  type: 'e2e.pickup_change',
+  channel: 'device',
+  operation: '受け取り場所の変更',
+  parse: (details) =>
+    typeof details === 'object' &&
+    details !== null &&
+    typeof (details as { place_name?: unknown }).place_name === 'string'
+      ? { place_name: String((details as { place_name: string }).place_name) }
+      : undefined,
+  lines: (content) => [{ label: '受け取り場所の名称', value: String(content.place_name) }],
+};
 
 let cluster: PgCluster;
 let keysvc: KeysvcProcess;
 let idp: Idp;
 let origin: string;
+let approvalOrigin: string;
 let rpKey: PrivateKey;
 const outbox = new MemoryOutbox();
 
@@ -80,8 +95,13 @@ test.beforeAll(async () => {
   const jwk = await exportJWK(publicKey);
   const port = await freePort();
   origin = `http://localhost:${port}`;
+  let approvalPort = await freePort();
+  while (approvalPort === port) approvalPort = await freePort();
+  approvalOrigin = `http://localhost:${approvalPort}`;
   idp = await createIdp({
     origin,
+    approvalOrigin,
+    approvalTypes: [E2E_APPROVAL],
     rpId: 'localhost',
     registry: {
       tenants: [TENANT],
@@ -112,6 +132,7 @@ test.beforeAll(async () => {
     logWrite: () => {},
   });
   await idp.app.listen({ host: 'localhost', port });
+  await idp.listenApproval({ host: 'localhost', port: approvalPort });
 });
 
 test.afterAll(async () => {
@@ -285,4 +306,63 @@ test('UV のないアサーションでは、PWA にログインできない（A
     'パスキーでの確認ができませんでした。もう一度お試しください。',
   );
   await expect(page.getByRole('button', { name: 'パスキーでログイン' })).toBeVisible();
+});
+
+test('承認用のオリジン：受信箱から承認待ちを開き、パスキーで承認する', async ({ page }) => {
+  // 攻撃者が持っている情報：なし（正規の利用者の流れ。DESIGN.md 2章「端末での承認」と「受信箱」の画面を確かめる）
+  // 試す経路：PWA でアカウントを作る → 承認待ちを作る → 受信箱のリンクから承認用のオリジンを開く → パスキーで
+  //           確認待ちを表示する → 承認する
+  // 期待する結果：承認画面に、企業名、操作の種類、型が決めた項目、要求の時刻と端末、警告文 A-2（DESIGN.md の文言の
+  //               まま）、同じ大きさの承認と拒否が出る。初期フォーカスは企業名で、どのボタンにも置かない。承認すると、受信箱で
+  //               「承認しました」になる。CSP の違反はない
+  // plan 11章：番号なし（plan 10章 M6、DESIGN.md 原則4・8）
+  const problems = watchProblems(page);
+  const { cdp, authenticatorId } = await addVirtualAuthenticator(page);
+  await page.goto(`${origin}/`);
+  await page.getByRole('button', { name: '割符のアカウントを作る' }).click();
+  await expect(page.getByRole('heading', { name: '受信箱' })).toBeVisible();
+  const { credentials } = await cdp.send('WebAuthn.getCredentials', { authenticatorId });
+  const handle = Buffer.from(credentials[0]?.userHandle ?? '', 'base64').toString('hex');
+  const userId = `${handle.slice(0, 8)}-${handle.slice(8, 12)}-${handle.slice(12, 16)}-${handle.slice(16, 20)}-${handle.slice(20)}`;
+  // 要求の端末は、要求を出したブラウザの User-Agent から決める（ここでは、同じブラウザから出したことにする）。
+  const device = deviceKindOf(await page.evaluate(() => navigator.userAgent));
+  const requested = await idp.requestApproval({
+    userId: userId as never,
+    tenantId: TENANT.tenantId as never,
+    type: E2E_APPROVAL.type,
+    details: { place_name: 'テスト店' },
+    ttlSeconds: 300,
+    device,
+  });
+  expect(requested.ok).toBe(true);
+  await page.reload();
+  await expect(page.getByText('確認待ち', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: '確認待ちの画面を開く' }).click();
+  await expect(page).toHaveURL(`${approvalOrigin}/`);
+  await page.getByRole('button', { name: 'パスキーで確認待ちを表示する' }).click();
+
+  const card = page.getByRole('article');
+  await expect(card.getByRole('heading', { name: TENANT.displayName })).toBeFocused();
+  await expect(card.getByText('受け取り場所の変更', { exact: true })).toBeVisible();
+  await expect(card.getByText('テスト店')).toBeVisible();
+  await expect(card.getByText(/^要求の時刻：/)).toBeVisible();
+  await expect(
+    card.getByText(`要求の端末：${DEVICE_KINDS[device]}`, { exact: true }),
+  ).toBeVisible();
+  await expect(card.getByRole('note')).toContainText('ご注意');
+  await expect(card.getByRole('note')).toContainText(
+    'この確認は、あなたが今この端末で受け取り場所の変更をしようとしている場合だけ承認してください。電話やメッセージで頼まれて承認してはいけません。',
+  );
+  const approve = card.getByRole('button', { name: '承認する' });
+  const deny = card.getByRole('button', { name: '拒否する' });
+  const [a, d] = await Promise.all([approve.boundingBox(), deny.boundingBox()]);
+  expect(a?.width).toBe(d?.width);
+  expect(a?.height).toBe(d?.height);
+  await approve.click();
+  await expect(page.getByRole('status')).toHaveText('承認しました。');
+  await expect(page.getByText('確認待ちはありません。')).toBeVisible();
+
+  await page.goto(`${origin}/`);
+  await expect(page.getByText('承認しました', { exact: true })).toBeVisible();
+  expect(problems, 'CSP 違反やスクリプトのエラーがない').toEqual([]);
 });

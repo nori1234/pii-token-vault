@@ -11,13 +11,15 @@ export type IdpMacPurpose =
   | 'audit_chain'
   | 'pairwise_sub'
   | 'oidc_storage_id'
-  | 'email_verify_code';
+  | 'email_verify_code'
+  | 'approval_challenge';
 const MAC_PURPOSES: readonly IdpMacPurpose[] = [
   'alias_lookup',
   'audit_chain',
   'pairwise_sub',
   'oidc_storage_id',
   'email_verify_code',
+  'approval_challenge',
 ];
 
 export interface IdpKeyClient {
