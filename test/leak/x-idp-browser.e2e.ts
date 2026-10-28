@@ -17,7 +17,7 @@ import {
 } from 'jose';
 import pg from 'pg';
 import { createIdp, type Idp } from '../../packages/idp/src/app.ts';
-import type { ApprovalType } from '../../packages/idp/src/inbox.ts';
+import { type ApprovalType, DEVICE_KINDS, deviceKindOf } from '../../packages/idp/src/inbox.ts';
 import { MemoryOutbox } from '../../packages/idp/src/mailer.ts';
 import { type KeysvcProcess, startKeysvc } from '../../scripts/keysvc-up.ts';
 import { applyDatabaseAcl, migrate } from '../../scripts/migrate.ts';
@@ -312,8 +312,8 @@ test('承認用のオリジン：受信箱から承認待ちを開き、パス�
   // 攻撃者が持っている情報：なし（正規の利用者の流れ。DESIGN.md 2章「端末での承認」と「受信箱」の画面を確かめる）
   // 試す経路：PWA でアカウントを作る → 承認待ちを作る → 受信箱のリンクから承認用のオリジンを開く → パスキーで
   //           確認待ちを表示する → 承認する
-  // 期待する結果：承認画面に、企業名、操作の種類、型が決めた項目、警告文 A-2（DESIGN.md の文言のまま）、同じ大きさの
-  //               承認と拒否が出る。初期フォーカスは企業名で、どのボタンにも置かない。承認すると、受信箱で
+  // 期待する結果：承認画面に、企業名、操作の種類、型が決めた項目、要求の時刻と端末、警告文 A-2（DESIGN.md の文言の
+  //               まま）、同じ大きさの承認と拒否が出る。初期フォーカスは企業名で、どのボタンにも置かない。承認すると、受信箱で
   //               「承認しました」になる。CSP の違反はない
   // plan 11章：番号なし（plan 10章 M6、DESIGN.md 原則4・8）
   const problems = watchProblems(page);
@@ -324,12 +324,15 @@ test('承認用のオリジン：受信箱から承認待ちを開き、パス�
   const { credentials } = await cdp.send('WebAuthn.getCredentials', { authenticatorId });
   const handle = Buffer.from(credentials[0]?.userHandle ?? '', 'base64').toString('hex');
   const userId = `${handle.slice(0, 8)}-${handle.slice(8, 12)}-${handle.slice(12, 16)}-${handle.slice(16, 20)}-${handle.slice(20)}`;
+  // 要求の端末は、要求を出したブラウザの User-Agent から決める（ここでは、同じブラウザから出したことにする）。
+  const device = deviceKindOf(await page.evaluate(() => navigator.userAgent));
   const requested = await idp.requestApproval({
     userId: userId as never,
     tenantId: TENANT.tenantId as never,
     type: E2E_APPROVAL.type,
     details: { place_name: 'テスト店' },
     ttlSeconds: 300,
+    device,
   });
   expect(requested.ok).toBe(true);
   await page.reload();
@@ -342,6 +345,10 @@ test('承認用のオリジン：受信箱から承認待ちを開き、パス�
   await expect(card.getByRole('heading', { name: TENANT.displayName })).toBeFocused();
   await expect(card.getByText('受け取り場所の変更', { exact: true })).toBeVisible();
   await expect(card.getByText('テスト店')).toBeVisible();
+  await expect(card.getByText(/^要求の時刻：/)).toBeVisible();
+  await expect(
+    card.getByText(`要求の端末：${DEVICE_KINDS[device]}`, { exact: true }),
+  ).toBeVisible();
   await expect(card.getByRole('note')).toContainText('ご注意');
   await expect(card.getByRole('note')).toContainText(
     'この確認は、あなたが今この端末で受け取り場所の変更をしようとしている場合だけ承認してください。電話やメッセージで頼まれて承認してはいけません。',

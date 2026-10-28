@@ -4,7 +4,12 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { TenantId } from '../../packages/warifu-core/src/ids.ts';
-import { newApprover, PICKUP_DETAILS, TEST_DEVICE_TYPE } from '../setup/approvals.ts';
+import {
+  newApprover,
+  PICKUP_DETAILS,
+  TEST_DEVICE_TYPE,
+  TEST_REQUEST_DEVICE,
+} from '../setup/approvals.ts';
 import { startTestIdp, type TestIdp } from '../setup/idp.ts';
 import { SoftAuthenticator } from '../setup/soft-authenticator.ts';
 
@@ -27,6 +32,7 @@ async function requestFor(userId: Awaited<ReturnType<typeof newApprover>>['userI
     type: TEST_DEVICE_TYPE.type,
     details: PICKUP_DETAILS,
     ttlSeconds: 300,
+    device: TEST_REQUEST_DEVICE,
   });
   if (!result.ok) throw new Error('承認待ちを作れなかった');
   return result.itemId;

@@ -22,9 +22,8 @@
 
   // 固定の警告文（DESIGN.md 3章）。文言は変えない。〈〉の部分だけを、登録簿の企業名と、割符が決めた操作の種類で埋める。
   // サーバーからは警告文の ID だけを受け取る（FixedWarning は任意の文字列を受け取らない。DESIGN.md 6章）。
+  // M6 は端末での承認（A-2）だけ。窓口での承認（A-1）は、画面の必須要素とともに M7 で足す。
   const WARNINGS = Object.freeze({
-    'A-1':
-      'あなたが自分から〈企業名〉の公式窓口に連絡し、窓口コードを伝えた場合だけ承認してください。相手から電話がかかってきた場合や、メッセージで頼まれた場合は、拒否してください。',
     'A-2':
       'この確認は、あなたが今この端末で〈操作の種類〉をしようとしている場合だけ承認してください。電話やメッセージで頼まれて承認してはいけません。',
   });
@@ -594,7 +593,7 @@
 
   let cardCount = 0;
 
-  /** ApprovalCard（DESIGN.md 6章）：企業名、操作の種類、操作の内容、時刻、補足の順。承認と拒否は同じ大きさ。 */
+  /** ApprovalCard（DESIGN.md 6章）：企業名、操作の種類、操作の内容、要求の時刻と端末、補足の順。承認と拒否は同じ大きさ。 */
   function approvalCard(card) {
     cardCount += 1;
     const companyId = `approval-company-${cardCount}`;
@@ -611,6 +610,7 @@
             ...card.lines.flatMap((line) => [el('dt', {}, line.label), el('dd', {}, line.value)]),
           ),
       el('p', {}, `要求の時刻：${DATE.format(new Date(card.createdAt))}`),
+      el('p', {}, `要求の端末：${card.device}`),
       el('p', {}, `期限：${expiryText(card.expiresAt)}`),
       fixedWarning(card.warning, { company: card.company, operation: card.operation }),
       el(

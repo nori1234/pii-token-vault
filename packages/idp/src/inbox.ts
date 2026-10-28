@@ -7,6 +7,10 @@
 //   画面に出す文言（見出し、項目のラベル）は型が決め、企業名は登録簿から引く。
 // - すべて withWarifuUser の中で読み書きする。項目の ID を知っていても、ほかの利用者の項目には届かない（RLS。テスト6）。
 // - 承認と拒否は、DB の1つの文で状態を変える（同じ要求に両方が通らないようにする。ADR 0006）。
+// - M6 で受け付ける承認待ちは、端末での承認（step-up。警告文 A-2）だけ。窓口での承認は、DESIGN.md の窓口の
+//   必須要素（「心当たりがない」、窓口でできる範囲、変更の通知と取り消しの説明など）とともに M7 で足す。
+// - 確定の後に企業へ結果を引き渡す後処理は、M6 では持たない。確実な引き渡し（引き渡しの状態、再試行、画面の表示）
+//   は、M7 で製品の型と一緒に決める（ADR 0023）。
 // - 保存期間を過ぎた行は、その利用者の受信箱を読むときと書くときに消す（利用者をまたいで消す経路は作らない。ADR 0023）。
 
 import {
@@ -39,6 +43,11 @@ const CONTENT_KEY_PATTERN = /^[a-z][a-z0-9_]{0,31}$/;
 const MAX_CONTENT_KEYS = 16;
 const MAX_CONTENT_STRING = 200;
 const CHALLENGE_LABEL = 'warifu/approval/v1';
+/**
+ * 承認待ちを作るときの、利用者ごとのロックの名前空間（pg_advisory_xact_lock の2つの int の鍵の1つ目）。
+ * 監査ログは1つの bigint の鍵を使う（warifu-core の audit）。2つの鍵の形とは、鍵の空間が重ならない。
+ */
+const INBOX_LOCK_NAMESPACE = 2023;
 
 /** 型が決めた中身。キーは小文字の英数字、値は短い文字列、整数、真偽値だけ（入れ子にしない）。 */
 export type InboxContent = Readonly<Record<string, string | number | boolean>>;
@@ -74,9 +83,46 @@ export type NoticeType = keyof typeof NOTICE_TYPES;
 
 // ---- 承認待ち ----
 
-/** 端末での承認（step-up。警告文 A-2）か、窓口での承認（警告文 A-1）か（DESIGN.md 2章）。 */
-export type ApprovalChannel = 'device' | 'desk';
+/**
+ * 承認の種類（DESIGN.md 2章）。M6 は端末での承認（step-up。警告文 A-2）だけ。窓口での承認（警告文 A-1）は、
+ * 画面の必須要素とともに M7 で足す。
+ */
+export type ApprovalChannel = 'device';
 export type ApprovalDecision = 'approved' | 'denied';
+
+/**
+ * 要求の端末（DESIGN.md 1章の④「要求の時刻と端末」）。要求を出したブラウザの User-Agent から、OS の大まかな種類
+ * だけを決めて置く（版や機種名は置かない）。iPadOS のブラウザは Mac と名乗ることがあるので、Mac と出ることがある。
+ */
+export const DEVICE_KINDS = Object.freeze({
+  iphone: 'iPhone',
+  ipad: 'iPad',
+  android: 'Android の端末',
+  windows: 'Windows のパソコン',
+  chromeos: 'Chromebook',
+  mac: 'Mac',
+  linux: 'Linux のパソコン',
+  other: 'そのほかの端末',
+} as const);
+
+export type DeviceKind = keyof typeof DEVICE_KINDS;
+
+/** User-Agent から、要求の端末の種類を決める。分からなければ other。 */
+export function deviceKindOf(userAgent: unknown): DeviceKind {
+  if (typeof userAgent !== 'string' || userAgent.length > 1024) return 'other';
+  if (/\biPhone\b/.test(userAgent)) return 'iphone';
+  if (/\biPad\b/.test(userAgent)) return 'ipad';
+  if (/\bAndroid\b/.test(userAgent)) return 'android';
+  if (/\bWindows\b/.test(userAgent)) return 'windows';
+  if (/\bCrOS\b/.test(userAgent)) return 'chromeos';
+  if (/\bMacintosh\b|\bMac OS X\b/.test(userAgent)) return 'mac';
+  if (/\bLinux\b/.test(userAgent)) return 'linux';
+  return 'other';
+}
+
+export function isDeviceKind(value: unknown): value is DeviceKind {
+  return typeof value === 'string' && Object.hasOwn(DEVICE_KINDS, value);
+}
 
 /**
  * 承認待ちの型。割符のコードで定義する（企業の設定からは作らない）。M6 では製品の型はまだなく、M7 で CIBA と
@@ -91,14 +137,6 @@ export interface ApprovalType {
   parse(details: unknown): InboxContent | undefined;
   /** 画面に出す項目。parse の結果だけから作る。 */
   lines(content: InboxContent): readonly DisplayLine[];
-  /** 承認か拒否が DB で確定した後に呼ぶ（M7 で、CIBA の結果を返すのに使う）。失敗しても確定は戻さない。 */
-  settle?(input: {
-    readonly itemId: string;
-    readonly userId: WarifuUserId;
-    readonly tenantId: TenantId;
-    readonly decision: ApprovalDecision;
-    readonly content: InboxContent;
-  }): Promise<void>;
 }
 
 export class ApprovalTypes {
@@ -109,7 +147,10 @@ export class ApprovalTypes {
       if (!TYPE_PATTERN.test(t.type) || this.#byType.has(t.type) || t.type in NOTICE_TYPES) {
         throw new RangeError('承認待ちの型の名前が違うか、重なっている');
       }
-      if (t.channel !== 'device' && t.channel !== 'desk') throw new RangeError('承認の種類が違う');
+      // 窓口での承認（desk）は、画面の必須要素を作る M7 まで受け付けない。
+      if (t.channel !== 'device') throw new RangeError('承認の種類が違う（M6 は端末での承認だけ）');
+      // 確定の後の後処理は、確実な引き渡しを決める M7 まで持たせない。
+      if ('settle' in t) throw new RangeError('承認待ちの型の後処理は、M6 では受け付けない');
       if (typeof t.operation !== 'string' || t.operation.length === 0 || t.operation.length > 40) {
         throw new RangeError('操作の種類の語が違う');
       }
@@ -166,6 +207,7 @@ interface InboxRow {
   expires_at: Date | null;
   decided_at: Date | null;
   read_at: Date | null;
+  request_device: string | null;
 }
 
 export interface InboxItem {
@@ -179,6 +221,8 @@ export interface InboxItem {
   readonly expiresAt: Date | null;
   readonly decidedAt: Date | null;
   readonly readAt: Date | null;
+  /** 要求の端末（承認待ちだけ）。 */
+  readonly device: DeviceKind | null;
 }
 
 /** 承認待ち（期限内で、まだ決まっていないもの）。 */
@@ -186,10 +230,23 @@ export interface PendingApproval extends InboxItem {
   readonly kind: 'approval';
   readonly tenantId: TenantId;
   readonly expiresAt: Date;
+  readonly device: DeviceKind;
+}
+
+/** 承認待ちの形（企業と要求の端末がある）か。 */
+function isPending(item: InboxItem | undefined): item is PendingApproval {
+  return (
+    item !== undefined &&
+    item.kind === 'approval' &&
+    item.tenantId !== null &&
+    item.expiresAt !== null &&
+    item.device !== null
+  );
 }
 
 function toItem(row: InboxRow): InboxItem | undefined {
   if (!isInboxContent(row.content)) return undefined;
+  if (row.request_device !== null && !isDeviceKind(row.request_device)) return undefined;
   return {
     itemId: row.item_id,
     kind: row.kind,
@@ -201,6 +258,7 @@ function toItem(row: InboxRow): InboxItem | undefined {
     expiresAt: row.expires_at,
     decidedAt: row.decided_at,
     readAt: row.read_at,
+    device: row.request_device as DeviceKind | null,
   };
 }
 
@@ -245,10 +303,12 @@ export async function requestApproval(
     readonly type: string;
     readonly details: unknown;
     readonly ttlSeconds: number;
+    /** 要求の端末（deviceKindOf で決める）。 */
+    readonly device: DeviceKind;
   },
 ): Promise<RequestApprovalResult> {
   const def = deps.approvalTypes.get(input.type);
-  if (def === undefined) return { ok: false, reason: 'invalid' };
+  if (def === undefined || !isDeviceKind(input.device)) return { ok: false, reason: 'invalid' };
   if (
     !Number.isInteger(input.ttlSeconds) ||
     input.ttlSeconds < APPROVAL_TTL_MIN_SECONDS ||
@@ -259,6 +319,11 @@ export async function requestApproval(
   const content = def.parse(input.details);
   if (content === undefined || !isInboxContent(content)) return { ok: false, reason: 'invalid' };
   return deps.db.withWarifuUser(input.userId, async (tx) => {
+    // 件数の確認と挿入を、利用者ごとに直列にする（同時に作っても、上限をすり抜けない）。ロックはトランザクションの
+    // 終わりに外れる。鍵の2つ目は利用者 ID のハッシュで、ほかの利用者と重なっても、待つだけで正しさは変わらない。
+    await tx.query(
+      sql`SELECT pg_catalog.pg_advisory_xact_lock(${INBOX_LOCK_NAMESPACE}, pg_catalog.hashtext(${input.userId})) AS locked`,
+    );
     const now = deps.now();
     await purgeInbox(tx, now);
     const pending = await tx.one<{ count: string }>(
@@ -272,10 +337,10 @@ export async function requestApproval(
     const expiresAt = new Date(now.getTime() + input.ttlSeconds * 1000);
     await tx.execute(
       sql`INSERT INTO idp.inbox (item_id, user_id, kind, type, tenant_id, content, state, created_at, expires_at,
-                                 purge_after)
+                                 purge_after, request_device)
           VALUES (${itemId}, ${input.userId}, 'approval', ${def.type}, ${input.tenantId},
                   ${JSON.stringify(content)}::jsonb, 'pending', ${now}, ${expiresAt},
-                  ${new Date(expiresAt.getTime() + APPROVAL_KEEP_DAYS * DAY_MS)})`,
+                  ${new Date(expiresAt.getTime() + APPROVAL_KEEP_DAYS * DAY_MS)}, ${input.device})`,
     );
     await appendAudit(
       tx,
@@ -293,7 +358,8 @@ export async function listInbox(deps: RepoDeps, userId: WarifuUserId): Promise<I
   return deps.db.withWarifuUser(userId, async (tx) => {
     await purgeInbox(tx, deps.now());
     const rows = await tx.query<InboxRow>(
-      sql`SELECT item_id, kind, type, tenant_id, content, state, created_at, expires_at, decided_at, read_at FROM idp.inbox ORDER BY created_at DESC, item_id LIMIT ${INBOX_LIST_LIMIT}`,
+      sql`SELECT item_id, kind, type, tenant_id, content, state, created_at, expires_at, decided_at, read_at,
+                 request_device FROM idp.inbox ORDER BY created_at DESC, item_id LIMIT ${INBOX_LIST_LIMIT}`,
     );
     return rows.map(toItem).filter((item): item is InboxItem => item !== undefined);
   });
@@ -324,11 +390,12 @@ export async function findPendingApproval(
   if (!isItemId(itemId)) return undefined;
   return deps.db.withWarifuUser(userId, async (tx) => {
     const [row] = await tx.query<InboxRow>(
-      sql`SELECT item_id, kind, type, tenant_id, content, state, created_at, expires_at, decided_at, read_at FROM idp.inbox
+      sql`SELECT item_id, kind, type, tenant_id, content, state, created_at, expires_at, decided_at, read_at,
+                 request_device FROM idp.inbox
            WHERE item_id = ${itemId} AND kind = 'approval' AND state = 'pending' AND expires_at > ${deps.now()}`,
     );
     const item = row === undefined ? undefined : toItem(row);
-    return item as PendingApproval | undefined;
+    return isPending(item) ? item : undefined;
   });
 }
 
@@ -339,13 +406,12 @@ export async function listPendingApprovals(
 ): Promise<PendingApproval[]> {
   return deps.db.withWarifuUser(userId, async (tx) => {
     const rows = await tx.query<InboxRow>(
-      sql`SELECT item_id, kind, type, tenant_id, content, state, created_at, expires_at, decided_at, read_at FROM idp.inbox
+      sql`SELECT item_id, kind, type, tenant_id, content, state, created_at, expires_at, decided_at, read_at,
+                 request_device FROM idp.inbox
            WHERE kind = 'approval' AND state = 'pending' AND expires_at > ${deps.now()}
            ORDER BY created_at DESC, item_id LIMIT ${MAX_PENDING_APPROVALS}`,
     );
-    return rows
-      .map(toItem)
-      .filter((item): item is PendingApproval => item !== undefined && item.tenantId !== null);
+    return rows.map(toItem).filter(isPending);
   });
 }
 
@@ -355,7 +421,7 @@ export async function listPendingApprovals(
  * 確定できなければ undefined（決まった後、期限切れ、ほかの利用者のもの、ないものを区別しない）。
  */
 export async function decideApproval(
-  deps: RepoDeps & { readonly approvalTypes: ApprovalTypes },
+  deps: RepoDeps,
   input: {
     readonly userId: WarifuUserId;
     readonly itemId: string;
@@ -368,28 +434,24 @@ export async function decideApproval(
     const [row] = await tx.query<InboxRow>(
       sql`UPDATE idp.inbox SET state = ${input.decision}, decided_at = ${now}
            WHERE item_id = ${input.itemId} AND kind = 'approval' AND state = 'pending' AND expires_at > ${now}
-       RETURNING item_id, kind, type, tenant_id, content, state, created_at, expires_at, decided_at, read_at`,
+       RETURNING item_id, kind, type, tenant_id, content, state, created_at, expires_at, decided_at, read_at,
+                 request_device`,
     );
     const item = row === undefined ? undefined : toItem(row);
-    if (item === undefined || item.tenantId === null) return undefined;
-    const def = deps.approvalTypes.get(item.type);
+    if (!isPending(item)) return undefined;
     await appendAudit(
       tx,
       deps.keys,
       APPROVAL_DECIDED,
-      {
-        decision: input.decision,
-        channel: def?.channel ?? 'device',
-        tenant_id: item.tenantId,
-      },
+      { decision: input.decision, channel: 'device', tenant_id: item.tenantId },
       { now: deps.now },
     );
-    return item as PendingApproval;
+    return item;
   });
 }
 
 /**
- * 承認と拒否のチャレンジの材料（ADR 0023）。要求の内容（型、企業、中身、時刻）と、決定（承認か拒否か）、
+ * 承認と拒否のチャレンジの材料（ADR 0023）。要求の内容（型、企業、中身、時刻、要求の端末）と、決定（承認か拒否か）、
  * 利用者、承認のセッション、使い捨ての乱数を、長さ付きでつなぐ。鍵サービスの mac(approval_challenge) にかけた値を
  * WebAuthn の challenge にするので、署名は、この内容のこの決定にだけ結び付く。
  */
@@ -413,5 +475,6 @@ export function approvalChallengeMessage(input: {
     canonicalContent(item.content),
     item.createdAt.toISOString(),
     item.expiresAt.toISOString(),
+    item.device,
   ]);
 }

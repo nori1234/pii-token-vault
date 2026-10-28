@@ -1,7 +1,7 @@
 // 承認待ちのテストの補助（ADR 0023）。M6 には製品の承認待ちの型がまだないので、テストの型を使う。
 // 型は割符のコードとして書くもの（企業の設定からは作らない）なので、テストでも同じ形で書く。
 
-import type { ApprovalType, InboxContent } from '../../packages/idp/src/inbox.ts';
+import type { ApprovalType, DeviceKind, InboxContent } from '../../packages/idp/src/inbox.ts';
 import type { WarifuUserId } from '../../packages/warifu-core/src/ids.ts';
 import { Browser, type TestIdp } from './idp.ts';
 import type { SoftAuthenticator } from './soft-authenticator.ts';
@@ -32,24 +32,13 @@ export const TEST_DEVICE_TYPE: ApprovalType = {
   },
 };
 
-/** 窓口での承認の型の例：照会だけ（中身なし）。 */
-export const TEST_DESK_TYPE: ApprovalType = {
-  type: 'test.desk_inquiry',
-  channel: 'desk',
-  operation: '窓口での照会',
-  parse(details: unknown): InboxContent | undefined {
-    if (typeof details !== 'object' || details === null || Object.keys(details).length > 0) {
-      return undefined;
-    }
-    return {};
-  },
-  lines: () => [],
-};
-
 export const PICKUP_DETAILS = Object.freeze({
   place_kind: 'convenience_store',
   place_name: 'テスト店',
 });
+
+/** テストで要求を出した端末の種類（画面では「Windows のパソコン」）。 */
+export const TEST_REQUEST_DEVICE: DeviceKind = 'windows';
 
 /** ソフトウェアの認証器の最後の資格情報の userHandle を、利用者 ID（UUID）にする。 */
 export function userIdOf(authenticator: SoftAuthenticator): WarifuUserId {

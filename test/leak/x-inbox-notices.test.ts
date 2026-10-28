@@ -2,7 +2,13 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { TenantId } from '../../packages/warifu-core/src/ids.ts';
-import { newApprover, PICKUP_DETAILS, TEST_DEVICE_TYPE, userIdOf } from '../setup/approvals.ts';
+import {
+  newApprover,
+  PICKUP_DETAILS,
+  TEST_DEVICE_TYPE,
+  TEST_REQUEST_DEVICE,
+  userIdOf,
+} from '../setup/approvals.ts';
 import { Browser, startTestIdp, type TestIdp } from '../setup/idp.ts';
 import { SoftAuthenticator } from '../setup/soft-authenticator.ts';
 
@@ -116,6 +122,7 @@ describe('漏えい：全端末への知らせ（受信箱）', () => {
       type: TEST_DEVICE_TYPE.type,
       details: PICKUP_DETAILS,
       ttlSeconds: 60,
+      device: TEST_REQUEST_DEVICE,
     });
     expect(requested.ok).toBe(true);
     const notice = (await inbox(u.pwa)).find((item) => item.kind === 'notice');

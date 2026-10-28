@@ -47,6 +47,8 @@ import {
   type ApprovalType,
   ApprovalTypes,
   approvalChallengeMessage,
+  DEVICE_KINDS,
+  type DeviceKind,
   decideApproval,
   findPendingApproval,
   type InboxItem,
@@ -141,6 +143,8 @@ export interface Idp {
     readonly type: string;
     readonly details: unknown;
     readonly ttlSeconds: number;
+    /** 要求の端末（要求を出したブラウザの User-Agent を deviceKindOf にかけたもの）。 */
+    readonly device: DeviceKind;
   }): Promise<RequestApprovalResult>;
   /**
    * 承認用のオリジンを、別のポートで待ち受ける（ローカルの開発とテスト。本番は前段で Host を振り分ける）。
@@ -153,8 +157,11 @@ export interface Idp {
 const JSON_LIMIT = 16 * 1024;
 const UID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const DECISIONS: ReadonlySet<string> = new Set<ApprovalDecision>(['approved', 'denied']);
-/** 承認の画面に出す固定の警告文（DESIGN.md 3章）。文言は画面の側の定数だけを使い、ここでは ID だけを渡す。 */
-const WARNING_OF = Object.freeze({ device: 'A-2', desk: 'A-1' } as const);
+/**
+ * 承認の画面に出す固定の警告文（DESIGN.md 3章）。文言は画面の側の定数だけを使い、ここでは ID だけを渡す。
+ * M6 は端末での承認（A-2）だけ。窓口での承認（A-1）は、画面の必須要素とともに M7 で足す。
+ */
+const WARNING_OF = Object.freeze({ device: 'A-2' } as const);
 
 /** 応答の本文は固定の形だけ。値を入れない。 */
 const FAILED = Object.freeze({ error: 'failed' });
@@ -664,7 +671,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
 
   // ---- 承認用のオリジン：ログイン、承認待ちの一覧、承認と拒否（ADR 0023） ----
 
-  /** 承認画面の中身（DESIGN.md 1章の順：企業名、操作の種類、操作の内容、時刻、補足）。 */
+  /** 承認画面の中身（DESIGN.md 1章の順：企業名、操作の種類、操作の内容、要求の時刻と端末、補足）。 */
   function approvalCardOf(item: PendingApproval) {
     const def = approvalTypes.get(item.type);
     const tenant = registry.tenants.get(item.tenantId);
@@ -675,6 +682,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
       operation: def.operation,
       lines: def.lines(item.content),
       createdAt: item.createdAt.toISOString(),
+      device: DEVICE_KINDS[item.device],
       expiresAt: item.expiresAt.toISOString(),
       warning: WARNING_OF[def.channel],
     };
@@ -798,20 +806,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
       decision: result.decision,
     });
     if (decided === undefined) return reply.code(409).send({ error: 'already_decided' });
-    const def = approvalTypes.get(decided.type);
-    if (def?.settle !== undefined) {
-      try {
-        await def.settle({
-          itemId: decided.itemId,
-          userId,
-          tenantId: decided.tenantId,
-          decision: result.decision,
-          content: decided.content,
-        });
-      } catch (err) {
-        request.log.error({ event: 'idp.approval_settle_failed', err });
-      }
-    }
+    // 企業へ結果を引き渡す後処理は、M6 では持たない（確実な引き渡しは M7 で決める。ADR 0023）。
     return { ok: true, decision: result.decision };
   });
 

@@ -20,7 +20,12 @@ CREATE TABLE idp.inbox (
   read_at timestamptz,
   -- この時刻を過ぎたら消す（ADR 0023 の保存期間）。
   purge_after timestamptz NOT NULL,
+  -- 要求の端末（承認待ちだけ）。User-Agent から決めた OS の大まかな種類だけを置く（DESIGN.md 1章の④）。
+  request_device text
+    CHECK (request_device IN ('iphone', 'ipad', 'android', 'windows', 'chromeos', 'mac', 'linux', 'other')),
   CHECK ((kind = 'approval') = (expires_at IS NOT NULL)),
+  CHECK ((kind = 'approval') = (request_device IS NOT NULL)),
+  CHECK (kind <> 'approval' OR tenant_id IS NOT NULL),
   CHECK (
     (kind = 'approval' AND state IN ('pending', 'approved', 'denied'))
     OR (kind = 'notice' AND state IN ('unread', 'read'))
@@ -47,8 +52,9 @@ CREATE POLICY idp_delete ON idp.inbox FOR DELETE TO warifu_idp
 
 -- 列単位の権限。作った後に変えられるのは、状態と、その時刻だけ（中身、型、期限は書き換えられない）。
 GRANT SELECT (item_id, user_id, kind, type, tenant_id, content, state, created_at, expires_at, decided_at,
-              read_at, purge_after),
-      INSERT (item_id, user_id, kind, type, tenant_id, content, state, created_at, expires_at, purge_after),
+              read_at, purge_after, request_device),
+      INSERT (item_id, user_id, kind, type, tenant_id, content, state, created_at, expires_at, purge_after,
+              request_device),
       UPDATE (state, decided_at, read_at)
   ON idp.inbox TO warifu_idp;
 GRANT DELETE ON idp.inbox TO warifu_idp;

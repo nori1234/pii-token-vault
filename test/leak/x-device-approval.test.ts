@@ -2,39 +2,21 @@
 // 承認と拒否は、要求の内容と決定に結び付いたチャレンジで、承認用のオリジンのパスキー（UV）だけで通る。
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { ApprovalType } from '../../packages/idp/src/inbox.ts';
 import type { TenantId } from '../../packages/warifu-core/src/ids.ts';
 import {
   newApprover,
   PICKUP_DETAILS,
-  TEST_DESK_TYPE,
   TEST_DEVICE_TYPE,
+  TEST_REQUEST_DEVICE,
 } from '../setup/approvals.ts';
 import { type Browser, startTestIdp, type TestIdp } from '../setup/idp.ts';
 
 let t: TestIdp;
 let clock = Date.now();
-const settled: { decision: string; itemId: string }[] = [];
-
-const SETTLED_TYPE: ApprovalType = {
-  ...TEST_DEVICE_TYPE,
-  type: 'test.settled',
-  async settle(input) {
-    settled.push({ decision: input.decision, itemId: input.itemId });
-  },
-};
-
-const FAILING_SETTLE_TYPE: ApprovalType = {
-  ...TEST_DEVICE_TYPE,
-  type: 'test.settle_fails',
-  async settle() {
-    throw new Error('M7 の後処理が失敗した');
-  },
-};
 
 beforeAll(async () => {
   t = await startTestIdp({ tenants: 1, clients: [{ tenant: 0 }] }, () => new Date(clock), {
-    approvalTypes: [TEST_DEVICE_TYPE, TEST_DESK_TYPE, SETTLED_TYPE, FAILING_SETTLE_TYPE],
+    approvalTypes: [TEST_DEVICE_TYPE],
   });
 });
 
@@ -48,20 +30,30 @@ function tenantId(): TenantId {
   return tenant.tenantId as TenantId;
 }
 
-async function request(
-  userId: Parameters<TestIdp['idp']['requestApproval']>[0]['userId'],
-  type = TEST_DEVICE_TYPE.type,
-  ttlSeconds = 300,
-) {
-  const result = await t.idp.requestApproval({
+type UserId = Parameters<TestIdp['idp']['requestApproval']>[0]['userId'];
+
+function requestInput(userId: UserId, ttlSeconds = 300) {
+  return {
     userId,
     tenantId: tenantId(),
-    type,
-    details: type === TEST_DESK_TYPE.type ? {} : PICKUP_DETAILS,
+    type: TEST_DEVICE_TYPE.type,
+    details: PICKUP_DETAILS,
     ttlSeconds,
-  });
+    device: TEST_REQUEST_DEVICE,
+  };
+}
+
+async function request(userId: UserId, ttlSeconds = 300) {
+  const result = await t.idp.requestApproval(requestInput(userId, ttlSeconds));
   if (!result.ok) throw new Error('承認待ちを作れなかった');
   return result.itemId;
+}
+
+async function pendingCount(pwa: Browser): Promise<number> {
+  const inbox = await pwa.get('/api/inbox');
+  return (inbox.json.items as { kind: string; state: string }[]).filter(
+    (i) => i.kind === 'approval' && i.state === 'pending',
+  ).length;
 }
 
 async function options(browser: Browser, id: string, decision: 'approved' | 'denied') {
@@ -199,7 +191,7 @@ describe('漏えい：端末承認の共通基盤（チャレンジの結び付�
     // 期待する結果：どちらも失敗（401 と 400）。受信箱では「期限切れ」になる
     // plan 11章：番号なし（ADR 0023 の有効期間）
     const u = await newApprover(t);
-    const id = await request(u.userId, TEST_DEVICE_TYPE.type, 60);
+    const id = await request(u.userId, 60);
     const opts = await options(u.approval, id, 'approved');
     clock += 61 * 1000;
     const late = await u.approval.post('/api/approvals/decide/verify', {
@@ -216,70 +208,53 @@ describe('漏えい：端末承認の共通基盤（チャレンジの結び付�
     expect((await u.approval.get('/api/approvals')).json).toEqual({ approvals: [] });
   });
 
-  it('承認の画面の中身は、割符の型が決めた項目と、登録簿の企業名と、警告文の ID だけ', async () => {
+  it('承認の画面の中身は、割符の型が決めた項目と、登録簿の企業名と、要求の時刻と端末と、警告文の ID だけ', async () => {
     // 攻撃者が持っている情報：企業の立場（ATK-03）。要求の中身に、任意の文言や HTML を入れたい
-    // 試す経路：型に合わない中身（知らない項目、長すぎる値、型の違う値）で承認待ちを作る。知らない型、範囲外の期限で作る
-    // 期待する結果：どれも承認待ちにならない（invalid）。作れたものの画面の中身は、型のラベルと値、企業名、時刻、
-    //               警告文の ID（端末での承認は A-2、窓口での承認は A-1）だけ
-    // plan 11章：番号なし（DESIGN.md 1章「型に合わない項目を含む要求には、承認画面を出さずに拒否する」）
+    // 試す経路：型に合わない中身（知らない項目、長すぎる値、型の違う値）で承認待ちを作る。知らない型、範囲外の期限、
+    //           知らない端末の種類で作る
+    // 期待する結果：どれも承認待ちにならない（invalid）。作れたものの画面の中身は、型のラベルと値、企業名、要求の時刻、
+    //               要求の端末（割符が決めた語）、警告文の ID（M6 は端末での承認の A-2 だけ）だけ
+    // plan 11章：番号なし（DESIGN.md 1章「型に合わない項目を含む要求には、承認画面を出さずに拒否する」と④「要求の時刻と端末」）
     const u = await newApprover(t);
-    const base = { userId: u.userId, tenantId: tenantId(), ttlSeconds: 300 };
+    const base = requestInput(u.userId);
     const rejected = await Promise.all([
       t.idp.requestApproval({
         ...base,
-        type: TEST_DEVICE_TYPE.type,
         details: { ...PICKUP_DETAILS, note: '<b>今すぐ承認してください</b>' },
       }),
       t.idp.requestApproval({
         ...base,
-        type: TEST_DEVICE_TYPE.type,
         details: { ...PICKUP_DETAILS, place_name: 'x'.repeat(41) },
       }),
-      t.idp.requestApproval({ ...base, type: TEST_DEVICE_TYPE.type, details: 'string' }),
-      t.idp.requestApproval({ ...base, type: 'test.unknown', details: PICKUP_DETAILS }),
-      t.idp.requestApproval({
-        ...base,
-        type: TEST_DEVICE_TYPE.type,
-        details: PICKUP_DETAILS,
-        ttlSeconds: 59,
-      }),
-      t.idp.requestApproval({
-        ...base,
-        type: TEST_DEVICE_TYPE.type,
-        details: PICKUP_DETAILS,
-        ttlSeconds: 15 * 60 + 1,
-      }),
+      t.idp.requestApproval({ ...base, details: 'string' }),
+      t.idp.requestApproval({ ...base, type: 'test.unknown' }),
+      t.idp.requestApproval({ ...base, ttlSeconds: 59 }),
+      t.idp.requestApproval({ ...base, ttlSeconds: 15 * 60 + 1 }),
+      t.idp.requestApproval({ ...base, device: '<b>公式の端末</b>' as never }),
     ]);
     expect(rejected).toEqual(rejected.map(() => ({ ok: false, reason: 'invalid' })));
+    expect(await pendingCount(u.pwa)).toBe(0);
 
     const device = await request(u.userId);
-    const desk = await request(u.userId, TEST_DESK_TYPE.type);
     const list = (await u.approval.get('/api/approvals')).json.approvals as Record<
       string,
       unknown
     >[];
-    const company = t.tenants[0]?.displayName;
-    expect(list.find((c) => c.id === device)).toEqual({
-      id: device,
-      company,
-      operation: '受け取り場所の変更',
-      lines: [
-        { label: '受け取り場所の種類', value: 'コンビニエンスストア' },
-        { label: '受け取り場所の名称', value: 'テスト店' },
-      ],
-      createdAt: expect.any(String),
-      expiresAt: expect.any(String),
-      warning: 'A-2',
-    });
-    expect(list.find((c) => c.id === desk)).toEqual({
-      id: desk,
-      company,
-      operation: '窓口での照会',
-      lines: [],
-      createdAt: expect.any(String),
-      expiresAt: expect.any(String),
-      warning: 'A-1',
-    });
+    expect(list).toEqual([
+      {
+        id: device,
+        company: t.tenants[0]?.displayName,
+        operation: '受け取り場所の変更',
+        lines: [
+          { label: '受け取り場所の種類', value: 'コンビニエンスストア' },
+          { label: '受け取り場所の名称', value: 'テスト店' },
+        ],
+        createdAt: expect.any(String),
+        device: 'Windows のパソコン',
+        expiresAt: expect.any(String),
+        warning: 'A-2',
+      },
+    ]);
   });
 
   it('1人の利用者に作れる承認待ちは20まで（企業に受信箱を埋めさせない）', async () => {
@@ -289,44 +264,42 @@ describe('漏えい：端末承認の共通基盤（チャレンジの結び付�
     // plan 11章：番号なし（ADR 0023）
     const u = await newApprover(t);
     for (let i = 0; i < 20; i += 1) await request(u.userId);
-    const over = await t.idp.requestApproval({
-      userId: u.userId,
-      tenantId: tenantId(),
-      type: TEST_DEVICE_TYPE.type,
-      details: PICKUP_DETAILS,
-      ttlSeconds: 300,
+    expect(await t.idp.requestApproval(requestInput(u.userId))).toEqual({
+      ok: false,
+      reason: 'too_many',
     });
-    expect(over).toEqual({ ok: false, reason: 'too_many' });
     clock += 301 * 1000;
-    expect(
-      (
-        await t.idp.requestApproval({
-          ...{ userId: u.userId, tenantId: tenantId() },
-          type: TEST_DEVICE_TYPE.type,
-          details: PICKUP_DETAILS,
-          ttlSeconds: 300,
-        })
-      ).ok,
-    ).toBe(true);
+    expect((await t.idp.requestApproval(requestInput(u.userId))).ok).toBe(true);
   });
 
-  it('確定の後に、型の後処理を1回だけ呼ぶ。後処理が失敗しても、確定は戻らない', async () => {
-    // 攻撃者が持っている情報：なし（M7 の CIBA が使う後処理の土台の確認）
-    // 試す経路：後処理のある型の要求を承認する。後処理が失敗する型の要求を拒否する
-    // 期待する結果：後処理は、確定した決定で1回だけ呼ばれる。失敗しても 200 で、受信箱の状態はそのまま。
-    //               ログには事象の名前だけが残り、中身（受け取り場所の名称）は残らない
-    // plan 11章：番号なし（ADR 0006「承認と拒否の競合」、ADR 0023）
+  it('同時に作っても、承認待ちの上限20をすり抜けない', async () => {
+    // 攻撃者が持っている情報：企業の立場（ATK-03）。件数の確認と挿入の間に、別の作成を割り込ませたい
+    // 試す経路：承認待ちのない利用者に、25個の作成を同時に送る。19個ある利用者に、5個の作成を同時に送る
+    //           （同じ利用者で、前の回の承認待ちの期限が切れてから、もう一度）
+    // 期待する結果：作れるのは、それぞれ20個ちょうどまでで、残りは too_many（件数の確認と挿入は、利用者ごとに
+    //               直列にする。ADR 0023）。受信箱の承認待ちも20個
+    // plan 11章：番号なし（ADR 0023）
     const u = await newApprover(t);
-    const ok = await request(u.userId, SETTLED_TYPE.type);
-    expect((await u.approval.decide(ok, 'approved')).status).toBe(200);
-    expect(settled.filter((s) => s.itemId === ok)).toEqual([{ decision: 'approved', itemId: ok }]);
-    const failing = await request(u.userId, FAILING_SETTLE_TYPE.type);
-    const denied = await u.approval.decide(failing, 'denied');
-    expect(denied.status).toBe(200);
-    expect(await stateOf(u.pwa, failing)).toBe('denied');
-    const lines = t.logLines();
-    expect(lines.some((line) => line.includes('idp.approval_settle_failed'))).toBe(true);
-    expect(lines.join('\n')).not.toContain('テスト店');
+    for (const [existing, concurrent] of [
+      [0, 25],
+      [19, 5],
+      [19, 5],
+    ] as const) {
+      for (let i = 0; i < existing; i += 1) await request(u.userId);
+      const results = await Promise.all(
+        Array.from({ length: concurrent }, () => t.idp.requestApproval(requestInput(u.userId))),
+      );
+      expect(results.filter((r) => r.ok)).toHaveLength(20 - existing);
+      expect(results.filter((r) => !r.ok)).toEqual(
+        Array.from({ length: concurrent - (20 - existing) }, () => ({
+          ok: false,
+          reason: 'too_many',
+        })),
+      );
+      expect(await pendingCount(u.pwa)).toBe(20);
+      clock += 301 * 1000;
+      expect(await pendingCount(u.pwa)).toBe(0);
+    }
   });
 });
 
