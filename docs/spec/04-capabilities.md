@@ -72,6 +72,7 @@
 | mac（desk_request_lookup） | — | ○ | — | テナント別の窓口申請IDの照合 |
 | mac（desk_change_lookup） | — | ○ | — | テナント別の変更・取消IDの照合 |
 | mac（initial_link_lookup） | — | ○ | — | テナント別の移行申請・再送識別子の照合 |
+| mac（initial_link_public_id） | — | ○ | — | 内部乱数レコードIDから移行専用IDを再導出。照合用索引とは別用途・別鍵 |
 | mac（desk_public_id） | — | ○ | — | 内部の乱数IDから企業へ渡す変更・取消IDを用途別に再導出 |
 | mac（desk_subject_lookup） | ○ | — | — | idp内で承認済み企業別主体と利用者の対応をテナント別に照合 |
 | sign（desk_approval、initial_link） | ○ | — | — | 本人の操作別承認と初回移行の最終承認を用途別に署名 |
