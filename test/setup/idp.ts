@@ -16,6 +16,7 @@ import {
 } from 'jose';
 import { inject } from 'vitest';
 import { createIdp, type Idp } from '../../packages/idp/src/app.ts';
+import type { ApprovalType } from '../../packages/idp/src/inbox.ts';
 import { type Mailer, MemoryOutbox } from '../../packages/idp/src/mailer.ts';
 import { SoftAuthenticator } from './soft-authenticator.ts';
 import { workerDatabase } from './worker-db.ts';
@@ -40,6 +41,8 @@ export interface TestClient {
 export interface TestIdp {
   readonly idp: Idp;
   readonly origin: string;
+  /** 承認用のオリジン（別のポート。ADR 0023）。 */
+  readonly approvalOrigin: string;
   readonly issuer: string;
   readonly outbox: MemoryOutbox;
   readonly tenants: readonly TestTenant[];
@@ -63,6 +66,8 @@ export async function startTestIdp(
   options?: {
     /** 既定はメモリの送信箱（outbox）。relay の内部配送 API につなぐときは RelayMailer を渡す。 */
     readonly mailer?: Mailer;
+    /** 承認待ちの型（M6 では製品の型がないので、テストが自分の型を渡す）。 */
+    readonly approvalTypes?: readonly ApprovalType[];
   },
 ): Promise<TestIdp> {
   const tenants: TestTenant[] = Array.from({ length: spec.tenants }, (_, i) => ({
@@ -103,6 +108,9 @@ export async function startTestIdp(
   // そこで、空いているポートを OS に聞いてから使う。
   const port = await freePort();
   const origin = `http://localhost:${port}`;
+  let approvalPort = await freePort();
+  while (approvalPort === port) approvalPort = await freePort();
+  const approvalOrigin = `http://localhost:${approvalPort}`;
   const config = await workerDatabase();
   const provided = inject('keysvc');
   const outbox = new MemoryOutbox();
@@ -110,7 +118,9 @@ export async function startTestIdp(
   let outbound = 0;
   const idp = await createIdp({
     origin,
+    approvalOrigin,
     rpId: 'localhost',
+    ...(options?.approvalTypes === undefined ? {} : { approvalTypes: options.approvalTypes }),
     registry: { tenants, clients: publicClients },
     keysvc: { socketPath: provided.socketPath, credential: provided.credentials.idp },
     db: { host: String(config.host), port: Number(config.port), database: String(config.database) },
@@ -124,9 +134,11 @@ export async function startTestIdp(
     ...(now === undefined ? {} : { now }),
   });
   await idp.app.listen({ host: 'localhost', port });
+  await idp.listenApproval({ host: 'localhost', port: approvalPort });
   return {
     idp,
     origin,
+    approvalOrigin,
     issuer: idp.issuer,
     outbox,
     tenants,
@@ -247,8 +259,35 @@ export class Browser {
   /** PWA の step-up。 */
   async stepUp(): Promise<HttpResult> {
     const options = await this.post('/api/stepup/options');
-    const response = this.authenticator.get(options.json.options as never);
+    const response = this.authenticator.get(options.json.options as never, undefined, {
+      origin: this.origin,
+    });
     return this.post('/api/stepup/verify', { ceremonyId: options.json.ceremonyId, response });
+  }
+
+  /** 承認用のオリジンでパスキーでログインする（このブラウザ役の origin は、承認用のオリジンにしておく）。 */
+  async approvalLogin(): Promise<HttpResult> {
+    const options = await this.post('/api/approvals/login/options');
+    const response = this.authenticator.get(options.json.options as never, undefined, {
+      origin: this.origin,
+    });
+    return this.post('/api/approvals/login/verify', {
+      ceremonyId: options.json.ceremonyId,
+      response,
+    });
+  }
+
+  /** 承認か拒否を、パスキーで確かめて送る。 */
+  async decide(id: string, decision: 'approved' | 'denied'): Promise<HttpResult> {
+    const options = await this.post('/api/approvals/decide/options', { id, decision });
+    if (options.status !== 200) return options;
+    const response = this.authenticator.get(options.json.options as never, undefined, {
+      origin: this.origin,
+    });
+    return this.post('/api/approvals/decide/verify', {
+      ceremonyId: options.json.ceremonyId,
+      response,
+    });
   }
 }
 

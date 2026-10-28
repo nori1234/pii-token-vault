@@ -62,7 +62,12 @@ describe('能力の表の性質（不変条件3）', () => {
   });
 
   it('sub の導出、保存の id、確認コードの MAC は idp だけ', () => {
-    for (const purpose of ['pairwise_sub', 'oidc_storage_id', 'email_verify_code']) {
+    for (const purpose of [
+      'pairwise_sub',
+      'oidc_storage_id',
+      'email_verify_code',
+      'approval_challenge',
+    ]) {
       const callers = ACL.filter(([, op, target]) => op === 'mac' && target === purpose).map(
         ([caller]) => caller,
       );

@@ -36,6 +36,7 @@ plan 8章は、鍵サービス（`packages/keysvc`）を別プロセスで立て
 | mac（alias_lookup） | ○ | ○ | ○ | M3〜M5 |
 | mac（audit_chain） | ○ | ○ | ○ | M2 |
 | mac（pairwise_sub、oidc_storage_id、email_verify_code） | ○ | — | — | M3（ADR 0018） |
+| mac（approval_challenge） | ○ | — | — | M6（ADR 0023） |
 | derive_alias（alias_derive） | ○ | ○ | — | M3・M5 |
 | sign（id_token）、public_keys（id_token） | ○ | — | — | M3（ADR 0014） |
 

@@ -32,3 +32,16 @@ export const EMAIL_VERIFICATION_STARTED = defineAuditEvent('idp.email.verificati
 export const EMAIL_VERIFIED = defineAuditEvent('idp.email.verified', {
   change: 'bool',
 });
+
+/** 承認待ちを作った（M7 の CIBA などが呼ぶ。ADR 0023）。中身は残さない。 */
+export const APPROVAL_REQUESTED = defineAuditEvent('idp.approval.requested', {
+  channel: { enum: ['device', 'desk'] },
+  tenant_id: 'uuid',
+});
+
+/** 承認待ちを、利用者がパスキー（UV）で承認または拒否した（ADR 0023）。 */
+export const APPROVAL_DECIDED = defineAuditEvent('idp.approval.decided', {
+  decision: { enum: ['approved', 'denied'] },
+  channel: { enum: ['device', 'desk'] },
+  tenant_id: 'uuid',
+});

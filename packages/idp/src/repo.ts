@@ -12,6 +12,7 @@ import {
   PASSKEY_ADDED,
   PASSKEY_REMOVED,
 } from './audit-events.ts';
+import { insertNotice } from './inbox.ts';
 
 /** WebAuthn で受け付ける COSE のアルゴリズム：ES256、EdDSA（Ed25519）、RS256（不変条件9）。 */
 export type CredentialAlgorithm = -7 | -8 | -257;
@@ -172,6 +173,13 @@ export async function addCredential(
   await deps.db.withWarifuUser(userId, async (tx) => {
     await insertCredential(tx, userId, credential);
     const count = await countCredentials(tx);
+    // 全端末への知らせ（plan 4章、ADR 0023）。追加と同じトランザクションで入れる。
+    await insertNotice(tx, {
+      userId,
+      type: 'passkey.added',
+      content: { synced: credential.backupEligible },
+      now: deps.now(),
+    });
     await appendAudit(
       tx,
       deps.keys,
@@ -207,6 +215,7 @@ export async function deleteCredential(
       sql`DELETE FROM idp.credentials WHERE credential_id = ${credentialId}`,
     );
     if (deleted !== 1) return false;
+    await insertNotice(tx, { userId, type: 'passkey.removed', now: deps.now() });
     await appendAudit(tx, deps.keys, PASSKEY_REMOVED, { count: count - 1 }, { now: deps.now });
     return true;
   });
@@ -402,6 +411,12 @@ export async function confirmPendingEmail(
       );
     }
     await tx.execute(sql`DELETE FROM contacts.email_pending`);
+    // 全端末への知らせ（TH-27。ADR 0023）。旧アドレスへの知らせ（relay）とは別に、受信箱にも入れる。
+    await insertNotice(tx, {
+      userId,
+      type: current === undefined ? 'email.registered' : 'email.changed',
+      now,
+    });
     await appendAudit(
       tx,
       deps.keys,

@@ -8,6 +8,7 @@
 // - company-api は encrypt と decrypt を持たない。company-api の sign と public_keys は、tenant_jwt と set の鍵だけ（ADR 0022）。
 // - sender、rp-kit、demo-rp の行はない（資格情報もない）。
 // - sub の導出（pairwise_sub）、idp の保存の id（oidc_storage_id）、確認コード（email_verify_code）の MAC は idp だけ（ADR 0018）。
+//   承認のチャレンジ（approval_challenge）の MAC も idp だけ（ADR 0023）。
 //
 // 行を足すときは、warifu-core の keys/protocol.ts、各クライアントの型、t08-keysvc-acl と t08-key-client-surface の
 // 期待の表を同じ PR で直す。
@@ -30,6 +31,7 @@ export const ACL: ReadonlyArray<readonly [KeysvcCaller, KeysvcOp, AclTarget]> = 
   ['idp', 'mac', 'pairwise_sub'],
   ['idp', 'mac', 'oidc_storage_id'],
   ['idp', 'mac', 'email_verify_code'],
+  ['idp', 'mac', 'approval_challenge'],
   ['idp', 'derive_alias', 'alias_derive'],
   ['idp', 'sign', 'id_token'],
   ['idp', 'public_keys', 'id_token'],

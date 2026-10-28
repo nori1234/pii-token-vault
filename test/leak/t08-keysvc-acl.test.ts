@@ -18,6 +18,7 @@ type Combo =
   | 'mac/pairwise_sub'
   | 'mac/oidc_storage_id'
   | 'mac/email_verify_code'
+  | 'mac/approval_challenge'
   | 'mac/relay_replay'
   | 'mac/relay_thread'
   | 'mac/message_id'
@@ -41,6 +42,7 @@ const COMBOS: readonly Combo[] = [
   'mac/pairwise_sub',
   'mac/oidc_storage_id',
   'mac/email_verify_code',
+  'mac/approval_challenge',
   'mac/relay_replay',
   'mac/relay_thread',
   'mac/message_id',
@@ -64,6 +66,7 @@ const ALLOWED: Readonly<Record<Caller, readonly Combo[]>> = {
     'mac/pairwise_sub',
     'mac/oidc_storage_id',
     'mac/email_verify_code',
+    'mac/approval_challenge',
     'derive_alias',
     'sign/id_token',
     'public_keys/id_token',
@@ -149,6 +152,8 @@ function bodyFor(combo: Combo): { op: string; body: unknown } {
       return { op: 'mac', body: { purpose: 'oidc_storage_id', message: b64('m') } };
     case 'mac/email_verify_code':
       return { op: 'mac', body: { purpose: 'email_verify_code', message: b64('m') } };
+    case 'mac/approval_challenge':
+      return { op: 'mac', body: { purpose: 'approval_challenge', message: b64('m') } };
     case 'mac/relay_replay':
       return { op: 'mac', body: { purpose: 'relay_replay', message: b64('m') } };
     case 'mac/relay_thread':
