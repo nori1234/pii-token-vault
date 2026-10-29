@@ -2,7 +2,7 @@
   "name": "@pii-token-vault/idp",
   "version": "0.0.0",
   "private": true,
-  "description": "OIDC、パスキー、CIBA、回復、PWA",
+  "description": "OIDC、パスキー、操作別 step-up、回復、PWA",
   "license": "MIT",
   "type": "module",
   "exports": {
