@@ -34,6 +34,7 @@ export type MacPurpose =
   | 'pairwise_sub'
   | 'oidc_storage_id'
   | 'email_verify_code'
+  | 'approval_challenge'
   | 'relay_replay'
   | 'relay_thread'
   | 'message_id';
@@ -43,6 +44,7 @@ export const MAC_PURPOSES: readonly MacPurpose[] = Object.freeze([
   'pairwise_sub',
   'oidc_storage_id',
   'email_verify_code',
+  'approval_challenge',
   'relay_replay',
   'relay_thread',
   'message_id',

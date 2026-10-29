@@ -14,16 +14,27 @@ afterAll(async () => {
   await t.stop();
 });
 
-// Fastify の HEAD は GET から自動で足される。
+// Fastify の HEAD は GET から自動で足される。承認用のオリジン（ADR 0023）だけのルートは、末尾に「 (approval)」。
 const ROUTES = [
   'GET /',
+  'GET / (approval)',
+  'GET /api/approvals (approval)',
+  'GET /api/inbox',
   'GET /api/me',
   'GET /assets/app.css',
+  'GET /assets/app.css (approval)',
   'GET /assets/app.js',
+  'GET /assets/app.js (approval)',
   'GET /assets/webauthn.js',
+  'GET /assets/webauthn.js (approval)',
   'GET /interaction/:uid',
+  'POST /api/approvals/decide/options (approval)',
+  'POST /api/approvals/decide/verify (approval)',
+  'POST /api/approvals/login/options (approval)',
+  'POST /api/approvals/login/verify (approval)',
   'POST /api/email/confirm',
   'POST /api/email/start',
+  'POST /api/inbox/read',
   'POST /api/login/options',
   'POST /api/login/verify',
   'POST /api/logout',
@@ -47,7 +58,8 @@ describe('漏えい：idp のルート一覧と、ブラウザ側の守り', () 
     // 攻撃者が持っている情報：sub、別名、窓口コード（漏れた企業のデータ）
     // 試す経路：idp の Fastify に登録されたルートを、すべて列挙する
     // 期待する結果：一覧と完全に一致する。sub・別名から連絡先を返すルート、admin、users、lookup のようなルートはない。
-    //               メールの変更は /api/email/*（PWA のセッションと step-up）だけ
+    //               メールの変更は /api/email/*（PWA のセッションと step-up）だけ。受信箱は、自分の項目の一覧と既読だけ。
+    //               承認と拒否は、承認用のオリジンだけ（ADR 0023）
     // plan 11章：テスト6（逆引きのルートがない。ルート一覧で固定）
     const routes = t.idp.routes().filter((route) => !route.startsWith('HEAD '));
     expect(routes).toEqual(ROUTES);

@@ -55,18 +55,24 @@ export function newNonce(bytes: Uint8Array): string {
 
 export interface PageInput {
   readonly nonce: string;
-  readonly page: 'home' | 'interaction';
+  /** home は PWA、interaction は企業へのログイン、approval は承認用のオリジンの承認待ちの画面（ADR 0023）。 */
+  readonly page: 'home' | 'interaction' | 'approval';
   /** インタラクションの uid（英数字と - _ だけ。interactionDetails で確かめた値）。 */
   readonly uid?: string;
   readonly prompt?: 'login' | 'consent';
   /** 登録簿の企業名。 */
   readonly companyName?: string;
+  /** 承認用のオリジン（設定の値）。PWA の受信箱から、承認待ちの画面へ案内するのに使う。 */
+  readonly approvalOrigin?: string;
 }
 
 export function renderPage(input: PageInput): string {
   const attrs = [`data-page="${input.page}"`];
   if (input.uid !== undefined) attrs.push(`data-uid="${escapeHtml(input.uid)}"`);
   if (input.prompt !== undefined) attrs.push(`data-prompt="${input.prompt}"`);
+  if (input.approvalOrigin !== undefined) {
+    attrs.push(`data-approval-origin="${escapeHtml(input.approvalOrigin)}"`);
+  }
   const company =
     input.companyName === undefined
       ? ''
@@ -77,7 +83,7 @@ export function renderPage(input: PageInput): string {
     '<head>',
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    '<title>割符</title>',
+    `<title>${input.page === 'approval' ? '割符：確認待ち' : '割符'}</title>`,
     '<link rel="stylesheet" href="/assets/app.css">',
     '</head>',
     '<body>',

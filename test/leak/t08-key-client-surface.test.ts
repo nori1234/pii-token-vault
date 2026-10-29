@@ -107,7 +107,12 @@ describe('漏えい：鍵のクライアントの表面（plan 11章 テスト8�
       expect(await relay.mac(purpose, message)).toEqual(a);
     }
     // idp だけの用途。用途ごとに鍵が違う（同じ入力でも MAC が違う）。
-    const idpOnly = ['pairwise_sub', 'oidc_storage_id', 'email_verify_code'] as const;
+    const idpOnly = [
+      'pairwise_sub',
+      'oidc_storage_id',
+      'email_verify_code',
+      'approval_challenge',
+    ] as const;
     const macs = [
       await idp.mac('alias_lookup', message),
       await idp.mac('audit_chain', message),
