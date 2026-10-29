@@ -37,7 +37,7 @@ git show refs/review/<番号>:<パス>                      # 新しいファイ
 | 4 | 平文を残さない（4） | 連絡先、別名、トークン、回復コード、窓口コード、招待コード、協力者の表示名、申請ID、受付番号、変更ID、取消要求ID、移行証跡を、ログ、例外のメッセージ、DB の平文列、配送ログに書く。テンプレート文字列でログに値を埋め込む。別名を URL に載せる |
 | 5 | 突き合わせの防止（5） | sub の導出にテナント ID を使っていない。SET の jti に全体の通番や時刻を使う。email_verified を true にする。別名の世代を戻す |
 | 6 | 窓口の承認（6） | P0でCIBAを提供する。受付番号だけで認証・認可する。窓口用途の承認を高リスク操作に流用する |
-| 7 | SSRF（7） | sender 以外から外部へつなぐ。oidc-provider で jwks_uri・sector_identifier_uri・request_uri を有効にする。動的クライアント登録を有効にする |
+| 7 | SSRF（7） | sender 以外から外部へつなぐ。oidc-provider で jwks_uri・sector_identifier_uri を有効にする。割符の PAR が発行した urn 以外の request_uri を受け付ける。どれかの値を外へ取りに行く。動的クライアント登録を有効にする |
 | 8 | DB の境界（8） | `withTenant` / `withWarifuUser` を通らない DB アクセス。`sql` タグ以外で SQL を組み立てる。`set_config` の第3引数が true でない。FORCE の付け忘れ。列単位でない GRANT、`USING (true)` のポリシー、SECURITY DEFINER 関数を新たに足す。参加の状態、移行中の期限、割符が確かめた項目と日の列に、企業向けのルート（company-api と、窓口承認で呼べるもの）のロールから書き換えられる GRANT を付ける（ADR 0010） |
 | 9 | 暗号の許可リスト（9） | 許可リスト以外の方式。96ビット以外の IV。ES256 以外の JWS。WebAuthn で ES256、EdDSA（Ed25519）、RS256 以外を受け付ける |
 | 10 | 列挙の防止（10） | 登録済みかどうかで、本文・ステータス・所要時間が変わる分岐（already、exists、409、早めの return） |
