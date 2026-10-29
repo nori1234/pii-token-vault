@@ -474,16 +474,29 @@ export async function findDeskItem(
 
 /**
  * 正本の状態を受けて、項目を片付ける。終端なら closed にして7日後に消す予定を付ける。正本にない approving の項目は、
- * 手順の途中のものを消さないよう、作ってから2分を過ぎたものだけ消す。
+ * 手順の途中のものを消さないよう、作ってから2分を過ぎたものだけ消す。正本にある approving の項目（正本には記録できたが、
+ * idp が応答を受け取れなかったもの）は approved にして、受信箱から取り消せるようにする（ADR 0026 の O-63）。
  */
 export async function settleDeskItems(
   repo: RepoDeps,
   userId: WarifuUserId,
-  input: { readonly terminal: readonly string[]; readonly missing: readonly string[] },
+  input: {
+    readonly terminal: readonly string[];
+    readonly missing: readonly string[];
+    readonly recorded: readonly string[];
+  },
 ): Promise<void> {
-  if (input.terminal.length === 0 && input.missing.length === 0) return;
+  if (input.terminal.length === 0 && input.missing.length === 0 && input.recorded.length === 0) {
+    return;
+  }
   await repo.db.withWarifuUser(userId, async (tx) => {
     const now = repo.now();
+    if (input.recorded.length > 0) {
+      await tx.execute(
+        sql`UPDATE idp.desk_items SET state = 'approved'
+             WHERE item_id = ANY(${[...input.recorded]}::uuid[]) AND state = 'approving'`,
+      );
+    }
     if (input.terminal.length > 0) {
       await tx.execute(
         sql`UPDATE idp.desk_items

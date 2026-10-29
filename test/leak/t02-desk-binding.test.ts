@@ -277,6 +277,42 @@ describe('漏えい：申請の結び付き（plan 11章 テスト2）', () => {
     expect((await user.approval.post('/api/desk/view', { uid: c.uid })).status).toBe(400);
   });
 
+  it('同じ申請の承認と拒否を同時に送っても、どちらか一方だけが通る', async () => {
+    // 攻撃者が持っている情報：利用者の画面の URL のフラグメント（uid）。利用者が承認している間に、パスキーのいらない
+    //                       拒否を送れる（または、利用者が2つのボタンをほぼ同時に押した）
+    // 試す経路：承認の検証と「承認しない」を同時に送る（5回）。その後、インタラクションを完了させる
+    // 期待する結果：毎回、200 はどちらか一方だけ。承認が通ったときだけ認可コードが出て、拒否が通ったときは
+    //               access_denied。承認と拒否の両方が記録されることはない
+    // plan 11章：テスト2（ADR 0026 の O-61、ADR 0023 の O-44「承認と拒否の両方は通らない」）
+    for (let round = 0; round < 5; round += 1) {
+      clock += 1000;
+      const par = await pushRequest(world.t, client(0), [deskDetail(user.sub)]);
+      const { uid } = await arriveAtDesk(user.browser, client(0), String(par.requestUri));
+      const started = await user.approval.post('/api/desk/approve/options', { uid, call: 'self' });
+      expect(started.status).toBe(200);
+      const response = user.approval.authenticator.get(started.json.options as never, undefined, {
+        origin: user.approval.origin,
+      });
+      const [approved, declined] = await Promise.all([
+        user.approval.post('/api/desk/approve/verify', {
+          uid,
+          ceremonyId: started.json.ceremonyId,
+          response,
+        }),
+        user.approval.post('/api/desk/decline', { uid, reason: 'denied' }),
+      ]);
+      const winners = [approved.status, declined.status].filter((status) => status === 200);
+      expect([round, winners]).toEqual([round, [200]]);
+      const finished = await user.browser.follow(`/interaction/${uid}/desk/finish`);
+      const params = finished.external?.searchParams;
+      if (approved.status === 200) {
+        expect(params?.get('code')).not.toBeNull();
+      } else {
+        expect(params?.get('error')).toBe('access_denied');
+      }
+    }
+  });
+
   it('URL にほかの項目を足しても、PAR で送った内容が使われる（ブラウザでの差し替えはできない）', async () => {
     // 攻撃者が持っている情報：利用者のブラウザの URL を書き換えられる（中継の詐欺のリンク）
     // 試す経路：request_uri の URL に、別の redirect_uri、scope、state を足して入口を開き、承認する

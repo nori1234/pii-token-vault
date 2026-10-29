@@ -2,10 +2,17 @@
 // 状態の変更は同じ行の中で原子的に決まり、再送は同じ結果を返し、食い違う報告は 409。終端でない行は期限が過ぎても
 // 消さず、終端から7日で消す。M6 の受信箱の30日・90日の決まりは、窓口の項目には当てはめない。
 
+import { randomBytes, randomUUID } from 'node:crypto';
 import { decodeJwt } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from '../../packages/warifu-core/src/db/sql.ts';
-import type { TenantId, WarifuUserId } from '../../packages/warifu-core/src/ids.ts';
+import { createDeskClient } from '../../packages/warifu-core/src/desk/client.ts';
+import {
+  parseTenantId,
+  parseWarifuUserId,
+  type TenantId,
+  type WarifuUserId,
+} from '../../packages/warifu-core/src/ids.ts';
 import { userIdOf } from '../setup/approvals.ts';
 import { serviceDb } from '../setup/db.ts';
 import {
@@ -164,6 +171,54 @@ describe('漏えい：窓口の作成の正本の状態と保存期間', () => {
     expect(wrong.status).toBe(409);
     const status = await call('/v1/desk/cancellation-status', { change_id: made.changeId });
     expect(status.json()).toEqual({ state: 'cancellation_pending' });
+  });
+
+  it('正本に記録できたのに idp が応答を受け取れなかった項目も、受信箱から取り消せる', async () => {
+    // 攻撃者が持っている情報：なし（障害の場面。company-api が記録した直後に、idp への応答が失われた。ADR 0026 の O-63）
+    // 試す経路：idp の項目を approving のまま置き、同じ内部のレコード ID で company-api の内部 API に承認を記録する
+    //           （idp は応答を受け取らなかったことにする）。その後、利用者が承認用のオリジンで項目を読み、取り消す
+    // 期待する結果：項目は「承認済み（作成の知らせ待ち）」で取り消せて、取消は 200。正本は取消の受理（企業には
+    //               cancellation_pending）になる
+    // plan 11章：番号なし（ADR 0026 の O-63「利用者は、受信箱の項目から取り消せる」）
+    clock += 1000;
+    const userId = parseWarifuUserId(userIdOf(user.browser.authenticator));
+    const tenantId = parseTenantId(String(world.company.tenants[0]?.tenantId));
+    const changeRef = randomUUID();
+    const idp = await serviceDb('idp');
+    try {
+      await idp.withWarifuUser(userId, (tx) =>
+        tx.execute(
+          sql`INSERT INTO idp.desk_items (item_id, user_id, tenant_id, change_ref, action, state, created_at)
+              VALUES (${randomUUID()}, ${userId}, ${tenantId}, ${changeRef}, 'desk.case.create', 'approving', ${new Date(clock)})`,
+        ),
+      );
+    } finally {
+      await idp.close();
+    }
+    const desk = createDeskClient({
+      socketPath: world.deskSocketPath,
+      credential: world.deskCredential,
+    });
+    const recorded = await desk.approve({
+      tenantId,
+      userId,
+      changeRef,
+      requestId: randomBytes(16).toString('base64url'),
+      action: 'desk.case.create',
+    });
+    expect(recorded.ok).toBe(true);
+    await user.approval.approvalLogin();
+    const item = (await deskItems(user.approval)).find(
+      (entry) => entry.state === 'awaiting_notice',
+    );
+    expect(item).toMatchObject({ cancellable: true });
+    expect((await cancelDeskItem(user.approval, String(item?.id))).status).toBe(200);
+    if (!recorded.ok) throw new Error('記録に失敗した');
+    expect(
+      (await call('/v1/desk/cancellation-status', { change_id: recorded.changeId })).json(),
+    ).toEqual({
+      state: 'cancellation_pending',
+    });
   });
 
   it('終端でない行は、30日・90日を過ぎても消えず、受信箱から取り消せる', async () => {

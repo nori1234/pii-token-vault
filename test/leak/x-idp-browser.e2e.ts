@@ -218,6 +218,21 @@ async function clientAssertion(): Promise<string> {
     .sign(rpKey);
 }
 
+/**
+ * 企業の redirect_uri への移動をつかまえて、その URL を返す。redirect_uri では何も待ち受けていないので、ブラウザが
+ * 接続の失敗でエラーの画面に移り終わるまで待つ（その移動が、テストの次の page.goto を中断させないように）。
+ */
+async function catchRedirect(page: Page, action: () => Promise<unknown>): Promise<URL> {
+  const toCompany = (r: { url(): string }) => r.url().startsWith(`${REDIRECT_URI}?`);
+  const [request] = await Promise.all([
+    page.waitForRequest(toCompany),
+    page.waitForEvent('requestfailed', toCompany),
+    action(),
+  ]);
+  await expect.poll(() => page.url()).toMatch(/^chrome-error:/);
+  return new URL(request.url());
+}
+
 /** 画面でアカウントを作って企業に接続し、企業別ID（sub）を返す（窓口の承認は、接続済みの利用者だけ）。 */
 async function connectThroughScreens(page: Page): Promise<string> {
   const verifier = randomBytes(32).toString('base64url');
@@ -233,11 +248,10 @@ async function connectThroughScreens(page: Page): Promise<string> {
   });
   await page.goto(`${idp.issuer}/auth?${params}`);
   await page.getByRole('button', { name: '割符のアカウントを作る' }).click();
-  const [request] = await Promise.all([
-    page.waitForRequest((r) => r.url().startsWith(`${REDIRECT_URI}?`)),
+  const callback = await catchRedirect(page, () =>
     page.getByRole('button', { name: '接続する' }).click(),
-  ]);
-  return String((await redeem(new URL(request.url()), verifier)).sub);
+  );
+  return String((await redeem(callback, verifier)).sub);
 }
 
 /** 企業のサーバーの役で、窓口の申請を PAR で登録する（ADR 0025、ADR 0026 の O-60）。 */
@@ -488,11 +502,7 @@ test('窓口での承認：公式窓口に自分から連絡した利用者が�
   await approve.click();
   await expect(card.getByRole('status')).toHaveText('先に、上の問いに答えてください。');
   await card.getByRole('button', { name: 'いいえ、自分から公式窓口に連絡しました' }).click();
-  const [request] = await Promise.all([
-    page.waitForRequest((r) => r.url().startsWith(`${REDIRECT_URI}?`)),
-    approve.click(),
-  ]);
-  const callback = new URL(request.url());
+  const callback = await catchRedirect(page, () => approve.click());
   expect(callback.searchParams.get('state')).toBe('state-desk');
   const claims = await redeem(callback, pushed.verifier);
   expect(claims.sub).toBe(sub);
@@ -544,11 +554,9 @@ test('窓口での承認：相手からかかってきた電話だと答える�
   await expect(page.getByRole('status')).toHaveText(
     `承認しませんでした。相手からかかってきた電話で求められた操作は、承認しないでください。${TENANT.displayName}の公式窓口に、自分から連絡し直してください。`,
   );
-  const [request] = await Promise.all([
-    page.waitForRequest((r) => r.url().startsWith(`${REDIRECT_URI}?`)),
+  const callback = await catchRedirect(page, () =>
     page.getByRole('button', { name: '企業の画面に戻る' }).click(),
-  ]);
-  const callback = new URL(request.url());
+  );
   expect(callback.searchParams.get('error')).toBe('access_denied');
   expect(callback.searchParams.get('code')).toBeNull();
   expect(callback.searchParams.get('state')).toBe('state-desk');

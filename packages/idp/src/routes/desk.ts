@@ -141,12 +141,14 @@ export async function deskItemEntries(
   if (reachable) {
     const terminal: string[] = [];
     const missing: string[] = [];
+    const recorded: string[] = [];
     for (const item of items) {
       const state = states.get(item.changeRef)?.state ?? 'unknown';
       if (state === 'unknown') missing.push(item.itemId);
       else if (isTerminalDeskState(state)) terminal.push(item.itemId);
+      else if (item.state === 'approving') recorded.push(item.itemId);
     }
-    await settleDeskItems(ctx.repo, userId, { terminal, missing });
+    await settleDeskItems(ctx.repo, userId, { terminal, missing, recorded });
   }
   const nowMs = ctx.nowMs();
   const out: DeskItemEntry[] = [];
@@ -363,11 +365,14 @@ export function registerDeskRoutes(ctx: RouteContext): void {
       },
     });
     if (!result.ok || target === undefined) return reply.code(401).send(FAILED);
-    const handoff: DeskHandoff = target;
-    const { uid, tenantId, clientId, detail } = handoff;
+    const { uid } = target;
     if (inFlight.has(uid)) return reply.code(409).send(FAILED);
     inFlight.add(uid);
     try {
+      // 検証の間に、拒否、期限切れ、失敗の上限で引き継ぎが閉じていないかを、読み直して確かめる（承認と拒否の両方は通さない）。
+      const handoff = await loadHandoff(store, uid, ctx.nowMs());
+      if (!isOpen(handoff, ctx.nowMs())) return reply.code(401).send(FAILED);
+      const { tenantId, clientId, detail } = handoff;
       const { userId } = result;
       // アサーションの利用者の sub が、申請の subject と一致し、その企業に接続済みのときだけ承認する（O-61、O-53）。
       const sub = await deriveSub(keys, tenantId, userId);
@@ -433,17 +438,22 @@ export function registerDeskRoutes(ctx: RouteContext): void {
     if (uid === undefined || typeof reason !== 'string' || !DECLINE_REASONS.has(reason)) {
       return reply.code(400).send(FAILED);
     }
-    const handoff = await loadHandoff(store, uid, ctx.nowMs());
-    if (handoff === undefined || handoff.state !== 'pending' || inFlight.has(uid)) {
-      return reply.code(400).send(FAILED);
+    // 承認と同じ印を取ってから読む（承認の途中の引き継ぎは拒否にしない。承認と拒否の両方は通さない）。
+    if (inFlight.has(uid)) return reply.code(400).send(FAILED);
+    inFlight.add(uid);
+    try {
+      const handoff = await loadHandoff(store, uid, ctx.nowMs());
+      if (handoff === undefined || handoff.state !== 'pending') return reply.code(400).send(FAILED);
+      await saveHandoff(
+        store,
+        { ...handoff, state: 'declined', declineReason: reason as DeskDeclineReason },
+        ctx.nowMs(),
+      );
+      await auditDeclined(repo, handoff.tenantId, reason as DeskDeclineReason);
+      return { redirectTo: finishUrl(uid) };
+    } finally {
+      inFlight.delete(uid);
     }
-    await saveHandoff(
-      store,
-      { ...handoff, state: 'declined', declineReason: reason as DeskDeclineReason },
-      ctx.nowMs(),
-    );
-    await auditDeclined(repo, handoff.tenantId, reason as DeskDeclineReason);
-    return { redirectTo: finishUrl(uid) };
   });
 
   // ---- 承認用のオリジン：窓口の作成の項目と取消 ----
