@@ -37,7 +37,7 @@
 
 - sub はテナント単位の値で、秘密ではない。同じテナントの別のクライアントでは同じ値、別のテナントでは別の値になる（不変条件5、テスト4）。P0ではコードフローを使う（RP-77）。
 - email クレームと `contact_alias` のどちらで別名を受け取るかは、クライアントの登録のときに選ぶ（既定は email。`email_verified` は常に false。どちらも scope `email` のときだけ出る。[ADR 0018](../adr/0018-idp-passkey-oidc.md)）。
-- `acr` の値：ログインと step-up は `urn:warifu:acr:passkey`（UV 付きのパスキー）。ID トークンには、要求しなくても acr と auth_time が入る。step-up は、`max_age`（0 も可）か `prompt=login` で新しい認証を求め、auth_time で確かめる（[ADR 0018](../adr/0018-idp-passkey-oidc.md)）。窓口用途の値は M7 で決める（[ADR 0006](../adr/0006-ciba-spike-findings.md)）。
+- `acr` の値：ログインと step-up は `urn:warifu:acr:passkey`（UV 付きのパスキー）。ID トークンには、要求しなくても acr と auth_time が入る。step-up は、`max_age`（0 も可）か `prompt=login` で新しい認証を求め、auth_time で確かめる（[ADR 0018](../adr/0018-idp-passkey-oidc.md)）。窓口の承認も `urn:warifu:acr:passkey` で、企業は ID トークンではなく、操作ごとの承認（3章）で確かめる（[ADR 0026](../adr/0026-desk-step-up-details.md)）。
 - ID トークンの有効期間は5分。リフレッシュトークンは出さない。企業は、ID トークンを受け取った後、自前のセッションを作る（RP-02）。
 - 紐付けの前から企業が持っている既存会員の本物の連絡先をどう扱うか（消すかどうか）は、未定（M9 で決める。plan 3-3、原則2）。いまは推奨（RP-35）にとどめる。必須にするかも、M9 で決める。
 
@@ -52,7 +52,7 @@
 | RP-12 | 操作ごとの承認は、要求した1つの操作にだけ使わなければならない。別の操作や、内容の違う操作に使い回してはならない | P0 | SDK |
 | RP-13 | RP-10 の「企業側の API」には、公開していない管理用・内部の API、管理画面、窓口担当者の画面、バッチの処理を含む。どの経路でも、従業員や委託先の権限だけで、高リスクの操作をしてはならない。移行中の参加でも緩めない（RP-15） | P0 | 監査 |
 
-- 「高額」の基準、`authorization_details` の型、承認の有効期間は、未定（M7 で決める）。
+- M7 で、窓口の型 `warifu_desk` と、操作ごとの承認（ES256 の JWT、5分）を決めた（3章、[ADR 0026](../adr/0026-desk-step-up-details.md)）。高リスクの操作の `authorization_details` の型と、「高額」の基準は、未定（M7 では窓口の型だけを作った）。
 - 管理用・内部の経路を適合テストで確かめる方法と、rp-kit の参照実装で承認の検査をどの層に置くかは、未定（M9 で決める）。
 - 承認画面には、企業名（割符の登録簿の値）、操作の種類と内容、時刻と端末、警告文 A-2 が出る（DESIGN.md 2章）。
 
@@ -78,6 +78,13 @@
 - 承認後は割符の受信箱に知らせ待ちを表示し、作成通知前も本人の取消を受け付ける。企業は作成前の署名済み取消予約と作成を原子的に競合させ、作成済みなら取り消す。未作成の確定・実行不能の報告があるまで通知未着だけで閉じない（ADR 0019）。
 - 初回紐付けの移行専用IDは割符が払い出し、企業は自社申請と対応付け、取消配送と結果報告・再送に同じIDを使う（ADR 0020）。
 - 取消の企業側での適用完了は、企業がprivate_key_jwtのclient_credentialsで得たテナントJWTを用いてcompany-apiへ報告する。Webhookの202は受領であり業務完了ではない。
+- M7 で決めたこと（[ADR 0026](../adr/0026-desk-step-up-details.md)。オーナーの確認待ち）：
+  - 申請の登録：企業のサーバーは、申請を固定した後、PAR（RP-11）で `authorization_details` を1件だけ送る。型は `warifu_desk`、`actions` は `desk.case.status.read`、`desk.order.status.read`、`desk.case.create` のどれか1つ、`identifier` は申請ID（128ビット以上の乱数の base64url。22〜128文字）、`subject` は申請を作った会員の sub。`choices`（`category` と `language`）は作成のときだけ付ける。ほかの項目（受付番号、注文番号、自由文）は送れない。使える操作は、登録簿のクライアントごとに決める（`deskActions`。既定はなし）。
+  - 割符は、承認した利用者の sub が `subject` と一致し、その企業に接続済みのときだけ承認する。`subject` で利用者を探したり、知らせを送ったりはしない。承認しなかった（「承認しない」「心当たりがない」「相手からの電話」）ときは、理由を区別せずに `access_denied` を返す。
+  - 操作ごとの承認：トークンの応答の `authorization_details[0].approval` に、ES256 の JWT（`typ` は `warifu-op-approval+jwt`、5分）が入る。公開鍵は discovery の `warifu_op_approval_jwks_uri`（ID トークンの鍵とは別）。企業は、署名、`typ`、`iss`、`aud`（自分の `client_id`）、`purpose`（`desk`）、`action`、`exp`、`sub`（申請の会員）、`request_id`（自社で固定した申請）、`jti`（1回だけ）を、サーバーで確かめてから担当者に権限を渡す（RP-12、RP-23、RP-76）。作成のときは `change_id` も入る。ID トークン、パスキーの成功、申請ID の所持だけでは、権限を渡さない。検査の参照実装は M9 で rp-kit に入れる。
+  - 企業向けのルート（company-api。テナントの JWT の scope `desk` で呼ぶ。scope はクライアントごとに許し、既定は `company_api` だけ）：`POST /v1/desk/change-notices`（作成の知らせ。取消期限 `cancel_deadline` が返る）、`POST /v1/desk/execution-results`（承認を受けたのに作らなかった、`not_created`）、`POST /v1/desk/cancellation-results`（取消の適用、`applied` か `already_applied`）、`POST /v1/desk/cancellation-status`（取消の受付の状態）。応答は `401`（認証）、`403`（scope）、`404`（知らない ID と別テナントの ID を区別しない）、`409`（既知の記録と食い違う）、`400`（形）、`200` か `204`。同じ要求の再送は同じ結果を返す。
+  - 取消期限は、割符が作成の知らせを記録した時刻から24時間で、割符の時計で決める。企業は、`cancellation-status` が `closed_without_cancellation` を返すか、取消を適用するまで、取消を妨げる後の処理を保留する。
+  - 取消は、窓口の取消の SET（7章）で届く。企業は、変更ID と取消要求ID で1回だけ適用し、`cancellation-results` で報告する。
 
 ## 4. 既存会員の紐付け
 
@@ -127,7 +134,13 @@
 
 - 割符は、回復の後7日間、高リスクの承認を出さない（plan 4）。RP-53 の保留期間の長さは、未定（M8 で決める）。
 - SET の送信時刻はテナントごとにランダムにずらし、`jti` はテナントごとの乱数にする（テスト12）。
-- P0 で送るイベントは、検証のイベント（SSF の `verification`。企業が `POST /v1/events/verification` で頼み、受け口を確かめる）と、回復のイベント（M8）。SET は割符の鍵の ES256 で署名し（`typ` は `secevent+jwt`、検証の鍵は company-api の `GET /jwks`）、`aud` はテナント ID、`jti` はイベントごとの乱数。受け口が受け取らなければ、同じ `jti` で6回まで送り直す（[ADR 0022](../adr/0022-company-api-sender.md)）。
+- P0 で送るイベントは、検証のイベント（SSF の `verification`。企業が `POST /v1/events/verification` で頼み、受け口を確かめる）と、窓口の取消のイベント（`urn:warifu:secevent:desk-cancellation`。M7）と、回復のイベント（M8）。SET は割符の鍵の ES256 で署名し（`typ` は `secevent+jwt`、検証の鍵は company-api の `GET /jwks`）、`aud` はテナント ID、`jti` はイベントごとの乱数。受け口が受け取らなければ、同じ `jti` で6回まで送り直す（[ADR 0022](../adr/0022-company-api-sender.md)）。
+- 窓口の取消のイベント（[ADR 0026](../adr/0026-desk-step-up-details.md) の O-67）：中身は `change_id`、`cancellation_id`、`accepted`（`within_window`）。初めて送るのは、取消の受理から0〜60秒の後。割符は、受け口の `202` だけを配送済みとし、取消の SET は諦めずに送り直す。送り直しでは `jti` と `iat` が新しくなることがあるので、企業は `jti` ではなく、`change_id` と `cancellation_id` の組で1回だけ適用する。受け口は、次の形で応答する（RFC 8935 の応答への、本製品の追加規則）。
+  - 受け取った：`202`。
+  - 署名、宛先、形式は正しく、`iat` が300秒より古い：`400` で `{"err":"invalid_request","warifu_reason":"set_too_old"}`（割符は、5秒あけて、新しい `jti` と `iat` で送り直す。3回続くと保留）。
+  - `iat` が30秒より先の時刻：`400` で `{"err":"invalid_request","warifu_reason":"iat_in_future"}`（割符は保留にする。時刻を偽って署名し直さない）。
+  - 一時的に受け取れない：`429` か `5xx`（割符は、1分から6時間の間隔で送り直す）。そのほかの `4xx`、リダイレクト、`202` 以外の `2xx` は、割符が保留にする。
+  - 割符は、`description` を読まない。
 
 ## 8. 代わりの手順
 
@@ -157,7 +170,7 @@
 
 - M5 で決めたこと（[ADR 0022](../adr/0022-company-api-sender.md)）：
   - 企業向け API のトークン：`POST /token` で、`grant_type=client_credentials` と private_key_jwt（RFC 7523）の client assertion を送る。assertion は ES256 で、`iss` と `sub` は client_id、`aud` はトークンのエンドポイントの URL の1つだけ（配列にしない）、`exp`・`iat`・`jti` は必須、`iat` から5分まで、`jti` は1回だけ。
-  - テナントの JWT：ES256 で5分、`scope` は `company_api` の1つ（別名の入れ替えと、検証の SET の依頼）、リフレッシュトークンなし。
+  - テナントの JWT：ES256 で5分、`scope` は `company_api` の1つ（別名の入れ替えと、検証の SET の依頼）、リフレッシュトークンなし。M7 で、窓口のルートの scope `desk` を足した。トークンの要求の `scope` で1つを選び、使える scope はクライアントごとに決める（3章、[ADR 0026](../adr/0026-desk-step-up-details.md)）。
   - 封じ込め：静的な設定を直して配備し直す（company-api の登録の `suspended` で、トークンを出さず、発行済みのものも断り、SET を送らない。送信は relay、ログインは idp の登録から外す）。管理 API は作らない。
   - テナントの鍵の入れ替え：jwks に新しい鍵を足して（4つまで）切り替えた後、古い鍵を外す。定期的な入れ替えの周期は P1。
 - 未定：ロゴの渡し方と、受け付ける形式と検査（スクリプトを含みうる形式の扱いを含む）。P0 ではロゴを受け付けない（承認画面は登録簿の企業名だけ。M6・M7 か P1 で決める。ADR 0022 の O-40）。
@@ -288,11 +301,11 @@
 
 | 要件 | テスト |
 |---|---|
-| RP-11 | 未割り当て（M7 で決める） |
+| RP-11 | テスト2（`test/leak/t02-desk-binding`：PAR のクライアント認証、URL の `authorization_details` の拒否、型と操作の検査、通常のログインへの縮退の拒否） |
 | RP-22、RP-23 | テスト2 |
 | RP-51 | テスト11 |
 | RP-70 | テスト8 |
-| RP-71 | テスト6（動的クライアント登録のルートがないこと）。`jwks_uri`、`sector_identifier_uri`、`request_uris` などの登録の拒否は idp の単体テスト（`packages/idp/test/registry.test.ts`）、認可の要求の `request_uri` の拒否は `test/leak/x-idp-oidc`（M3。PAR が発行したもの以外の拒否は M7） |
+| RP-71 | テスト6（動的クライアント登録のルートがないこと）。`jwks_uri`、`sector_identifier_uri`、`request_uris` などの登録の拒否は idp の単体テスト（`packages/idp/test/registry.test.ts`）、認可の要求の `request_uri` の拒否は `test/leak/x-idp-oidc`（M3）。PAR が発行したもの以外の `request_uri` と、別の `client_id`、期限の後、応答の後の拒否はテスト2（`test/leak/t02-desk-binding`。M7） |
 | RP-73 | テスト6 |
 | RP-80〜88 | テスト5 |
 
