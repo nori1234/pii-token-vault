@@ -167,7 +167,7 @@ function publicStateOf(row: Row, now: Date): DeskPublicState | undefined {
 }
 
 /** 0〜60秒の乱数（ミリ秒）。送るたびに独立に決める（不変条件5、テスト12）。 */
-function initialDelayMs(): number {
+export function initialDelayMs(): number {
   const bytes = randomBytesOf(4);
   const value =
     ((bytes[0] ?? 0) << 24) | ((bytes[1] ?? 0) << 16) | ((bytes[2] ?? 0) << 8) | (bytes[3] ?? 0);

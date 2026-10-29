@@ -166,7 +166,8 @@ describe('漏えい：企業に送る SET（RP-50、RP-51）', () => {
                WHERE table_schema = 'company_api' AND table_name = 'set_outbox' ORDER BY column_name`,
         ),
       );
-      // 取消の SET（ADR 0026）は、正本の行への参照（change_ref）と、保留と送り直しの回数だけを足した。
+      // 取消の SET（ADR 0026）は、正本の行への参照（change_ref）と、保留（と保留にした時の設定の版。O-72）と
+      // 送り直しの回数だけを足した。
       expect(rows.map((r) => r.column_name)).toEqual([
         'attempts',
         'change_ref',
@@ -175,6 +176,7 @@ describe('漏えい：企業に送る SET（RP-50、RP-51）', () => {
         'event_id',
         'event_type',
         'held',
+        'held_revision',
         'issued_at',
         'jti',
         'reissues',

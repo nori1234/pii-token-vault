@@ -68,6 +68,10 @@ ALTER TABLE company_api.set_outbox ADD CONSTRAINT set_outbox_attempts_check CHEC
 ALTER TABLE company_api.set_outbox ADD COLUMN change_ref uuid;
 ALTER TABLE company_api.set_outbox ADD COLUMN held boolean NOT NULL DEFAULT false;
 ALTER TABLE company_api.set_outbox ADD COLUMN reissues integer NOT NULL DEFAULT 0 CHECK (reissues BETWEEN 0 AND 16);
+-- 保留にした時の、テナントの SET の受け口の設定の版（ADR 0026 の O-72）。版が変わった配備で送り直す。
+ALTER TABLE company_api.set_outbox ADD COLUMN held_revision integer CHECK (held_revision >= 0);
+ALTER TABLE company_api.set_outbox
+  ADD CONSTRAINT set_outbox_held_has_revision CHECK (held = (held_revision IS NOT NULL));
 ALTER TABLE company_api.set_outbox
   ADD CONSTRAINT set_outbox_change_ref_check CHECK ((event_type = 'desk_cancellation') = (change_ref IS NOT NULL));
 ALTER TABLE company_api.set_outbox
@@ -110,7 +114,8 @@ GRANT SELECT (item_id, user_id, tenant_id, change_ref, action, state, created_at
   ON idp.desk_items TO warifu_idp;
 GRANT DELETE ON idp.desk_items TO warifu_idp;
 
-GRANT SELECT (change_ref, held, reissues), INSERT (change_ref), UPDATE (held, reissues)
+GRANT SELECT (change_ref, held, held_revision, reissues), INSERT (change_ref),
+      UPDATE (held, held_revision, reissues)
   ON company_api.set_outbox TO warifu_company_api;
 
 RESET ROLE;

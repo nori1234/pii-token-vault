@@ -140,6 +140,7 @@
   - 署名、宛先、形式は正しく、`iat` が300秒より古い：`400` で `{"err":"invalid_request","warifu_reason":"set_too_old"}`（割符は、5秒あけて、新しい `jti` と `iat` で送り直す。3回続くと保留）。
   - `iat` が30秒より先の時刻：`400` で `{"err":"invalid_request","warifu_reason":"iat_in_future"}`（割符は保留にする。時刻を偽って署名し直さない）。
   - 一時的に受け取れない：`429` か `5xx`（割符は、1分から6時間の間隔で送り直す）。そのほかの `4xx`、リダイレクト、`202` 以外の `2xx` は、割符が保留にする。
+  - 保留になったら、企業は受け口を直して、検証の SET を `POST /v1/events/verification` で頼む。検証の SET に `202` を返すと、割符は保留にした取消の SET を送り直す。割符の側の原因なら、割符が設定を直して配備し直す（[ADR 0026](../adr/0026-desk-step-up-details.md) の O-72）。受理済みの取消は、`cancellation-status` の `cancellation_pending` で確かめられる。
   - 割符は、`description` を読まない。
 
 ## 8. 代わりの手順

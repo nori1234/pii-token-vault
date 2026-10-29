@@ -16,7 +16,10 @@
 // - 429、5xx、つながらない、時間切れは、1分、5分、30分、2時間、6時間、以後6時間ごとに、少し揺らして送り直す。
 //   送り直すときに iat が4分より古ければ、新しい jti と iat にする（受け口の受信の規則の300秒に収めるため）。
 // - そのほか（iat_in_future、ほかの 4xx、リダイレクト、202 以外の 2xx、宛先の検査に通らない）は保留にする。
-//   保留は自動では解かない（時計、鍵、登録の確認が要る。運用で設定を直して配備し直す）。
+//   保留は、同じ設定のまま自動では解かない（時計、鍵、登録の確認が要る）。管理 API は作らない（不変条件2）。
+//   解くのは次の2つだけ（ADR 0026 の O-72）。解いたものは、0〜60秒の乱数の後に、新しい jti と iat で送る：
+//   - 割符の側で原因を直し、テナントの setDeliveryRevision を変えて配備し直したとき（保留にした時の版と違うもの）。
+//   - 企業が受け口を直して検証の SET を頼み、それが 202 で届いたとき（同じ受け口、同じ鍵で受け取れたことになる）。
 
 import {
   randomBytesOf,
@@ -24,7 +27,7 @@ import {
   type TenantId,
   toBase64Url,
 } from '@pii-token-vault/warifu-core';
-import { type Db, sql } from '@pii-token-vault/warifu-core/db';
+import { type Db, sql, type Tx } from '@pii-token-vault/warifu-core/db';
 import type { CompanyApiKeyClient } from '@pii-token-vault/warifu-core/keys/company-api';
 import type { Logger } from '@pii-token-vault/warifu-core/log';
 import type {
@@ -32,7 +35,7 @@ import type {
   WebhookResult,
 } from '@pii-token-vault/warifu-core/sender/client';
 import type { CompanyApiConfig, CompanyTenant } from './config.ts';
-import { cancellationEventOf } from './desk.ts';
+import { cancellationEventOf, initialDelayMs } from './desk.ts';
 import type { PublicKeyCache } from './jwt.ts';
 import { type SetContent, signSet } from './set.ts';
 
@@ -117,6 +120,31 @@ async function claim(deps: OutboxDeps, tenant: CompanyTenant): Promise<Claimed |
 
 type Outcome = 'delivered' | 'retry' | 'dropped' | 'reissue' | 'held';
 
+/**
+ * 保留にした取消の SET を解いて、送り直す（ADR 0026 の O-72）。revision を渡すと、保留にした時の版がそれと違うもの
+ * だけを解く（配備し直したとき）。渡さなければ、そのテナントの保留をすべて解く（検証の SET が 202 で届いたとき）。
+ * 解いた数を返す。withTenant の中で呼ぶ。
+ */
+async function resumeHeld(tx: Tx, now: Date, revision?: number): Promise<number> {
+  const rows = await tx.query<{ event_id: string }>(
+    revision === undefined
+      ? sql`SELECT event_id FROM company_api.set_outbox WHERE held FOR UPDATE`
+      : sql`SELECT event_id FROM company_api.set_outbox
+             WHERE held AND held_revision <> ${revision} FOR UPDATE`,
+  );
+  for (const row of rows) {
+    // 送るたびに独立の遅延にする（解いた時刻で、企業をまたいで突き合わせさせない。不変条件5）。
+    await tx.execute(
+      sql`UPDATE company_api.set_outbox
+             SET held = false, held_revision = ${null}, attempts = 0, reissues = 0,
+                 jti = ${null}, issued_at = ${null},
+                 deliver_after = ${new Date(now.getTime() + initialDelayMs())}
+           WHERE event_id = ${row.event_id}`,
+    );
+  }
+  return rows.length;
+}
+
 /** 取消の SET の結果を、送信待ちの扱いに分ける（ADR 0026 の O-67）。 */
 export function cancellationOutcomeOf(
   result: WebhookResult | undefined,
@@ -157,6 +185,11 @@ async function settle(
       const delivered = result?.ok === true;
       if (delivered || row.attempts >= MAX_ATTEMPTS) {
         await tx.execute(sql`DELETE FROM company_api.set_outbox WHERE event_id = ${row.event_id}`);
+        // 202 で届いたら、受け口が直ったものとして、保留にした取消の SET を送り直す（202 以外の 2xx では解かない）。
+        if (result?.ok === true && result.status === 202) {
+          const resumed = await resumeHeld(tx, now);
+          if (resumed > 0) deps.log.info({ event: 'company_api.set_resumed', count: resumed });
+        }
         return delivered ? 'delivered' : 'dropped';
       }
       const delay = RETRY_DELAYS_MS[row.attempts - 1] ?? RETRY_DELAYS_MS.at(-1) ?? LEASE_MS;
@@ -174,7 +207,9 @@ async function settle(
       case 'reissue': {
         if (row.reissues + 1 >= MAX_REISSUES) {
           await tx.execute(
-            sql`UPDATE company_api.set_outbox SET held = true, reissues = ${row.reissues + 1}
+            sql`UPDATE company_api.set_outbox
+                   SET held = true, held_revision = ${tenant.setDeliveryRevision},
+                       reissues = ${row.reissues + 1}
                  WHERE event_id = ${row.event_id}`,
           );
           return 'held';
@@ -199,7 +234,9 @@ async function settle(
       }
       case 'held':
         await tx.execute(
-          sql`UPDATE company_api.set_outbox SET held = true WHERE event_id = ${row.event_id}`,
+          sql`UPDATE company_api.set_outbox
+                 SET held = true, held_revision = ${tenant.setDeliveryRevision}
+               WHERE event_id = ${row.event_id}`,
         );
         return 'held';
     }
@@ -228,6 +265,11 @@ export async function deliverDue(
   if (deps.sender === undefined) return counts;
   for (const tenant of deps.config.tenants.values()) {
     if (tenant.suspended || tenant.webhookUrl === undefined) continue;
+    // 設定の版を変えて配備し直したら、前の版で保留にしたものを送り直す（ADR 0026 の O-72）。
+    const resumed = await deps.db.withTenant(tenant.tenantId, (tx) =>
+      resumeHeld(tx, deps.now(), tenant.setDeliveryRevision),
+    );
+    if (resumed > 0) deps.log.info({ event: 'company_api.set_resumed', count: resumed });
     for (let i = 0; i < BATCH; i += 1) {
       const row = await claim(deps, tenant);
       if (row === undefined) break;

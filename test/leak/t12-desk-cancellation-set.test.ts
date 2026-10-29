@@ -6,6 +6,7 @@ import { decodeJwt } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from '../../packages/warifu-core/src/db/sql.ts';
 import type { TenantId } from '../../packages/warifu-core/src/ids.ts';
+import { startTestCompanyApi } from '../setup/company-api.ts';
 import { serviceDb } from '../setup/db.ts';
 import {
   cancelDeskItem,
@@ -109,6 +110,35 @@ function eventOf(set: string) {
 
 async function deliver() {
   return world.company.api.deliverDue();
+}
+
+/** 同じテナントの登録で、company-api を配備し直す（SET の受け口の設定の版だけを変えられる。ADR 0026 の O-72）。 */
+async function redeploy(setDeliveryRevision: number) {
+  return startTestCompanyApi({
+    tenants: world.company.tenants.map((tenant) => ({
+      tenantId: tenant.tenantId,
+      relayDomain: tenant.relayDomain,
+      client: tenant.client,
+      ...(tenant.webhookUrl === undefined ? {} : { webhookUrl: tenant.webhookUrl }),
+      scopes: ['company_api', 'desk'] as const,
+      setDeliveryRevision,
+    })),
+    sender: {
+      socketPath: world.sender.sender.socketPath,
+      credential: world.sender.credentials['company-api'],
+    },
+    now: () => new Date(clock),
+  });
+}
+
+/** 受け口が 401 を返して、取消の SET を保留にする。変更ID を返す。 */
+async function heldChange(): Promise<string> {
+  await clearOutbox();
+  const changeId = await cancelledChange(0);
+  clock += 61_000;
+  world.sender.respondWith(401);
+  expect((await deliver()).held).toBe(1);
+  return changeId;
 }
 
 describe('漏えい：窓口の取消の SET の配送（plan 11章 テスト12）', () => {
@@ -236,6 +266,100 @@ describe('漏えい：窓口の取消の SET の配送（plan 11章 テスト12�
     expect(await outbox(0)).toEqual([expect.objectContaining({ held: true })]);
     world.sender.respondWith(202);
   });
+
+  it('保留にした取消の SET は、設定を変えずに配備し直しても送らず、設定の版を変えて配備し直すと送り直して届く', async () => {
+    // 攻撃者が持っている情報：なし（運用の場面。割符の側の登録の誤りで、受け口が 401 を返した。ADR 0026 の O-72）
+    // 試す経路：取消の SET を保留にした後、同じ設定のまま配備し直して送る。次に、テナントの setDeliveryRevision を
+    //           変えて配備し直して送る。企業は届いた取消の結果を報告する
+    // 期待する結果：同じ設定では送らない（保留のまま）。版を変えた配備では、0〜60秒の後に、新しい jti と iat で1回
+    //               送って届き（202）、送信待ちは消える。取消は受理されたままで、結果の報告は 204
+    // plan 11章：テスト12（ADR 0026 の O-67、O-72）
+    const changeId = await heldChange();
+    const [held] = await outbox(0);
+    world.sender.respondWith(202);
+    const same = await redeploy(0);
+    try {
+      clock += 61_000;
+      const before = world.sender.requests.length;
+      await same.api.deliverDue();
+      expect(world.sender.requests.length).toBe(before);
+      expect(await outbox(0)).toEqual([expect.objectContaining({ held: true })]);
+    } finally {
+      await same.stop();
+    }
+    const bumped = await redeploy(1);
+    try {
+      const before = world.sender.requests.length;
+      // 解いた直後は、ふつうは0〜60秒の遅延の中（遅延がちょうど0なら、同じ回で送る）。
+      const first = await bumped.api.deliverDue();
+      if (first.delivered === 0) {
+        const [resumed] = await outbox(0);
+        expect(resumed).toMatchObject({ held: false, reissues: 0, attempts: 0, jti: null });
+        clock += 61_000;
+        expect((await bumped.api.deliverDue()).delivered).toBe(1);
+      }
+      const sent = world.sender.requests.slice(before);
+      expect(sent).toHaveLength(1);
+      const { claims, event } = eventOf(String(sent[0]?.body));
+      expect(event?.change_id).toBe(changeId);
+      expect(claims.jti).not.toBe(held?.jti);
+      expect(Math.abs(Number(claims.iat) - Math.floor(clock / 1000))).toBeLessThanOrEqual(1);
+      expect(await outbox(0)).toEqual([]);
+      const token = await bumped.accessToken(bumped.tenants[0] as never, 'desk');
+      const applied = await bumped.request({
+        path: '/v1/desk/cancellation-results',
+        token,
+        json: {
+          change_id: changeId,
+          cancellation_id: String(event?.cancellation_id),
+          result: 'applied',
+        },
+      });
+      expect(applied.status).toBe(204);
+    } finally {
+      await bumped.stop();
+    }
+  });
+
+  it.each([
+    ['202', 202, 1],
+    ['202 でない 2xx（200）', 200, 0],
+  ] as const)(
+    '企業が検証の SET を頼み、%s で届いたときだけ、保留にした取消の SET を送り直す',
+    async (_name, status, resumed) => {
+      // 攻撃者が持っている情報：企業の正規のトークン（scope company_api）。受け口を直した企業（または、受け口を操れる
+      //                       立場で、保留を解かせたい者）
+      // 試す経路：取消の SET を保留にした後、企業が POST /v1/events/verification で検証の SET を頼み、受け口が
+      //           202（または 200）を返す。その後、0〜60秒を過ぎてから送る
+      // 期待する結果：202 で届いたときだけ保留を解き、取消の SET を新しい jti と iat で送って届く。200 では解かない
+      //               （202 だけを配送できたことにする規則と同じ）
+      // plan 11章：テスト12（ADR 0026 の O-67、O-72）
+      await heldChange();
+      const token = await world.company.accessToken(
+        world.company.tenants[0] as never,
+        'company_api',
+      );
+      const requested = await world.company.request({
+        path: '/v1/events/verification',
+        token,
+        json: {},
+      });
+      expect(requested.status).toBe(202);
+      const before = world.sender.requests.length;
+      world.sender.respondWith(status);
+      await deliver();
+      // 検証の SET は届いたことにして消える。取消の SET は、解いたときだけ保留でなくなる。
+      expect((await outbox(0)).filter((row) => row.held)).toHaveLength(1 - resumed);
+      world.sender.respondWith(202);
+      clock += 61_000;
+      await deliver();
+      const cancellations = world.sender.requests
+        .slice(before)
+        .filter((request) => eventOf(request.body).event !== undefined);
+      expect(cancellations).toHaveLength(resumed);
+      expect(await outbox(0)).toHaveLength(1 - resumed);
+    },
+  );
 
   it('5xx が続いても諦めずに送り直し、間が空いたら新しい iat で送る', async () => {
     // 攻撃者が持っている情報：受け口を止められる立場（企業の障害、または妨害）

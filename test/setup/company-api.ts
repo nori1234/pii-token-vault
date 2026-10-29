@@ -47,6 +47,8 @@ export interface TenantSpec {
   readonly client?: TestApiClient;
   /** クライアントに許す scope（既定は company_api だけ。窓口は desk。ADR 0026）。 */
   readonly scopes?: readonly ('company_api' | 'desk')[];
+  /** SET の受け口の設定の版（ADR 0026 の O-72）。 */
+  readonly setDeliveryRevision?: number;
 }
 
 export interface InjectResult {
@@ -150,6 +152,9 @@ export async function startTestCompanyApi(options: {
           },
         ],
         ...(t.webhookUrl === undefined ? {} : { webhookUrl: t.webhookUrl }),
+        ...(options.tenants[i]?.setDeliveryRevision === undefined
+          ? {}
+          : { setDeliveryRevision: options.tenants[i]?.setDeliveryRevision }),
       })),
     },
     keysvc: keysvcConnection('company-api'),
