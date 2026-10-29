@@ -7,9 +7,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLocalJWKSet, decodeProtectedHeader, type JSONWebKeySet, jwtVerify } from 'jose';
+import { sql } from '../../packages/warifu-core/src/db/sql.ts';
 import type { DeskAction } from '../../packages/warifu-core/src/desk/protocol.ts';
-import { parseTenantId } from '../../packages/warifu-core/src/ids.ts';
+import { parseTenantId, type WarifuUserId } from '../../packages/warifu-core/src/ids.ts';
 import { startTestCompanyApi, type TestCompanyApi } from './company-api.ts';
+import { serviceDb } from './db.ts';
 import {
   Browser,
   clientAssertion,
@@ -38,6 +40,11 @@ export interface DeskWorld {
   readonly t: TestIdp;
   readonly company: TestCompanyApi;
   readonly sender: TestSender;
+  /** company-api の窓口の内部 API のソケットと、idp の資格情報（`idp.<base64url>`）。 */
+  readonly deskSocketPath: string;
+  readonly deskCredential: string;
+  /** 利用者のいちばん新しい窓口の項目の、内部のレコード ID（idp と同じ境界で読む）。 */
+  changeRefOf(userId: WarifuUserId): Promise<string>;
   stop(): Promise<void>;
 }
 
@@ -87,10 +94,28 @@ export async function startDeskWorld(spec: {
       },
     },
   );
+  const deskSocketPath = join(dir, 'company-api.sock');
   return {
     t,
     company,
     sender,
+    deskSocketPath,
+    deskCredential: `idp.${secret.toString('base64url')}`,
+    async changeRefOf(userId) {
+      const db = await serviceDb('idp');
+      try {
+        const rows = await db.withWarifuUser(userId, (tx) =>
+          tx.query<{ change_ref: string }>(
+            sql`SELECT change_ref FROM idp.desk_items ORDER BY created_at DESC LIMIT 1`,
+          ),
+        );
+        const ref = rows[0]?.change_ref;
+        if (ref === undefined) throw new Error('窓口の項目がない');
+        return ref;
+      } finally {
+        await db.close();
+      }
+    },
     async stop() {
       await t.stop();
       await company.stop();

@@ -11,7 +11,8 @@
 //
 // 窓口の取消の SET（ADR 0026 の O-67）。取消は受理済みなので、諦めて消すことはしない：
 // - 202 だけを配送できたことにして消す。業務の取消の完了は、企業の cancellation-results で決まる。
-// - 400 の set_too_old は、同じ取消を、新しい jti と iat ですぐに送り直す。続けて3回なら保留にする。
+// - 400 の set_too_old は、同じ取消を、5秒の後に新しい jti と iat で送り直す（同じ回の中では送り直さない）。
+//   続けて3回なら保留にする（受け口の時計の狂いとみなす）。
 // - 429、5xx、つながらない、時間切れは、1分、5分、30分、2時間、6時間、以後6時間ごとに、少し揺らして送り直す。
 //   送り直すときに iat が4分より古ければ、新しい jti と iat にする（受け口の受信の規則の300秒に収めるため）。
 // - そのほか（iat_in_future、ほかの 4xx、リダイレクト、202 以外の 2xx、宛先の検査に通らない）は保留にする。
@@ -46,6 +47,8 @@ export const RETRY_DELAYS_MS: readonly number[] = Object.freeze([
 export const MAX_ATTEMPTS = RETRY_DELAYS_MS.length + 1;
 /** 取消の SET を、新しい jti と iat で続けて送り直せる回数（set_too_old。これを超えたら保留）。 */
 export const MAX_REISSUES = 3;
+/** set_too_old の後、送り直すまでの間。 */
+export const REISSUE_DELAY_MS = 5_000;
 /** 取消の SET の iat がこれより古ければ、送り直すときに新しい jti と iat にする。 */
 export const REISSUE_AGE_MS = 240_000;
 /** 借りている間（その間に送り終えなければ、次の回で送り直す）。 */
@@ -179,7 +182,8 @@ async function settle(
         // 次に借りるときに、新しい jti と iat にする。
         await tx.execute(
           sql`UPDATE company_api.set_outbox
-                 SET jti = ${null}, issued_at = ${null}, reissues = ${row.reissues + 1}, deliver_after = ${now}
+                 SET jti = ${null}, issued_at = ${null}, reissues = ${row.reissues + 1},
+                     deliver_after = ${new Date(now.getTime() + REISSUE_DELAY_MS)}
                WHERE event_id = ${row.event_id}`,
         );
         return 'reissue';

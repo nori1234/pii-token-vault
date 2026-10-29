@@ -215,6 +215,8 @@ describe('漏えい：窓口の操作別承認と中継（plan 11章 テスト1�
     //               報告の後、受信箱は「取り消しました」、企業の照会は cancelled
     // plan 11章：テスト1（D-07、D-10、D-14）
     const detail = deskDetail(victim.sub);
+    // 受信箱の項目は新しい順。同じ時刻に作ると順が決まらないので、時計を進めておく。
+    clock += 1000;
     const flow = await deskFlow(world, victim, client(), detail);
     const payload = await verifyOpApproval(world.t, String(flow.approvalJwt), {
       clientId: client().clientId,
@@ -292,6 +294,8 @@ describe('漏えい：窓口の操作別承認と中継（plan 11章 テスト1�
     //               cancellation_pending のまま。企業は未作成を報告でき、受信箱は「作成されませんでした」
     // plan 11章：テスト1（D-42、D-43）
     const detail = deskDetail(victim.sub);
+    // 受信箱の項目は新しい順。同じ時刻に作ると順が決まらないので、時計を進めておく。
+    clock += 1000;
     const flow = await deskFlow(world, victim, client(), detail);
     const { change_id: changeId } = decodeJwt(String(flow.approvalJwt));
     await victim.approval.approvalLogin();
@@ -334,6 +338,8 @@ describe('漏えい：窓口の操作別承認と中継（plan 11章 テスト1�
     // 期待する結果：取消は 409 で断る。企業の照会は closed_without_cancellation。受信箱は「受付を終えました」
     // plan 11章：テスト1（D-34）
     const detail = deskDetail(victim.sub);
+    // 受信箱の項目は新しい順。同じ時刻に作ると順が決まらないので、時計を進めておく。
+    clock += 1000;
     const flow = await deskFlow(world, victim, client(), detail);
     const { change_id: changeId } = decodeJwt(String(flow.approvalJwt));
     await companyCall('/v1/desk/change-notices', {
