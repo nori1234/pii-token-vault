@@ -48,6 +48,9 @@ export const REJECTED_AUTHORIZATION_PARAMS: readonly string[] = Object.freeze([
   'resource',
 ]);
 
+/** 窓口の承認の、仮のリソース（RAR に resource が要るため。ほかのリソースサーバーは置かない。ADR 0026）。 */
+export const DESK_RESOURCE = 'urn:warifu:desk';
+
 /** 割符の PAR の受け口が発行する request_uri の形（oidc-provider の urn と、nanoid の id）。 */
 export const PAR_REQUEST_URI_PATTERN = /^urn:ietf:params:oauth:request_uri:[A-Za-z0-9_-]{21,64}$/;
 
@@ -278,15 +281,26 @@ export function buildProvider(deps: ProviderDeps): Provider {
       userinfo: { enabled: false },
       introspection: { enabled: false },
       revocation: { enabled: false },
-      // RAR は resourceIndicators を有効にしないと使えない（oidc-provider 9.12.2 の checkDependantFeatures。
-      // ADR 0026）。リソースサーバーは1つも置かない：resource を付けた要求は、すべて invalid_target で断る。
+      // RAR は resourceIndicators を有効にしないと使えず、RAR の要求には resource が要る（oidc-provider 9.12.2 の
+      // checkDependantFeatures と check_resource。ADR 0026）。リソースサーバーは、窓口のための仮の DESK_RESOURCE だけを
+      // 置き、authorization_details のある要求にだけ既定で付ける。それ以外の resource は invalid_target で断る。
+      // アクセストークンは不透明で、受け付ける口はない（userinfo も introspection も無効）。
       resourceIndicators: {
         enabled: true,
-        defaultResource: () => undefined,
-        getResourceServerInfo: () => {
-          throw new errors.InvalidTarget();
+        defaultResource: (ctx: KoaContextWithOIDC, _client: unknown, oneOf?: string[]) => {
+          if (oneOf !== undefined) return oneOf;
+          return ctx.oidc.params?.authorization_details === undefined ? undefined : DESK_RESOURCE;
         },
-        useGrantedResource: () => false,
+        getResourceServerInfo: (_ctx: KoaContextWithOIDC, identifier: string) => {
+          if (identifier !== DESK_RESOURCE) throw new errors.InvalidTarget();
+          return {
+            scope: '',
+            audience: DESK_RESOURCE,
+            accessTokenFormat: 'opaque',
+            accessTokenTTL: TTL.AccessToken,
+          };
+        },
+        useGrantedResource: () => true,
       },
       claimsParameter: { enabled: false },
       clientCredentials: { enabled: false },

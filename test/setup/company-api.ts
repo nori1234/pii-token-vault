@@ -45,6 +45,8 @@ export interface TenantSpec {
   readonly webhookUrl?: string;
   readonly suspended?: boolean;
   readonly client?: TestApiClient;
+  /** クライアントに許す scope（既定は company_api だけ。窓口は desk。ADR 0026）。 */
+  readonly scopes?: readonly ('company_api' | 'desk')[];
 }
 
 export interface InjectResult {
@@ -60,8 +62,8 @@ export interface TestCompanyApi {
   readonly logs: string[];
   /** POST /token（client assertion の中身を変えられる）。 */
   token(tenant: TestTenant, form?: Record<string, string>): Promise<InjectResult>;
-  /** トークンを得る（失敗したら例外）。 */
-  accessToken(tenant: TestTenant): Promise<string>;
+  /** トークンを得る（失敗したら例外）。scope を省けば company_api。 */
+  accessToken(tenant: TestTenant, scope?: 'company_api' | 'desk'): Promise<string>;
   request(input: {
     readonly method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
     readonly path: string;
@@ -116,6 +118,11 @@ export async function startTestCompanyApi(options: {
   readonly tenants: readonly TenantSpec[];
   readonly sender?: SenderConnection;
   readonly now?: () => Date;
+  /** idp からの窓口の内部 API（ADR 0026）。 */
+  readonly deskInternal?: {
+    readonly socketPath: string;
+    readonly credentials: Readonly<Record<'idp', Uint8Array>>;
+  };
 }): Promise<TestCompanyApi> {
   const tenants: TestTenant[] = options.tenants.map((spec) => ({
     tenantId: spec.tenantId ?? parseTenantId(randomUUID()),
@@ -133,7 +140,15 @@ export async function startTestCompanyApi(options: {
         relayDomain: t.relayDomain,
         participation: 'full',
         ...(options.tenants[i]?.suspended === true ? { suspended: true } : {}),
-        apiClients: [{ clientId: t.client.clientId, jwks: { keys: [publicJwkOf(t.client)] } }],
+        apiClients: [
+          {
+            clientId: t.client.clientId,
+            jwks: { keys: [publicJwkOf(t.client)] },
+            ...(options.tenants[i]?.scopes === undefined
+              ? {}
+              : { scopes: options.tenants[i]?.scopes }),
+          },
+        ],
         ...(t.webhookUrl === undefined ? {} : { webhookUrl: t.webhookUrl }),
       })),
     },
@@ -141,6 +156,7 @@ export async function startTestCompanyApi(options: {
     db: { host: String(db.host), port: Number(db.port), database: String(db.database) },
     ...(options.sender === undefined ? {} : { sender: options.sender }),
     ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.deskInternal === undefined ? {} : { deskInternal: options.deskInternal }),
     logWrite: (line) => logs.push(line),
     deliveryIntervalMs: 0,
   });
@@ -159,10 +175,15 @@ export async function startTestCompanyApi(options: {
     tenants,
     logs,
     async token(tenant, form) {
+      // client assertion の iat と exp は、company-api の時計（options.now）に合わせる。
+      const nowSeconds = Math.floor((options.now?.() ?? new Date()).getTime() / 1000);
       const params = new URLSearchParams({
         grant_type: 'client_credentials',
         client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
-        client_assertion: await clientAssertion(tenant.client),
+        client_assertion: await clientAssertion(tenant.client, {
+          iat: nowSeconds,
+          exp: nowSeconds + 60,
+        }),
         ...form,
       });
       const res = await api.app.inject({
@@ -173,8 +194,8 @@ export async function startTestCompanyApi(options: {
       });
       return wrap(res);
     },
-    async accessToken(tenant) {
-      const res = await handle.token(tenant);
+    async accessToken(tenant, scope) {
+      const res = await handle.token(tenant, scope === undefined ? undefined : { scope });
       if (res.status !== 200) throw new Error(`トークンを得られない（${res.status}）`);
       return (res.json() as { access_token: string }).access_token;
     },

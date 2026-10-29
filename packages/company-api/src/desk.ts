@@ -314,7 +314,7 @@ export async function recordNotice(
   deps: DeskDeps,
   tenant: CompanyTenant,
   input: { readonly requestId: string; readonly changeId: string },
-): Promise<DeskRouteResult<{ state: DeskPublicState; cancel_closes_at: string | null }>> {
+): Promise<DeskRouteResult<{ state: DeskPublicState; cancel_deadline: string | null }>> {
   if (
     !DESK_REQUEST_ID_PATTERN.test(input.requestId) ||
     !DESK_EXTERNAL_ID_PATTERN.test(input.changeId)
@@ -355,7 +355,7 @@ export async function recordNotice(
     if (state === undefined) return { status: 409 } as const;
     return {
       status: 200,
-      body: { state, cancel_closes_at: deadline === null ? null : deadline.toISOString() },
+      body: { state, cancel_deadline: deadline === null ? null : deadline.toISOString() },
     } as const;
   });
 }
