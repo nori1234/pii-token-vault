@@ -10,6 +10,6 @@
   },
   "dependencies": {
     "@pii-token-vault/warifu-core": "0.0.0",
-    "nodemailer": "10.1.7"
+    "nodemailer": "10.2.0"
   }
 }
