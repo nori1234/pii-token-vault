@@ -22,7 +22,7 @@
     "migrate": "node scripts/migrate.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.15",
+    "@biomejs/biome": "2.6.2",
     "@playwright/test": "1.56.1",
     "@types/node": "22.20.5",
     "@types/pg": "8.23.1",
