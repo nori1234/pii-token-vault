@@ -22,6 +22,10 @@ const MAC_PURPOSES: readonly IdpMacPurpose[] = [
   'approval_challenge',
 ];
 
+/** id_token：ID トークン。op_approval：操作ごとの承認（ADR 0026）。 */
+export type IdpSigningKeyId = 'id_token' | 'op_approval';
+const SIGNING_KEY_IDS: readonly IdpSigningKeyId[] = ['id_token', 'op_approval'];
+
 export interface IdpKeyClient {
   encryptContact(input: {
     readonly userId: WarifuUserId;
@@ -34,10 +38,10 @@ export interface IdpKeyClient {
     readonly generation: number;
   }): Promise<string>;
   sign(
-    keyId: 'id_token',
+    keyId: IdpSigningKeyId,
     message: Uint8Array,
   ): Promise<{ readonly kid: string; readonly signature: Uint8Array }>;
-  publicKeys(keyId: 'id_token'): Promise<readonly Es256PublicJwk[]>;
+  publicKeys(keyId: IdpSigningKeyId): Promise<readonly Es256PublicJwk[]>;
 }
 
 export function createIdpKeyClient(connection: KeysvcConnection): IdpKeyClient {
@@ -61,11 +65,11 @@ export function createIdpKeyClient(connection: KeysvcConnection): IdpKeyClient {
     }) {
       return deriveAliasWith(call, input);
     },
-    sign(keyId: 'id_token', message: Uint8Array) {
-      return signEs256With(call, ['id_token'], keyId, message);
+    sign(keyId: IdpSigningKeyId, message: Uint8Array) {
+      return signEs256With(call, SIGNING_KEY_IDS, keyId, message);
     },
-    publicKeys(keyId: 'id_token') {
-      return publicKeysWith(call, ['id_token'], keyId);
+    publicKeys(keyId: IdpSigningKeyId) {
+      return publicKeysWith(call, SIGNING_KEY_IDS, keyId);
     },
   });
 }

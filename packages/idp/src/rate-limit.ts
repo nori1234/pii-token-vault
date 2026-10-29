@@ -1,11 +1,11 @@
 // 機能ごとのレート制限（plan 2章、CAP-34、ADR 0018）。窓の数え方は warifu-core の RateLimiter。
-// キーは「アカウント」「送信元（IP）」の2つを、機能ごとに組み合わせる。値は ADR 0018 と ADR 0023 の表を正とする。
+// キーは「アカウント」「送信元（IP）」の2つを、機能ごとに組み合わせる。値は ADR 0018、ADR 0023、ADR 0026 の表を正とする。
 
 import { RateLimiter as BaseRateLimiter, type LimitRule } from '@pii-token-vault/warifu-core';
 
 export type { LimitRule };
 
-/** ADR 0018 と ADR 0023 の表。 */
+/** ADR 0018、ADR 0023、ADR 0026 の表。 */
 export const RATE_LIMITS = Object.freeze({
   /** パスキーでアカウントを作る（IP ごと）。 */
   accountCreateByIp: { limit: 10, windowSeconds: 3600 },
@@ -23,6 +23,14 @@ export const RATE_LIMITS = Object.freeze({
   inboxByUser: { limit: 60, windowSeconds: 60 },
   /** 承認と拒否の選択肢の発行（利用者ごと。ADR 0023）。 */
   approvalByUser: { limit: 20, windowSeconds: 60 },
+  /** PAR の受け口（IP ごと。クライアントを確かめる前。ADR 0026 の O-70）。 */
+  parByIp: { limit: 120, windowSeconds: 60 },
+  /** PAR の受け口（クライアントごと。受け付けた後）。 */
+  parByClient: { limit: 60, windowSeconds: 60 },
+  /** 窓口の引き継ぎを作る（クライアントごと）。 */
+  deskByClient: { limit: 60, windowSeconds: 60 },
+  /** 窓口の作成の取消の選択肢（利用者ごと）。 */
+  deskCancelByUser: { limit: 10, windowSeconds: 60 },
 } satisfies Record<string, LimitRule>);
 
 export type LimitName = keyof typeof RATE_LIMITS;

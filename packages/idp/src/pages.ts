@@ -55,8 +55,11 @@ export function newNonce(bytes: Uint8Array): string {
 
 export interface PageInput {
   readonly nonce: string;
-  /** home は PWA、interaction は企業へのログイン、approval は承認用のオリジンの承認待ちの画面（ADR 0023）。 */
-  readonly page: 'home' | 'interaction' | 'approval';
+  /**
+   * home は PWA、interaction は企業へのログイン、approval は承認用のオリジンの承認待ちの画面（ADR 0023）、
+   * desk は承認用のオリジンの窓口での承認の画面（ADR 0026）。
+   */
+  readonly page: 'home' | 'interaction' | 'approval' | 'desk';
   /** インタラクションの uid（英数字と - _ だけ。interactionDetails で確かめた値）。 */
   readonly uid?: string;
   readonly prompt?: 'login' | 'consent';
@@ -65,6 +68,13 @@ export interface PageInput {
   /** 承認用のオリジン（設定の値）。PWA の受信箱から、承認待ちの画面へ案内するのに使う。 */
   readonly approvalOrigin?: string;
 }
+
+const TITLES: Readonly<Record<PageInput['page'], string>> = Object.freeze({
+  home: '割符',
+  interaction: '割符',
+  approval: '割符：確認待ち',
+  desk: '割符：窓口での確認',
+});
 
 export function renderPage(input: PageInput): string {
   const attrs = [`data-page="${input.page}"`];
@@ -83,7 +93,7 @@ export function renderPage(input: PageInput): string {
     '<head>',
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<title>${input.page === 'approval' ? '割符：確認待ち' : '割符'}</title>`,
+    `<title>${TITLES[input.page]}</title>`,
     '<link rel="stylesheet" href="/assets/app.css">',
     '</head>',
     '<body>',

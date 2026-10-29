@@ -138,8 +138,8 @@ export interface TestSender {
   readonly requests: ReceivedRequest[];
   readonly mails: ReceivedMail[];
   readonly logs: string[];
-  /** Webhook の受け口の応答を変える。 */
-  respondWith(status: number, headers?: Record<string, string>): void;
+  /** Webhook の受け口の応答を変える（本文の既定は `{}`）。 */
+  respondWith(status: number, headers?: Record<string, string>, body?: string): void;
   stop(): Promise<void>;
 }
 
@@ -151,7 +151,7 @@ export async function startTestSender(table: DnsTable, fixture: TlsFixture): Pro
   const requests: ReceivedRequest[] = [];
   const mails: ReceivedMail[] = [];
   const logs: string[] = [];
-  let response = { status: 202, headers: {} as Record<string, string> };
+  let response = { status: 202, headers: {} as Record<string, string>, body: '{}' };
 
   const https: HttpsServer = createHttpsServer(
     { cert: fixture.cert, key: fixture.key },
@@ -166,7 +166,7 @@ export async function startTestSender(table: DnsTable, fixture: TlsFixture): Pro
           body: Buffer.concat(chunks).toString('utf8'),
         });
         res.writeHead(response.status, response.headers);
-        res.end('{}');
+        res.end(response.body);
       });
     },
   );
@@ -220,8 +220,8 @@ export async function startTestSender(table: DnsTable, fixture: TlsFixture): Pro
     requests,
     mails,
     logs,
-    respondWith(status, headers = {}) {
-      response = { status, headers };
+    respondWith(status, headers = {}, body = '{}') {
+      response = { status, headers, body };
     },
     async stop() {
       await sender.close();

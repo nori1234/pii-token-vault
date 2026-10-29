@@ -164,6 +164,7 @@ describe('漏えい：送信サービスの SSRF 対策（plan 11章 テスト11
     };
     expect(await webhook().postSet({ url: `https://${WEBHOOK_HOST}/hook?x=1`, set: SET })).toEqual({
       ok: true,
+      status: 202,
     });
     expect(calls).toBe(1);
     expect(t.connections).toEqual([{ kind: 'tls', address: PUBLIC_V4 }]);
@@ -189,6 +190,7 @@ describe('漏えい：送信サービスの SSRF 対策（plan 11章 テスト11
       expect(await webhook().postSet({ url: `https://${WEBHOOK_HOST}/hook`, set: SET })).toEqual({
         ok: false,
         reason: 'redirect',
+        status,
       });
     }
     expect(t.connections).toHaveLength(2);
@@ -242,6 +244,67 @@ describe('漏えい：送信サービスの SSRF 対策（plan 11章 テスト11
     expect(t.mails).toHaveLength(1);
     expect(t.mails[0]?.to).toEqual(['u@mixed.example']);
     expect(t.mails[0]?.raw.equals(raw)).toBe(true);
+  });
+
+  it('受け口の 400 の本文から読むのは、SET の時刻の失敗の2つの値だけ（ADR 0026 の O-67）', async () => {
+    // 攻撃者が持っている情報：Webhook の受け口を操れる立場（悪意のあるテナント ATK-03）
+    // 試す経路：400 の本文に、set_too_old と iat_in_future、知らない理由、err の違い、JSON でない本文、
+    //           description に URL と SET を入れた本文を返す。200 と 500 も返す
+    // 期待する結果：決まった2つの値だけを setError で返し、ほかは status と reason だけ。description も本文も
+    //               呼び出し元に返さず、ログにも出さない。2xx は ok と status
+    // plan 11章：テスト11（テスト12の配送の応答の分類）
+    const url = `https://${WEBHOOK_HOST}/hook`;
+    const json = { 'content-type': 'application/json' };
+    const leak = `https://${WEBHOOK_HOST}/internal ${SET}`;
+    const cases: [number, Record<string, string>, string, object][] = [
+      [
+        400,
+        json,
+        JSON.stringify({ err: 'invalid_request', description: leak, warifu_reason: 'set_too_old' }),
+        { ok: false, reason: 'http_status', status: 400, setError: 'set_too_old' },
+      ],
+      [
+        400,
+        { 'content-type': 'application/json; charset=utf-8' },
+        JSON.stringify({ err: 'invalid_request', warifu_reason: 'iat_in_future' }),
+        { ok: false, reason: 'http_status', status: 400, setError: 'iat_in_future' },
+      ],
+      [
+        400,
+        json,
+        JSON.stringify({ err: 'invalid_request', warifu_reason: 'expired_token' }),
+        { ok: false, reason: 'http_status', status: 400 },
+      ],
+      [
+        400,
+        json,
+        JSON.stringify({ err: 'invalid_key', warifu_reason: 'set_too_old' }),
+        { ok: false, reason: 'http_status', status: 400 },
+      ],
+      [
+        400,
+        { 'content-type': 'text/plain' },
+        'warifu_reason=set_too_old',
+        { ok: false, reason: 'http_status', status: 400 },
+      ],
+      [
+        500,
+        json,
+        JSON.stringify({ warifu_reason: 'set_too_old' }),
+        {
+          ok: false,
+          reason: 'http_status',
+          status: 500,
+        },
+      ],
+      [200, json, '{}', { ok: true, status: 200 }],
+    ];
+    for (const [status, headers, body, expected] of cases) {
+      t.respondWith(status, headers, body);
+      expect(await webhook().postSet({ url, set: SET })).toEqual(expected);
+    }
+    t.respondWith(202);
+    expect(t.logs.join('\n')).not.toContain('internal');
   });
 
   it('ログに URL、宛先、アドレスを残さない', async () => {
