@@ -32,6 +32,16 @@ export interface WebhookRequest {
   readonly set: string;
 }
 
+/**
+ * 受け口が 400 で返した、SET の時刻だけの失敗（割符の受信の規則の補足。RFC 8935 の err は invalid_request。
+ * ADR 0026 の O-67）。sender は本文の err と warifu_reason だけを読み、description は読まない。
+ */
+export type SetTimeError = 'set_too_old' | 'iat_in_future';
+export const SET_TIME_ERRORS: readonly SetTimeError[] = Object.freeze([
+  'set_too_old',
+  'iat_in_future',
+]);
+
 /** 署名と封印を付けたメッセージを、宛先のドメインの MX に送る。raw は base64。 */
 export interface MailRequest {
   readonly mailFrom: string;

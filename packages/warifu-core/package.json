@@ -18,6 +18,8 @@
     "./relay/delivery": "./src/relay/delivery-client.ts",
     "./sender/protocol": "./src/sender/protocol.ts",
     "./sender/client": "./src/sender/client.ts",
+    "./desk/protocol": "./src/desk/protocol.ts",
+    "./desk/client": "./src/desk/client.ts",
     "./audit": "./src/audit/index.ts",
     "./log": "./src/log/index.ts"
   },

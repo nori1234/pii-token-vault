@@ -20,7 +20,7 @@ CREATE TABLE company_api.desk_changes (
   approved_at timestamptz NOT NULL,
   -- 作成の知らせを記録した時刻と、そこから決めた取消期限（割符の時計）。
   notice_at timestamptz,
-  cancel_deadline timestamptz,
+  cancel_closes_at timestamptz,
   -- 取消要求の内部のレコード ID と、受理した時刻（割符の時計）。外に出す取消要求ID は cancel_ref から導く。
   cancel_ref uuid,
   cancel_accepted_at timestamptz,
@@ -29,8 +29,8 @@ CREATE TABLE company_api.desk_changes (
   purge_after timestamptz,
   CONSTRAINT desk_changes_request_key UNIQUE (tenant_id, request_mac),
   CONSTRAINT desk_changes_change_key UNIQUE (tenant_id, change_mac),
-  CHECK ((notice_at IS NULL) = (cancel_deadline IS NULL)),
-  CHECK (cancel_deadline IS NULL OR cancel_deadline > notice_at),
+  CHECK ((notice_at IS NULL) = (cancel_closes_at IS NULL)),
+  CHECK (cancel_closes_at IS NULL OR cancel_closes_at > notice_at),
   CHECK ((cancel_ref IS NULL) = (cancel_accepted_at IS NULL)),
   CHECK ((state IN ('cancelled', 'not_created', 'closed')) = (terminal_at IS NOT NULL)),
   CHECK ((terminal_at IS NULL) = (purge_after IS NULL)),
@@ -98,9 +98,9 @@ CREATE POLICY idp_delete ON idp.desk_items FOR DELETE TO warifu_idp
 
 -- 列単位の権限。作った後に変えられるのは、状態と、その時刻と期限だけ（テナント、利用者、索引、操作は変えられない）。
 GRANT SELECT (change_ref, tenant_id, user_id, request_mac, change_mac, action, state, approved_at, notice_at,
-              cancel_deadline, cancel_ref, cancel_accepted_at, terminal_at, purge_after),
+              cancel_closes_at, cancel_ref, cancel_accepted_at, terminal_at, purge_after),
       INSERT (change_ref, tenant_id, user_id, request_mac, change_mac, action, state, approved_at),
-      UPDATE (state, notice_at, cancel_deadline, cancel_ref, cancel_accepted_at, terminal_at, purge_after)
+      UPDATE (state, notice_at, cancel_closes_at, cancel_ref, cancel_accepted_at, terminal_at, purge_after)
   ON company_api.desk_changes TO warifu_company_api;
 GRANT DELETE ON company_api.desk_changes TO warifu_company_api;
 

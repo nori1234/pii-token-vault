@@ -48,7 +48,7 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
         'action',
         'approved_at',
         'cancel_accepted_at',
-        'cancel_deadline',
+        'cancel_closes_at',
         'cancel_ref',
         'change_mac',
         'change_ref',
@@ -62,7 +62,7 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
       ],
       UPDATE: [
         'cancel_accepted_at',
-        'cancel_deadline',
+        'cancel_closes_at',
         'cancel_ref',
         'notice_at',
         'purge_after',
