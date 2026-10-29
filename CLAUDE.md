@@ -131,7 +131,7 @@ packages/relay        メール中継（decrypt できる唯一のサービス�
 packages/company-api  企業向け API
 packages/sender       送信サービス（外向きの通信の唯一の出口）
 packages/rp-kit       企業向け SDK と適合テスト
-packages/demo-rp      デモ用の予約サイトと窓口担当者の画面
+packages/demo-rp      デモ用の企業のサイト（A社はデモ証券、B社は予約サイト）と窓口担当者の画面
 test/leak             漏えいシナリオのテスト（書き方は test/leak/README.md）
 test/setup            Vitest の globalSetup、ワーカーごとの DB、idp の起動とソフトウェアの認証器
 scripts               開発用のスクリプト（pg-up、keysvc-up、migrate）
