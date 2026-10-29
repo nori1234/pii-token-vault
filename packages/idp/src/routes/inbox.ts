@@ -1,8 +1,10 @@
-// PWA（本来のオリジン）：受信箱の一覧と、知らせの既読（ADR 0023）。
+// PWA（本来のオリジン）：受信箱の一覧と、知らせの既読（ADR 0023）。窓口の作成の項目も出す（状態は company-api の
+// 正本から読む。取り消すのは承認用のオリジンだけ。ADR 0026 の O-68）。
 
 import { bodyOf, FAILED, RATE_LIMITED } from '../http.ts';
 import { type InboxItem, isItemId, listInbox, markNoticeRead, NOTICE_TYPES } from '../inbox.ts';
 import type { RouteContext } from './context.ts';
+import { deskItemEntries } from './desk.ts';
 
 export function registerInboxRoutes(ctx: RouteContext): void {
   const { app, onMain, repo, registry, approvalTypes, limiter } = ctx;
@@ -49,6 +51,7 @@ export function registerInboxRoutes(ctx: RouteContext): void {
       items: entries,
       pendingApprovals: entries.filter((e) => e.kind === 'approval' && e.state === 'pending')
         .length,
+      desk: await deskItemEntries(ctx, current.session.userId),
     };
   });
 

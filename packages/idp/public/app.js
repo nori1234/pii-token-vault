@@ -1,4 +1,5 @@
-// 割符の PWA（M3 の土台）と、承認用のオリジンの承認待ちの画面（M6。ADR 0023）。ブラウザで動く。
+// 割符の PWA（M3 の土台）と、承認用のオリジンの承認待ちの画面（M6。ADR 0023）と、窓口での承認の画面と窓口の作成の
+// 項目（M7。ADR 0026）。ブラウザで動く。
 // - 画面は DOM の API（createElement、textContent）だけで組む。文字列を HTML として解釈させない（Trusted Types は 'none'）。
 // - 判断はすべてサーバーで行う。ここには資格情報も鍵も置かない（plan 2章「ブラウザ側」）。
 // - 文言は DESIGN.md 4章（です・ます調、専門用語を出さない、登録済みかどうかが分かる書き方をしない）。
@@ -22,10 +23,24 @@
 
   // 固定の警告文（DESIGN.md 3章）。文言は変えない。〈〉の部分だけを、登録簿の企業名と、割符が決めた操作の種類で埋める。
   // サーバーからは警告文の ID だけを受け取る（FixedWarning は任意の文字列を受け取らない。DESIGN.md 6章）。
-  // M6 は端末での承認（A-2）だけ。窓口での承認（A-1）は、画面の必須要素とともに M7 で足す。
   const WARNINGS = Object.freeze({
+    'A-1':
+      'あなたが自分から〈企業名〉の公式窓口に連絡した場合だけ、操作と担当者を確認して承認してください。相手からかかってきた電話で求められた場合は、承認せず、公式窓口へ連絡し直してください。',
     'A-2':
       'この確認は、あなたが今この端末で〈操作の種類〉をしようとしている場合だけ承認してください。電話やメッセージで頼まれて承認してはいけません。',
+    E: 'あなたが窓口に連絡していないのに、この通知が届いた場合は、取り消してください。割符や企業が電話で『取り消さないでください』と頼むことはありません。',
+  });
+
+  /** 窓口の作成の項目の状態（ADR 0026 の O-68）。未着や期限切れだけで「作成されませんでした」とは出さない。 */
+  const DESK_STATE_TEXT = Object.freeze({
+    approving: '承認の処理中です',
+    awaiting_notice: '承認済み（作成の知らせ待ち）',
+    created: '作成されました',
+    cancel_requested: '取消を受け付けました（企業の確認待ち）',
+    cancelled: '取り消しました',
+    not_created: '作成されませんでした',
+    closed: '受付を終えました',
+    unknown: '状態を確かめられませんでした。しばらくしてから、もう一度お試しください。',
   });
 
   function el(tag, props, ...children) {
@@ -102,8 +117,11 @@
     return 'パスキーでの確認ができませんでした。もう一度お試しください。';
   }
 
-  /** WebAuthn の儀式を1回行う。optionsPath で選択肢を取り（body を添えて）、verifyPath に結果を送る。 */
-  async function ceremony(kind, optionsPath, verifyPath, body) {
+  /**
+   * WebAuthn の儀式を1回行う。optionsPath で選択肢を取り（body を添えて）、verifyPath に結果を送る
+   * （verifyBody があれば、それも添える）。
+   */
+  async function ceremony(kind, optionsPath, verifyPath, body, verifyBody) {
     const started = await call('POST', optionsPath, body);
     if (started.status !== 200) return started;
     let response;
@@ -115,7 +133,11 @@
     } catch {
       return { status: 400, data: {} };
     }
-    return call('POST', verifyPath, { ceremonyId: started.data.ceremonyId, response });
+    return call('POST', verifyPath, {
+      ...(verifyBody ?? {}),
+      ceremonyId: started.data.ceremonyId,
+      response,
+    });
   }
 
   async function stepUp() {
@@ -355,11 +377,38 @@
     expired: '期限が切れました',
   });
 
+  /** 窓口の作成の項目の1行（企業名、固定の操作型、状態、取消期限）。 */
+  function deskItemLines(item) {
+    return [
+      el('strong', {}, item.company),
+      el('span', {}, item.operation),
+      el('span', {}, DESK_STATE_TEXT[item.state] ?? DESK_STATE_TEXT.unknown),
+      item.state === 'created' && item.cancelDeadline
+        ? el('span', {}, `取消期限：${expiryText(item.cancelDeadline)}`)
+        : null,
+    ];
+  }
+
   /** 受信箱（DESIGN.md 2章）：承認待ちと知らせの一覧と、承認待ちの期限。文言はサーバーの型が決めたものだけ。 */
   function inboxList(inbox) {
-    if (inbox.items.length === 0) return el('p', {}, 'お知らせはありません。');
+    const desk = inbox.desk ?? [];
+    if (inbox.items.length === 0 && desk.length === 0) return el('p', {}, 'お知らせはありません。');
     const approvalUrl = approvalOriginUrl();
     const list = el('ul', { className: 'inbox' });
+    // 窓口の作成の項目。取り消すのは、承認用のオリジンの画面だけ（パスキーで確かめる。ADR 0026 の O-68）。
+    for (const item of desk) {
+      list.append(
+        el(
+          'li',
+          {},
+          ...deskItemLines(item),
+          item.state === 'created' ? fixedWarning(item.warning, { company: item.company }) : null,
+          item.cancellable && approvalUrl
+            ? el('a', { href: approvalUrl }, '取り消す（確認待ちの画面を開く）')
+            : null,
+        ),
+      );
+    }
     for (const item of inbox.items) {
       if (item.kind === 'approval') {
         const pending = item.state === 'pending';
@@ -622,9 +671,54 @@
     );
   }
 
+  /** 窓口の作成の取消（承認用のオリジン。パスキーで確かめる）。「心当たりがない」も同じ取消に、申告の案内を添える。 */
+  const cancelDesk = (item, unrecognized) => async () => {
+    const result = await ceremony(
+      'authenticate',
+      '/api/desk-items/cancel/options',
+      '/api/desk-items/cancel/verify',
+      { id: item.id },
+    );
+    if (result.status === 200) {
+      return renderApprovals(
+        unrecognized
+          ? `取消を受け付けました。心当たりがない場合は、${item.company}の公式窓口に、自分から連絡して、不正の疑いを申告してください。`
+          : '取消を受け付けました。',
+      );
+    }
+    if (result.status === 401 && result.data.error === 'login_required') {
+      return renderApprovalLogin('もう一度、パスキーで確かめてください。');
+    }
+    renderApprovals(
+      result.status === 409
+        ? '取消期限を過ぎたか、受付が終わっていたため、取り消せませんでした。'
+        : failureText(result),
+    );
+  };
+
+  /** 窓口の作成の項目（DESIGN.md 2章「窓口の承認済み・作成の知らせ待ち」「窓口での変更の通知」）。 */
+  function deskItemCard(item) {
+    return el(
+      'article',
+      { className: 'approval-card' },
+      ...deskItemLines(item),
+      item.state === 'created' ? fixedWarning(item.warning, { company: item.company }) : null,
+      item.cancellable
+        ? el(
+            'div',
+            { className: 'actions equal' },
+            el('button', { type: 'button', onclick: cancelDesk(item, false) }, '取り消す'),
+            el('button', { type: 'button', onclick: cancelDesk(item, true) }, '心当たりがない'),
+          )
+        : null,
+    );
+  }
+
   async function renderApprovals(note) {
     const result = await call('GET', '/api/approvals');
     if (result.status === 401) return renderApprovalLogin(note);
+    const deskResult = await call('GET', '/api/desk-items');
+    const deskItems = deskResult.status === 200 ? deskResult.data.items : [];
     const refresh = el(
       'button',
       { type: 'button', onclick: () => renderApprovals() },
@@ -640,6 +734,14 @@
     show(
       note ? status(note) : null,
       ...(cards.length === 0 ? [el('p', {}, '確認待ちはありません。')] : cards),
+      deskItems.length === 0
+        ? null
+        : el(
+            'section',
+            { 'aria-labelledby': 'desk-items-heading' },
+            el('h2', { id: 'desk-items-heading' }, '窓口での手続き'),
+            ...deskItems.map(deskItemCard),
+          ),
       refresh,
     );
     // 初期フォーカスは見出し（企業名）に置き、どのボタンにも置かない（DESIGN.md 原則4）。
@@ -647,8 +749,136 @@
     if (first) first.focus();
   }
 
+  // ---- 承認用のオリジン：窓口での承認（DESIGN.md 2章「窓口での承認（step-up）」、ADR 0026 の O-61） ----
+
+  /** 承認しなかったときの案内。理由は画面の案内と監査だけに使い、企業には区別して返さない。 */
+  const DECLINE_TEXT = Object.freeze({
+    denied: '承認しませんでした。企業の画面に戻ります。',
+    unrecognized:
+      'この申請を取りやめました。心当たりがない場合は、〈企業名〉の公式窓口に、自分から連絡して、不正の疑いを申告してください。',
+    incoming_call:
+      '承認しませんでした。相手からかかってきた電話で求められた操作は、承認しないでください。〈企業名〉の公式窓口に、自分から連絡し直してください。',
+  });
+
+  function renderDeskEnded(text) {
+    show(status(text));
+  }
+
+  async function renderDesk() {
+    const uid = window.location.hash.slice(1);
+    const loaded = /^[A-Za-z0-9_-]{1,64}$/.test(uid)
+      ? await call('POST', '/api/desk/view', { uid })
+      : { status: 400, data: {} };
+    if (loaded.status !== 200) {
+      return renderDeskEnded(
+        'この確認は、期限が切れたか、すでに終わっています。企業の画面から、もう一度お試しください。',
+      );
+    }
+    const card = loaded.data;
+    let answer = null;
+    const note = el('div');
+    const decline = (reason) => async () => {
+      const result = await call('POST', '/api/desk/decline', { uid, reason });
+      const text = DECLINE_TEXT[reason].replace('〈企業名〉', () => card.company);
+      if (result.status === 200 && typeof result.data.redirectTo === 'string') {
+        const target = result.data.redirectTo;
+        return show(
+          status(text),
+          el(
+            'button',
+            { type: 'button', onclick: () => window.location.assign(target) },
+            '企業の画面に戻る',
+          ),
+        );
+      }
+      renderDeskEnded(text);
+    };
+    const approve = async () => {
+      if (answer !== 'self') {
+        note.replaceChildren(status('先に、上の問いに答えてください。'));
+        return;
+      }
+      const result = await ceremony(
+        'authenticate',
+        '/api/desk/approve/options',
+        '/api/desk/approve/verify',
+        { uid, call: 'self' },
+        { uid },
+      );
+      if (go(result)) return;
+      note.replaceChildren(
+        status(
+          result.status === 429
+            ? failureText(result)
+            : 'パスキーでの確認ができませんでした。企業の画面でログインしているアカウントの割符で、もう一度お試しください。',
+        ),
+      );
+    };
+    const question = el(
+      'fieldset',
+      { className: 'question' },
+      el('legend', {}, 'この操作は、相手からかかってきた電話で求められていますか？'),
+      el(
+        'div',
+        { className: 'actions equal' },
+        el(
+          'button',
+          {
+            type: 'button',
+            onclick: () => {
+              answer = 'self';
+              note.replaceChildren(status('自分から公式窓口に連絡した、と答えました。'));
+            },
+          },
+          'いいえ、自分から公式窓口に連絡しました',
+        ),
+        el(
+          'button',
+          { type: 'button', onclick: decline('incoming_call') },
+          'はい、相手からかかってきました',
+        ),
+      ),
+    );
+    show(
+      el(
+        'article',
+        { className: 'approval-card', 'aria-labelledby': 'desk-company' },
+        el('h2', { id: 'desk-company', className: 'company', tabindex: '-1' }, card.company),
+        el('p', { className: 'operation' }, card.operation),
+        card.lines.length === 0
+          ? null
+          : el(
+              'dl',
+              {},
+              ...card.lines.flatMap((line) => [el('dt', {}, line.label), el('dd', {}, line.value)]),
+            ),
+        el('p', {}, `要求の時刻：${DATE.format(new Date(card.createdAt))}`),
+        el('p', {}, `要求の端末：${card.device}`),
+        el('p', {}, `期限：${expiryText(card.expiresAt)}`),
+        el('h3', {}, '窓口に許すこと'),
+        el('p', {}, card.scope),
+        el('p', {}, card.validity),
+        el('p', {}, card.change),
+        question,
+        fixedWarning(card.warning, { company: card.company }),
+        note,
+        el(
+          'div',
+          { className: 'actions equal' },
+          el('button', { type: 'button', onclick: approve }, '承認する'),
+          el('button', { type: 'button', onclick: decline('denied') }, '承認しない'),
+          el('button', { type: 'button', onclick: decline('unrecognized') }, '心当たりがない'),
+        ),
+      ),
+    );
+    // 初期フォーカスは見出し（企業名）に置き、どのボタンにも置かない（DESIGN.md 原則4）。
+    document.getElementById('desk-company')?.focus();
+  }
+
   if (root.dataset.page === 'approval') {
     void renderApprovals();
+  } else if (root.dataset.page === 'desk') {
+    void renderDesk();
   } else if (root.dataset.page === 'interaction') {
     const uid = root.dataset.uid ?? '';
     if (company) company.setAttribute('aria-label', '接続先の企業');
