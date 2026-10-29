@@ -1,4 +1,4 @@
-// idp の E2E（plan 10章 M3、ADR 0007、ADR 0018）。CDP の仮想認証器で、画面からパスキーを使う。
+// idp の E2E（plan 10章 M3・M6・M7、ADR 0007、ADR 0018、ADR 0026）。CDP の仮想認証器で、画面からパスキーを使う。
 // 一時的な Postgres、鍵サービス、idp を、このワーカーの中で起動する（webServer は使わない。企業の鍵をテストが持つため）。
 // 企業（RP）の役はテストが行い、redirect_uri への移動は、ブラウザが出した要求の URL から読む。
 //
@@ -110,6 +110,8 @@ test.beforeAll(async () => {
           clientId: CLIENT_ID,
           tenantId: TENANT.tenantId,
           redirectUris: [REDIRECT_URI],
+          // 窓口の照会だけを許す（作成は company-api の正本が要るので、Vitest の test/leak/t01・t12 で確かめる）。
+          deskActions: ['desk.case.status.read'],
           jwks: {
             keys: [
               {
@@ -177,15 +179,7 @@ function watchProblems(page: Page): string[] {
 async function redeem(callback: URL, verifier: string) {
   const code = callback.searchParams.get('code');
   if (code === null) throw new Error('認可コードがない');
-  const assertion = await new SignJWT({})
-    .setProtectedHeader({ alg: 'ES256', kid: 'rp-1' })
-    .setIssuer(CLIENT_ID)
-    .setSubject(CLIENT_ID)
-    .setAudience(idp.issuer)
-    .setIssuedAt()
-    .setExpirationTime('2m')
-    .setJti(randomUUID())
-    .sign(rpKey);
+  const assertion = await clientAssertion();
   const response = await fetch(`${idp.issuer}/token`, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -209,7 +203,77 @@ async function redeem(callback: URL, verifier: string) {
     audience: CLIENT_ID,
     algorithms: ['ES256'],
   });
-  return payload;
+  return Object.assign(payload, { tokenResponse: body });
+}
+
+async function clientAssertion(): Promise<string> {
+  return new SignJWT({})
+    .setProtectedHeader({ alg: 'ES256', kid: 'rp-1' })
+    .setIssuer(CLIENT_ID)
+    .setSubject(CLIENT_ID)
+    .setAudience(idp.issuer)
+    .setIssuedAt()
+    .setExpirationTime('2m')
+    .setJti(randomUUID())
+    .sign(rpKey);
+}
+
+/** 画面でアカウントを作って企業に接続し、企業別ID（sub）を返す（窓口の承認は、接続済みの利用者だけ）。 */
+async function connectThroughScreens(page: Page): Promise<string> {
+  const verifier = randomBytes(32).toString('base64url');
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: 'code',
+    scope: 'openid',
+    state: 'state-connect',
+    nonce: 'nonce-connect',
+    code_challenge: createHash('sha256').update(verifier).digest('base64url'),
+    code_challenge_method: 'S256',
+  });
+  await page.goto(`${idp.issuer}/auth?${params}`);
+  await page.getByRole('button', { name: '割符のアカウントを作る' }).click();
+  const [request] = await Promise.all([
+    page.waitForRequest((r) => r.url().startsWith(`${REDIRECT_URI}?`)),
+    page.getByRole('button', { name: '接続する' }).click(),
+  ]);
+  return String((await redeem(new URL(request.url()), verifier)).sub);
+}
+
+/** 企業のサーバーの役で、窓口の申請を PAR で登録する（ADR 0025、ADR 0026 の O-60）。 */
+async function pushDeskRequest(sub: string, requestId: string) {
+  const verifier = randomBytes(32).toString('base64url');
+  const response = await fetch(`${idp.issuer}/request`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: CLIENT_ID,
+      response_type: 'code',
+      redirect_uri: REDIRECT_URI,
+      scope: 'openid',
+      state: 'state-desk',
+      nonce: 'nonce-desk',
+      code_challenge: createHash('sha256').update(verifier).digest('base64url'),
+      code_challenge_method: 'S256',
+      authorization_details: JSON.stringify([
+        {
+          type: 'warifu_desk',
+          actions: ['desk.case.status.read'],
+          identifier: requestId,
+          subject: sub,
+        },
+      ]),
+      client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+      client_assertion: await clientAssertion(),
+    }),
+  });
+  const body = (await response.json()) as Record<string, unknown>;
+  expect(response.status).toBe(201);
+  const authorize = new URLSearchParams({
+    client_id: CLIENT_ID,
+    request_uri: String(body.request_uri),
+  });
+  return { url: `${idp.issuer}/auth?${authorize}`, verifier };
 }
 
 test('企業のログイン：画面でアカウントを作り、接続に同意し、企業に戻る', async ({ page }) => {
@@ -364,5 +428,135 @@ test('承認用のオリジン：受信箱から承認待ちを開き、パス�
 
   await page.goto(`${origin}/`);
   await expect(page.getByText('承認しました', { exact: true })).toBeVisible();
+  expect(problems, 'CSP 違反やスクリプトのエラーがない').toEqual([]);
+});
+
+test('窓口での承認：公式窓口に自分から連絡した利用者が、承認用のオリジンでパスキーで承認する', async ({
+  page,
+}) => {
+  // 攻撃者が持っている情報：なし（正規の利用者の流れ。DESIGN.md 2章「窓口での承認（step-up）」の画面を確かめる）
+  // 試す経路：画面で企業に接続する → 企業のサーバーが PAR で照会の申請を登録する → 利用者が認可の画面に来る →
+  //           承認用のオリジンの /desk に移る → 問いに答えずに承認を押す → 「いいえ、自分から公式窓口に連絡しました」→
+  //           承認する（UV 付きのパスキー）→ 企業の redirect_uri
+  // 期待する結果：承認画面に、登録簿の企業名（初期フォーカス）、割符の固定の操作名と用途の文、有効期間、要求の時刻と
+  //               端末、問い、警告文 A-1（DESIGN.md の文言のまま）、同じ大きさの3つのボタンが出る。問いに答える前は
+  //               承認に進まない。承認すると企業に戻り、トークンの応答に、申請に結び付いた操作ごとの承認（ES256、
+  //               typ warifu-op-approval+jwt、aud は企業、sub は接続済みの企業別ID）が入る。CSP の違反はない
+  // plan 11章：テスト1（窓口の承認の基本の流れ。中継の拒否は test/leak/t01-desk-relay.test.ts）
+  const problems = watchProblems(page);
+  await addVirtualAuthenticator(page);
+  const sub = await connectThroughScreens(page);
+  const requestId = randomBytes(16).toString('base64url');
+  const pushed = await pushDeskRequest(sub, requestId);
+  await page.goto(pushed.url);
+  await expect(page).toHaveURL(new RegExp(`^${approvalOrigin}/desk#`));
+
+  const card = page.getByRole('article');
+  await expect(card.getByRole('heading', { name: TENANT.displayName })).toBeFocused();
+  await expect(card.getByText('問い合わせ1件の状態を窓口に伝える', { exact: true })).toBeVisible();
+  await expect(
+    card.getByText(
+      '窓口の担当者に、あなたが企業の画面で選んだ問い合わせ1件の状態（受付済み、対応中、完了など）だけを伝えます。問い合わせの内容や履歴は伝えません。',
+    ),
+  ).toBeVisible();
+  await expect(
+    card.getByText('承認してから5分の間、この1回の操作にだけ使えます。', { exact: true }),
+  ).toBeVisible();
+  await expect(card.getByText(/^要求の時刻：/)).toBeVisible();
+  await expect(card.getByText(/^要求の端末：/)).toBeVisible();
+  await expect(card.getByRole('group')).toContainText(
+    'この操作は、相手からかかってきた電話で求められていますか？',
+  );
+  await expect(card.getByRole('note')).toContainText(
+    `あなたが自分から${TENANT.displayName}の公式窓口に連絡した場合だけ、操作と担当者を確認して承認してください。相手からかかってきた電話で求められた場合は、承認せず、公式窓口へ連絡し直してください。`,
+  );
+  await expect(card).not.toContainText(requestId);
+  await expect(card).not.toContainText(sub);
+  const approve = card.getByRole('button', { name: '承認する' });
+  const boxes = await Promise.all(
+    [
+      approve,
+      card.getByRole('button', { name: '承認しない' }),
+      card.getByRole('button', { name: '心当たりがない' }),
+    ].map((button) => button.boundingBox()),
+  );
+  for (const box of boxes) {
+    expect(Math.round(box?.width ?? 0)).toBe(Math.round(boxes[0]?.width ?? 1));
+    expect(Math.round(box?.height ?? 0)).toBe(Math.round(boxes[0]?.height ?? 1));
+  }
+
+  await approve.click();
+  await expect(card.getByRole('status')).toHaveText('先に、上の問いに答えてください。');
+  await card.getByRole('button', { name: 'いいえ、自分から公式窓口に連絡しました' }).click();
+  const [request] = await Promise.all([
+    page.waitForRequest((r) => r.url().startsWith(`${REDIRECT_URI}?`)),
+    approve.click(),
+  ]);
+  const callback = new URL(request.url());
+  expect(callback.searchParams.get('state')).toBe('state-desk');
+  const claims = await redeem(callback, pushed.verifier);
+  expect(claims.sub).toBe(sub);
+  const details = claims.tokenResponse.authorization_details as Record<string, unknown>[];
+  expect(details).toHaveLength(1);
+  const discovery = (await (
+    await fetch(`${idp.issuer}/.well-known/openid-configuration`)
+  ).json()) as Record<string, unknown>;
+  const opJwks = createLocalJWKSet(
+    (await (await fetch(String(discovery.warifu_op_approval_jwks_uri))).json()) as JSONWebKeySet,
+  );
+  const { payload } = await jwtVerify(String(details[0]?.approval), opJwks, {
+    issuer: idp.issuer,
+    audience: CLIENT_ID,
+    algorithms: ['ES256'],
+    typ: 'warifu-op-approval+jwt',
+  });
+  expect(payload).toMatchObject({
+    sub,
+    purpose: 'desk',
+    action: 'desk.case.status.read',
+    request_id: requestId,
+    acr: 'urn:warifu:acr:passkey',
+  });
+  expect(payload.change_id).toBeUndefined();
+  expect(problems, 'CSP 違反やスクリプトのエラーがない').toEqual([]);
+});
+
+test('窓口での承認：相手からかかってきた電話だと答えると、パスキーなしで終わり、企業には access_denied', async ({
+  page,
+}) => {
+  // 攻撃者が持っている情報：利用者の別名と企業別ID（漏えいした）。企業を名乗って利用者に電話をかけ、窓口の申請を
+  //                       承認させようとする（plan 1-2「窓口でのリアルタイム中継」）
+  // 試す経路：企業のサーバーが PAR で申請を登録した後、利用者が承認用のオリジンで「はい、相手からかかってきました」を選ぶ
+  //           → 「企業の画面に戻る」
+  // 期待する結果：パスキーを求めずに終わり、相手からの電話で求められた操作は承認しないこと、公式窓口へ自分から連絡し直す
+  //               ことを、登録簿の企業名で案内する。企業には error=access_denied だけが返り、承認しなかった理由は区別
+  //               できない。同じ申請の画面を開き直しても、承認に進めない
+  // plan 11章：テスト1（中継の場面。ADR 0026 の O-61）
+  const problems = watchProblems(page);
+  await addVirtualAuthenticator(page);
+  const sub = await connectThroughScreens(page);
+  const pushed = await pushDeskRequest(sub, randomBytes(16).toString('base64url'));
+  await page.goto(pushed.url);
+  const card = page.getByRole('article');
+  await expect(card.getByRole('heading', { name: TENANT.displayName })).toBeFocused();
+  const deskUrl = page.url();
+  await card.getByRole('button', { name: 'はい、相手からかかってきました' }).click();
+  await expect(page.getByRole('status')).toHaveText(
+    `承認しませんでした。相手からかかってきた電話で求められた操作は、承認しないでください。${TENANT.displayName}の公式窓口に、自分から連絡し直してください。`,
+  );
+  const [request] = await Promise.all([
+    page.waitForRequest((r) => r.url().startsWith(`${REDIRECT_URI}?`)),
+    page.getByRole('button', { name: '企業の画面に戻る' }).click(),
+  ]);
+  const callback = new URL(request.url());
+  expect(callback.searchParams.get('error')).toBe('access_denied');
+  expect(callback.searchParams.get('code')).toBeNull();
+  expect(callback.searchParams.get('state')).toBe('state-desk');
+
+  await page.goto(deskUrl);
+  await expect(page.getByRole('status')).toHaveText(
+    'この確認は、期限が切れたか、すでに終わっています。企業の画面から、もう一度お試しください。',
+  );
+  await expect(page.getByRole('button', { name: '承認する' })).toHaveCount(0);
   expect(problems, 'CSP 違反やスクリプトのエラーがない').toEqual([]);
 });
