@@ -1,4 +1,4 @@
-// idp：OIDC、パスキー、step-up、PWA（M3）。端末の受信箱と承認用のオリジン（M6）。CIBA は M7、回復は M8。
+// idp：OIDC、パスキー、step-up、PWA（M3）。端末の受信箱と承認用のオリジン（M6）。窓口の操作別 step-up は M7、回復は M8。
 
 export { createIdp, type Idp, type IdpOptions } from './app.ts';
 export {

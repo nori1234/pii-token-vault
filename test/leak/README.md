@@ -100,27 +100,23 @@ M5 で、company-api と送信サービスのテストを足した（ADR 0022）
 ## ひな形
 
 ```ts
-// 攻撃者が持っている情報：利用者の A社での sub と、A社が受け取った本物の ID トークン（A社が侵害された場面）
-// 試す経路：A社の資格情報で CIBA を始め、login_hint に sub を、id_token_hint に ID トークンを入れる
-// 期待する結果：どちらも 400 invalid_request で拒否する。利用者の端末の受信箱には何も届かない
-// plan 11章：テスト2
+// 攻撃者が持っている情報：他の応対を指す受付番号だけ
+// 試す経路：企業の窓口 API で受付番号を提示し、承認なしで個別情報を照会する
+// 期待する結果：403 forbidden、個別情報を返さず、業務変更や権限発行もない
+// plan 11章：テスト1・2
 import { describe, expect, it } from 'vitest';
 
-describe('漏えい：CIBA の hint（plan 11章 テスト2）', () => {
-  it('sub を login_hint に入れた要求を、400 invalid_request で拒否する', async () => {
-    // 準備：テナント、クライアント、利用者を作る。値は、テストの中で乱数から作る。
-    // 攻撃：攻撃者が持っている情報だけを使って、試す経路を呼ぶ。
-    const response = await startCiba({ login_hint: leakedSub });
-    // 拒否：ステータスと本文を確かめる。
-    expect(response.status).toBe(400);
-    expect(response.body.error).toBe('invalid_request');
-    // 副作用：受信箱、監査ログ、DB に、攻撃の結果が残っていないことを確かめる。
-    expect(await inboxCount(user)).toBe(0);
+describe('漏えい：受付番号だけでは許可しない（テスト1・2）', () => {
+  it('承認のない照会を403で拒否する', async () => {
+    const response = await requestDeskOperation({ receiptCode: leakedReceiptCode });
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('forbidden');
+    expect(await authorizedOperationCount()).toBe(0);
   });
 });
 ```
 
-`startCiba`、`leakedSub`、`inboxCount`、`user` は、説明のための仮の名前。
+`requestDeskOperation`、`leakedReceiptCode`、`authorizedOperationCount` は説明のための仮の名前。実際のルートと応答は実装時に確定し、この例を通過済みのテストとは扱わない。
 
 ## 書き方の決まり
 
@@ -141,7 +137,7 @@ describe('漏えい：CIBA の hint（plan 11章 テスト2）', () => {
 | M3 | テスト4の前半、テスト10（登録時の応答） |
 | M4（Gate A） | テスト5、テスト10（SMTP の RCPT への応答） |
 | M5 | テスト4の後半、テスト6、テスト11 |
-| M7（Gate B） | テスト1、テスト2、テスト4（CIBA のクライアントの sub）、テスト6（窓口コードと CIBA のレート制限） |
+| M7（Gate B） | テスト1、テスト2、テスト4、テスト6（受付番号と窓口の承認のレート制限） |
 | M8（Gate C） | テスト3、テスト6（回復のレート制限）、テスト10（回復時の応答） |
 | M9 | テスト9（移行中の参加の表示と、検査の分け方を含む。ADR 0010）、テスト12 |
 | M10（Gate D） | テスト7、SSRF、利用者どうしの BOLA |
