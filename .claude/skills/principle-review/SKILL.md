@@ -64,6 +64,9 @@ rg -n 'CIBA|ciba|login_hint|receiptCode|desk' packages/ spikes/
 # 観点7：sender 以外からの外向きの通信
 grep -rnE "fetch\(|https?\.(request|get)\(|net\.connect|tls\.connect|dns\.|from ['\"](undici|got|axios|node-fetch|ky|web-push)['\"]|createTransport" packages/ spikes/ | grep -v '^packages/sender/'
 
+# 観点7：oidc-provider の認可要求の受け方（PAR、要求オブジェクト、POST の認可要求、入口の検査。ADR 0025）
+grep -rnE "pushedAuthorizationRequests|requestObjects|enableHttpPostMethods|richAuthorizationRequests|REJECTED_AUTHORIZATION_PARAMS" packages/ spikes/
+
 # 観点8：DB の境界を広げる書き方（マイグレーションと、テストの中の文字列）
 grep -rniE 'SECURITY DEFINER|USING \(true\)|GRANT .* ON .* TO|BYPASSRLS|DISABLE ROW LEVEL' packages/ test/ scripts/
 

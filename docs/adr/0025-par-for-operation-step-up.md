@@ -36,6 +36,9 @@ PAR を使うには、不変条件7の文言を変える必要がある。この
 - **企業をまたいだ流用**：PAR が作る要求は、`iss` を登録したクライアントにした要求オブジェクトになる。別の `client_id` で使うと、検証で拒否される（`process_request_object.js`）。
 - **URL の他の項目**：`request_uri` を使った要求では、PAR で送られなかった項目は捨てられる。URL にほかの項目を付けても、混ざらない。
 - **使い捨てになるタイミング**：保存先の値が消費されるのは、認可の応答を返すときである（`lib/actions/authorization/respond.js`）。読み込んでから応答するまでの間（最長60秒）は、同じ値で別のインタラクションを始められる。
+- **受け付ける項目の一覧**（`getAuthorizationParams`）：
+  - `claims` は、`claimsParameter` を無効にしてあれば一覧に入らず、エラーにならずに捨てられる。
+  - `authorization_details` は、RAR を有効にすると、PAR の受け口だけでなく認可の入口（GET）でも受け付けられる。URL に載せた要求は、ライブラリでは止まらない。
 - **PAR を必須にする設定**：全体の `requirePushedAuthorizationRequests` と、クライアントごとの `require_pushed_authorization_requests` がある。`allowUnregisteredRedirectUris` は既定で false。
 
 RFC 9126（PAR）と FAPI 2.0 の原文は、この環境から照合できていない（`docs/standards.md`）。この ADR の判断は、上のライブラリの動きと、不変条件だけを根拠にする。
@@ -54,7 +57,7 @@ A を採る。不変条件7が防ごうとしているのは、割符に外の U
 
 ### 方式（O-50）
 
-- `authorization_details` を付けた認可の要求は、PAR だけで受け取る。認可の入口（GET）の URL に `authorization_details` を付けた要求は、`request_uri` の有無にかかわらず、入口で 400 にする。
+- `authorization_details` を付けた認可の要求は、PAR だけで受け取る。認可の入口（GET）の URL に `authorization_details` を付けた要求は、`request_uri` の有無にかかわらず、入口で 400 にする。RAR を有効にすると、ライブラリは URL の `authorization_details` も受け付けるので（上の「確かめたこと」）、この入口の検査がないと、申請に結び付く値が URL に載る要求が通ってしまう。
 - ログインの要求（`authorization_details` なし）は、いまの GET のままでよい。PAR で送ってもよい。すべての要求に PAR を必須にするかは、P1 で FAPI 2.0 への対応と一緒に決める。
 - POST の認可要求は使わない。OIDC のクッキーは `SameSite=Lax` のままにする。
 - 要求オブジェクト（`request`）は、これまでどおり無効にする（ADR 0018）。
@@ -73,7 +76,7 @@ A を採る。不変条件7が防ごうとしているのは、割符に外の U
 
 - パスは、oidc-provider の既定の `<issuer>/request`（`/oidc/request`）にする。ルートが1つ増えるので、`test/leak/x-idp-routes` の一覧に足し、`test/leak/` にテストを足す（不変条件12）。
 - クライアントの認証は `private_key_jwt`（ES256）だけ。client assertion の `aud` は issuer だけにする（ADR 0006、ADR 0018）。
-- 認可の入口で拒否しているもの（`id_token_hint`、`request`、`request_uri`、`registration`、`claims`）は、PAR の受け口でも拒否する。
+- 認可の入口で拒否しているもののうち、`id_token_hint`、`request`、`request_uri`、`registration` は、PAR の受け口でも拒否する。`claims` は、`claimsParameter` を無効にしてあるので、受け口では捨てられ、効き目がない（拒否はされない）。
   - この受け口では、oidc-provider が中で本文を読む（Fastify のボディ解析を通さない）。そのため、oidc-provider の検査と設定で止める。
   - 割符は自分の ID トークンを検証する鍵を持たない（ADR 0018）。`id_token_hint` が 500 にならずに 400 になることを、M7 のテストで固定する。
 - 有効期間は60秒（oidc-provider の上限のまま）にする。
@@ -122,7 +125,7 @@ A を採る。不変条件7が防ごうとしているのは、割符に外の U
 |---|---|---|
 | O-50 | 方式 | `authorization_details` を付けた要求は PAR だけ。ログインは GET のままでよい。POST の認可要求と要求オブジェクトは使わない |
 | O-51 | 受け付ける `request_uri` | 割符の PAR が発行した urn だけ。入口で形を確かめる。不変条件4のトークンに加える |
-| O-52 | PAR の受け口 | `/oidc/request`。`private_key_jwt` だけ。入口と同じものを拒否する。60秒。型は1件だけ。企業ごとのレート制限 |
+| O-52 | PAR の受け口 | `/oidc/request`。`private_key_jwt` だけ。`id_token_hint`・`request`・`request_uri`・`registration` を拒否する（`claims` は捨てられる）。60秒。型は1件だけ。企業ごとのレート制限 |
 | O-53 | 応答までの再利用 | 主体の照合で止める。ライブラリは書き換えない |
 | O-54 | 保存 | メモリだけ。鍵は MAC。永続化は P1 |
 | O-55 | 企業の手順 | サーバーから PAR を送り、ブラウザには `request_uri` と `client_id` だけを渡す |
