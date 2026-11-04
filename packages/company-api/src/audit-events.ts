@@ -27,3 +27,6 @@ export const DESK_NOT_CREATED = defineAuditEvent('company_api.desk.not_created',
 
 /** 取消期限を過ぎ、取消なしで受付を終えた。 */
 export const DESK_CLOSED = defineAuditEvent('company_api.desk.closed', {});
+
+/** 利用者の回復の成立を、このテナントへの送信待ちに入れた（idp の内部 API から。ADR 0027 の O-81）。 */
+export const RECOVERY_NOTIFIED = defineAuditEvent('company_api.recovery.notified', {});

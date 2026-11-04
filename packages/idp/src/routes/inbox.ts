@@ -5,6 +5,7 @@ import { bodyOf, FAILED, RATE_LIMITED } from '../http.ts';
 import { type InboxItem, isItemId, listInbox, markNoticeRead, NOTICE_TYPES } from '../inbox.ts';
 import type { RouteContext } from './context.ts';
 import { deskItemEntries } from './desk.ts';
+import { recoverySummary } from './recovery.ts';
 
 export function registerInboxRoutes(ctx: RouteContext): void {
   const { app, onMain, repo, registry, approvalTypes, limiter } = ctx;
@@ -52,6 +53,8 @@ export function registerInboxRoutes(ctx: RouteContext): void {
       pendingApprovals: entries.filter((e) => e.kind === 'approval' && e.state === 'pending')
         .length,
       desk: await deskItemEntries(ctx, current.session.userId),
+      // 進行中の回復（ADR 0027）。取り消すのは承認用のオリジン（警告文 F）。
+      recovery: await recoverySummary(ctx, current.session.userId),
     };
   });
 

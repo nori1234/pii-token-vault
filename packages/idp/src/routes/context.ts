@@ -47,6 +47,8 @@ export interface RouteContext {
   readonly provider: Provider;
   /** company-api の窓口の内部 API（ADR 0026）。なければ、窓口の作成と取消を受け付けない。 */
   readonly desk: DeskClient | undefined;
+  /** 協力者の承認から回復が成立するまでの待機（秒。ADR 0027 の O-77）。 */
+  readonly recoveryWaitSeconds: number;
   readonly assets: Assets;
   readonly nowMs: () => number;
   /** HTML を返す。CSP の nonce を作って、onSend の CSP に渡す。 */

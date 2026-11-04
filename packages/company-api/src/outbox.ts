@@ -9,7 +9,8 @@
 // - 2xx で消す。送れなければ、間を空けて送り直す（1分、5分、30分、2時間、6時間）。6回送れなければ諦めて消し、
 //   その数だけをログに残す。jti と iat は初めて送るときに決め、送り直しでも同じにする。
 //
-// 窓口の取消の SET（ADR 0026 の O-67）。取消は受理済みなので、諦めて消すことはしない：
+// 窓口の取消の SET（ADR 0026 の O-67）と、回復の SET（ADR 0027 の O-81）。どちらも、取消や回復はもう決まったこと
+// なので、諦めて消すことはしない（扱いは同じ）：
 // - 202 だけを配送できたことにして消す。業務の取消の完了は、企業の cancellation-results で決まる。
 // - 400 の set_too_old は、同じ取消を、5秒の後に新しい jti と iat で送り直す（同じ回の中では送り直さない）。
 //   続けて3回なら保留にする（受け口の時計の狂いとみなす）。
@@ -37,6 +38,7 @@ import type {
 import type { CompanyApiConfig, CompanyTenant } from './config.ts';
 import { cancellationEventOf, initialDelayMs } from './desk.ts';
 import type { PublicKeyCache } from './jwt.ts';
+import { recoveredEventOf } from './recovery.ts';
 import { type SetContent, signSet } from './set.ts';
 
 /** 送り直しまでの間（回数ごと）。検証の SET は、最後の回で送れなければ諦める。 */
@@ -84,9 +86,11 @@ export async function enqueueEvent(
 
 interface Claimed {
   readonly event_id: string;
-  readonly event_type: 'verification' | 'desk_cancellation';
+  readonly event_type: 'verification' | 'desk_cancellation' | 'account_recovered';
   readonly state: string | null;
   readonly change_ref: string | null;
+  readonly user_id: string | null;
+  readonly recovered_day: string | null;
   readonly jti: string;
   readonly issued_at: Date;
   readonly attempts: number;
@@ -102,9 +106,9 @@ async function claim(deps: OutboxDeps, tenant: CompanyTenant): Promise<Claimed |
       sql`UPDATE company_api.set_outbox
              SET attempts = attempts + 1,
                  deliver_after = ${new Date(now.getTime() + LEASE_MS)},
-                 jti = CASE WHEN jti IS NULL OR (event_type = 'desk_cancellation' AND issued_at <= ${stale})
+                 jti = CASE WHEN jti IS NULL OR (event_type <> 'verification' AND issued_at <= ${stale})
                             THEN ${toBase64Url(randomBytesOf(16))} ELSE jti END,
-                 issued_at = CASE WHEN jti IS NULL OR (event_type = 'desk_cancellation' AND issued_at <= ${stale})
+                 issued_at = CASE WHEN jti IS NULL OR (event_type <> 'verification' AND issued_at <= ${stale})
                                   THEN ${now} ELSE issued_at END
            WHERE event_id = (
                    SELECT event_id FROM company_api.set_outbox
@@ -112,7 +116,8 @@ async function claim(deps: OutboxDeps, tenant: CompanyTenant): Promise<Claimed |
                     ORDER BY deliver_after, event_id
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED)
-       RETURNING event_id, event_type, state, change_ref, jti, issued_at, attempts, reissues`,
+       RETURNING event_id, event_type, state, change_ref, user_id, recovered_day, jti, issued_at, attempts,
+                 reissues`,
     );
     return row;
   });
@@ -251,6 +256,18 @@ async function contentOf(
   if (row.event_type === 'verification') {
     return { type: 'verification', state: row.state, jti: row.jti, issuedAt: row.issued_at };
   }
+  if (row.event_type === 'account_recovered') {
+    if (row.user_id === null || row.recovered_day === null) return undefined;
+    const subject = await recoveredEventOf(deps, tenantId, row.user_id);
+    if (subject === undefined) return undefined;
+    return {
+      type: 'account_recovered',
+      sub: subject.sub,
+      recoveredDay: Number(row.recovered_day),
+      jti: row.jti,
+      issuedAt: row.issued_at,
+    };
+  }
   if (row.change_ref === null) return undefined;
   const ids = await cancellationEventOf(deps, tenantId, row.change_ref);
   if (ids === undefined) return undefined;
@@ -275,7 +292,7 @@ export async function deliverDue(
       if (row === undefined) break;
       const content = await contentOf(deps, tenant.tenantId, row);
       if (content === undefined) {
-        // 正本の行が消えた後の取消の SET（終端から7日を過ぎた）。送るものがないので消す。
+        // 正本の行が消えた後の取消の SET（終端から7日を過ぎた）、sub のなくなった回復の SET。送るものがないので消す。
         await deps.db.withTenant(tenant.tenantId, (tx) =>
           tx.execute(sql`DELETE FROM company_api.set_outbox WHERE event_id = ${row.event_id}`),
         );

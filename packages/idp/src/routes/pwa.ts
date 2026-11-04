@@ -3,7 +3,8 @@
 import { fromBase64Url, newWarifuUserId, toBase64Url } from '@pii-token-vault/warifu-core';
 import { currentAlias } from '../alias.ts';
 import { confirmEmailVerification, startEmailVerification } from '../email.ts';
-import { bodyOf, cookieOf, FAILED, isRecord, RATE_LIMITED } from '../http.ts';
+import { bodyOf, cookieOf, FAILED, isRecord, RATE_LIMITED, RESTRICTED } from '../http.ts';
+import { isRecoveryRestricted } from '../recovery.ts';
 import {
   addCredential,
   createAccount,
@@ -141,6 +142,10 @@ export function registerPwaRoutes(ctx: RouteContext): void {
   app.post('/api/email/start', onMain, async (request, reply) => {
     const current = await ctx.requireFreshSession(request, reply);
     if (current === undefined) return reply;
+    // 回復の後7日間は、配送先（本物のメール）の登録と変更を受け付けない（PRN-90、ADR 0027 の O-80）。
+    if (await isRecoveryRestricted(ctx.repo, current.session.userId)) {
+      return reply.code(409).send(RESTRICTED);
+    }
     const result = await startEmailVerification(ctx.emailDeps, {
       userId: current.session.userId,
       email: bodyOf(request).email,
@@ -193,6 +198,10 @@ export function registerPwaRoutes(ctx: RouteContext): void {
   app.post('/api/passkeys/delete', onMain, async (request, reply) => {
     const current = await ctx.requireFreshSession(request, reply);
     if (current === undefined) return reply;
+    // 回復の後7日間は、ほかのパスキーの削除を受け付けない（PRN-90）。
+    if (await isRecoveryRestricted(ctx.repo, current.session.userId)) {
+      return reply.code(409).send(RESTRICTED);
+    }
     const id = bodyOf(request).id;
     let credentialId: Uint8Array;
     try {

@@ -66,6 +66,24 @@ ALTER TABLE idp.credentials
   ADD CONSTRAINT credentials_recovery_attempt FOREIGN KEY (recovery_attempt_id)
   REFERENCES idp.recovery_attempts (attempt_id);
 
+-- 企業への回復の SET（ADR 0027 の O-81）。送るときに、テナントの範囲で sub を引く（sub は置かない）。
+-- recovery_ref は回復の記録の ID で、同じ回復の再送で二重に入れない。
+ALTER TABLE company_api.set_outbox DROP CONSTRAINT set_outbox_event_type_check;
+ALTER TABLE company_api.set_outbox
+  ADD CONSTRAINT set_outbox_event_type_check
+  CHECK (event_type IN ('verification', 'desk_cancellation', 'account_recovered'));
+ALTER TABLE company_api.set_outbox ADD COLUMN user_id uuid;
+ALTER TABLE company_api.set_outbox ADD COLUMN recovery_ref uuid;
+ALTER TABLE company_api.set_outbox ADD COLUMN recovered_day bigint CHECK (recovered_day % 86400 = 0);
+ALTER TABLE company_api.set_outbox
+  ADD CONSTRAINT set_outbox_recovery_check CHECK (
+    (event_type = 'account_recovered') = (recovery_ref IS NOT NULL)
+    AND (recovery_ref IS NULL) = (user_id IS NULL)
+    AND (recovery_ref IS NULL) = (recovered_day IS NULL)
+  );
+ALTER TABLE company_api.set_outbox
+  ADD CONSTRAINT set_outbox_recovery_ref_key UNIQUE (tenant_id, recovery_ref);
+
 ALTER TABLE idp.recovery_codes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE idp.recovery_codes FORCE ROW LEVEL SECURITY;
 ALTER TABLE idp.helpers ENABLE ROW LEVEL SECURITY;
@@ -125,5 +143,8 @@ GRANT SELECT (attempt_id, user_id, helper_user_id, state, request_device, starte
       UPDATE (state, approved_at, ready_at, ended_at, purge_after)
   ON idp.recovery_attempts TO warifu_idp;
 GRANT DELETE ON idp.recovery_attempts TO warifu_idp;
+
+GRANT SELECT (user_id, recovery_ref, recovered_day), INSERT (user_id, recovery_ref, recovered_day)
+  ON company_api.set_outbox TO warifu_company_api;
 
 RESET ROLE;

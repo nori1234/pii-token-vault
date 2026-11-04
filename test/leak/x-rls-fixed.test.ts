@@ -74,7 +74,17 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
   // SET の送信待ち（0006。ADR 0022。取消の SET は 0008。ADR 0026）。署名した SET の列はない。
   'company_api.set_outbox': {
     warifu_company_api: {
-      INSERT: ['change_ref', 'deliver_after', 'event_id', 'event_type', 'state', 'tenant_id'],
+      INSERT: [
+        'change_ref',
+        'deliver_after',
+        'event_id',
+        'event_type',
+        'recovered_day',
+        'recovery_ref',
+        'state',
+        'tenant_id',
+        'user_id',
+      ],
       SELECT: [
         'attempts',
         'change_ref',
@@ -86,9 +96,12 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
         'held_revision',
         'issued_at',
         'jti',
+        'recovered_day',
+        'recovery_ref',
         'reissues',
         'state',
         'tenant_id',
+        'user_id',
       ],
       UPDATE: [
         'attempts',

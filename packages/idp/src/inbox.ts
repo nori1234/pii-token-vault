@@ -60,7 +60,7 @@ export interface DisplayLine {
 
 // ---- 知らせ ----
 
-/** 知らせの型（M6）。plan 4章の「全端末に知らせる」もの。回復、窓口での変更、協力者は M7・M8 で足す。 */
+/** 知らせの型（M6、M8）。plan 4章の「全端末に知らせる」もの。回復と協力者は M8（ADR 0027）。 */
 export const NOTICE_TYPES = Object.freeze({
   'passkey.added': {
     title: 'パスキーが追加されました',
@@ -74,6 +74,29 @@ export const NOTICE_TYPES = Object.freeze({
   'passkey.removed': { title: 'パスキーが削除されました', lines: () => [] },
   'email.registered': { title: 'メールアドレスが登録されました', lines: () => [] },
   'email.changed': { title: 'メールアドレスが変更されました', lines: () => [] },
+  // 回復（ADR 0027）。持ち主の受信箱（全端末）に入れる。
+  'recovery.code_issued': { title: '回復コードを作りました', lines: () => [] },
+  'recovery.code_reissued': { title: '回復コードを作り直しました', lines: () => [] },
+  'recovery.started': {
+    title: '回復が始まりました',
+    lines: (content: InboxContent): readonly DisplayLine[] =>
+      isDeviceKind(content.device)
+        ? [{ label: '要求した端末', value: DEVICE_KINDS[content.device] }]
+        : [],
+  },
+  'recovery.approved': { title: '協力者が回復を承認しました', lines: () => [] },
+  'recovery.cancelled': { title: '回復を取り消しました', lines: () => [] },
+  'recovery.expired': { title: '回復の期限が切れました', lines: () => [] },
+  'recovery.completed': { title: '回復が完了しました', lines: () => [] },
+  'helper.set': { title: '協力者を登録しました', lines: () => [] },
+  'helper.removed': { title: '協力者を外しました', lines: () => [] },
+  // 協力者の受信箱に入れるもの。中身は協力関係の ID だけ（表示名は協力者の端末の中だけ。PRN-91）。
+  'helper.added': { title: '協力者になりました', lines: () => [] },
+  'helper.ended': { title: '協力者ではなくなりました', lines: () => [] },
+  'helper.recovery_started': { title: '協力している人が回復を始めました', lines: () => [] },
+  'helper.recovery_cancelled': { title: '協力している人の回復が取り消されました', lines: () => [] },
+  'helper.recovery_completed': { title: '協力している人の回復が完了しました', lines: () => [] },
+  'helper.code_reissued': { title: '協力している人が回復コードを作り直しました', lines: () => [] },
 } satisfies Record<
   string,
   { title: string; lines: (content: InboxContent) => readonly DisplayLine[] }

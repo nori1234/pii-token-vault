@@ -65,3 +65,33 @@ export const DESK_DECLINED = defineAuditEvent('idp.desk.declined', {
 export const DESK_CANCEL_REQUESTED = defineAuditEvent('idp.desk.cancel_requested', {
   tenant_id: 'uuid',
 });
+
+// 回復（ADR 0027 の O-85）。どれも持ち主の範囲で残す。回復コード、結び付け、表示名は入れない。
+
+/** 回復コードを作った（reissued は作り直し）。 */
+export const RECOVERY_CODE_ISSUED = defineAuditEvent('idp.recovery.code_issued', {
+  reissued: 'bool',
+});
+
+/** 協力者を登録した（replaced は入れ替え）。 */
+export const RECOVERY_HELPER_SET = defineAuditEvent('idp.recovery.helper_set', {
+  replaced: 'bool',
+});
+
+/** 協力者を外した。 */
+export const RECOVERY_HELPER_REMOVED = defineAuditEvent('idp.recovery.helper_removed', {});
+
+/** 回復を始めた（回復コードを確かめ、新しい端末に回復待ちのパスキーを作った）。 */
+export const RECOVERY_STARTED = defineAuditEvent('idp.recovery.started', {});
+
+/** 協力者が回復を承認した（待機に入った）。 */
+export const RECOVERY_HELPER_APPROVED = defineAuditEvent('idp.recovery.helper_approved', {});
+
+/** 回復を取り消した（登録済みの端末から）。 */
+export const RECOVERY_CANCELLED = defineAuditEvent('idp.recovery.cancelled', {});
+
+/** 協力者の承認を待つ期限が切れた。 */
+export const RECOVERY_EXPIRED = defineAuditEvent('idp.recovery.expired', {});
+
+/** 回復が成立した。 */
+export const RECOVERY_COMPLETED = defineAuditEvent('idp.recovery.completed', {});

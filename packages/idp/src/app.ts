@@ -58,6 +58,7 @@ import {
 } from './pages.ts';
 import { buildProvider, OIDC_MOUNT } from './provider.ts';
 import { RateLimiter } from './rate-limit.ts';
+import { RECOVERY_TIMES } from './recovery.ts';
 import { parseRegistry, type Registry } from './registry.ts';
 import { findCredential, type RepoDeps, recordCredentialUse } from './repo.ts';
 import { registerApprovalRoutes } from './routes/approvals.ts';
@@ -66,6 +67,7 @@ import { registerDeskRoutes } from './routes/desk.ts';
 import { registerInboxRoutes } from './routes/inbox.ts';
 import { registerInteractionRoutes } from './routes/interaction.ts';
 import { registerPwaRoutes } from './routes/pwa.ts';
+import { registerRecoveryRoutes } from './routes/recovery.ts';
 import { registerScreenRoutes } from './routes/screens.ts';
 import {
   APPROVAL_SESSION_COOKIE,
@@ -96,6 +98,11 @@ export interface IdpOptions {
   readonly mailer?: Mailer;
   /** company-api の窓口の内部 API（ADR 0026）。なければ、窓口の作成の承認と取消を受け付けない（照会は受け付ける）。 */
   readonly desk?: DeskConnection;
+  /**
+   * 回復（ADR 0027）。waitSeconds は協力者の承認から回復が成立するまでの待機（既定72時間）。オリジンが https のとき
+   * （本番）は、24時間未満を起動時に断る（ADR 0003、PRN-88）。
+   */
+  readonly recovery?: { readonly waitSeconds?: number };
   readonly now?: () => Date;
   readonly logLevel?: LogLevel;
   readonly logWrite?: (line: string) => void;
@@ -158,6 +165,14 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
   const onApproval = { constraints: { host: approvalHost } };
   const issuer = `${options.origin}${OIDC_MOUNT}`;
   const secureCookie = originUrl.protocol === 'https:';
+  const recoveryWaitSeconds = options.recovery?.waitSeconds ?? RECOVERY_TIMES.defaultWaitSeconds;
+  if (
+    !Number.isSafeInteger(recoveryWaitSeconds) ||
+    recoveryWaitSeconds < 1 ||
+    (secureCookie && recoveryWaitSeconds < RECOVERY_TIMES.minProductionWaitSeconds)
+  ) {
+    throw new Error('回復の待機は、本番（https）では24時間以上にする（ADR 0003）');
+  }
   const now = options.now ?? (() => new Date());
   const nowMs = () => now().getTime();
 
@@ -312,6 +327,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
     emailDeps,
     provider,
     desk: options.desk === undefined ? undefined : createDeskClient(options.desk),
+    recoveryWaitSeconds,
     assets,
     nowMs,
     sendHtml,
@@ -353,6 +369,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
   registerApprovalRoutes(ctx);
   registerInteractionRoutes(ctx);
   registerDeskRoutes(ctx);
+  registerRecoveryRoutes(ctx);
 
   let approvalServer: Server | undefined;
 

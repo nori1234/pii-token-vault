@@ -57,9 +57,10 @@ export interface PageInput {
   readonly nonce: string;
   /**
    * home は PWA、interaction は企業へのログイン、approval は承認用のオリジンの承認待ちの画面（ADR 0023）、
-   * desk は承認用のオリジンの窓口での承認の画面（ADR 0026）。
+   * desk は承認用のオリジンの窓口での承認の画面（ADR 0026）。recover（新しい端末での回復）、recovery（回復の設定）、
+   * helper（協力者として）も承認用のオリジン（ADR 0027 の O-82）。
    */
-  readonly page: 'home' | 'interaction' | 'approval' | 'desk';
+  readonly page: 'home' | 'interaction' | 'approval' | 'desk' | 'recover' | 'recovery' | 'helper';
   /** インタラクションの uid（英数字と - _ だけ。interactionDetails で確かめた値）。 */
   readonly uid?: string;
   readonly prompt?: 'login' | 'consent';
@@ -74,6 +75,9 @@ const TITLES: Readonly<Record<PageInput['page'], string>> = Object.freeze({
   interaction: '割符',
   approval: '割符：確認待ち',
   desk: '割符：窓口での確認',
+  recover: '割符：回復',
+  recovery: '割符：回復の設定',
+  helper: '割符：協力者',
 });
 
 export function renderPage(input: PageInput): string {
