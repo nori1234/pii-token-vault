@@ -223,6 +223,10 @@
             area.replaceChildren(codeForm());
           } else if (result.status === 400) {
             area.replaceChildren(status('メールアドレスの形を確かめてください。'));
+          } else if (result.status === 409 && result.data.error === 'restricted') {
+            area.replaceChildren(
+              status('回復の後7日間は、メールアドレスを登録したり変えたりできません。'),
+            );
           } else {
             area.replaceChildren(status(failureText(result)));
           }
@@ -723,6 +727,9 @@
     }
     if (result.status === 401 && result.data.error === 'login_required') {
       return renderApprovalLogin('もう一度、パスキーで確かめてください。');
+    }
+    if (result.status === 409 && result.data.error === 'restricted') {
+      return renderApprovals('回復の後7日間は、この操作を承認できません。拒否することはできます。');
     }
     renderApprovals(
       result.status === 429
