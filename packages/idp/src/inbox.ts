@@ -160,6 +160,11 @@ export interface ApprovalType {
   parse(details: unknown): InboxContent | undefined;
   /** 画面に出す項目。parse の結果だけから作る。 */
   lines(content: InboxContent): readonly DisplayLine[];
+  /**
+   * 高リスクの操作（配送先・返金先・支払い手段の変更、解約、高額の取引など。不変条件1(a)）。true の型は、回復の後の
+   * 7日間、承認を受け付けない（拒否は受け付ける。ADR 0027 の O-80）。P0 には、まだ高リスクの型はない。
+   */
+  readonly highRisk?: boolean;
 }
 
 export class ApprovalTypes {

@@ -522,12 +522,14 @@ export async function helperRelationship(
     );
     if (row === undefined) return undefined;
     const since = new Date(deps.now().getTime() - RECOVERY_TIMES.helperFreshDays * DAY_MS);
-    const [user] = await tx.query<{ created_at: Date; recovered_at: Date | null }>(
-      sql`SELECT created_at, recovered_at FROM idp.users`,
+    const [user] = await tx.query<{ recovered_at: Date | null }>(
+      sql`SELECT recovered_at FROM idp.users`,
     );
+    // 最初のパスキーは、アカウントと同じトランザクションで作るので、作成の時刻が同じ（除く）。比べるのは DB の中で
+    // 行う（JS の Date はミリ秒までなので、マイクロ秒の差を見落とさない）。
     const [added] = await tx.query(
-      sql`SELECT credential_id FROM idp.credentials
-           WHERE state = 'active' AND created_at > ${since} AND created_at > ${user?.created_at ?? since}
+      sql`SELECT c.credential_id FROM idp.credentials AS c, idp.users AS u
+           WHERE c.state = 'active' AND c.created_at > ${since} AND c.created_at > u.created_at
            LIMIT 1`,
     );
     const recentlyRecovered = user?.recovered_at != null && user.recovered_at > since;
