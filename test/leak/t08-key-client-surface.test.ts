@@ -116,6 +116,7 @@ describe('漏えい：鍵のクライアントの表面（plan 11章 テスト8�
       'oidc_storage_id',
       'email_verify_code',
       'approval_challenge',
+      'recovery_code',
     ] as const;
     const macs = [
       await idp.mac('alias_lookup', message),

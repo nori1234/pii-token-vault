@@ -8,7 +8,8 @@
 // - company-api は encrypt と decrypt を持たない。company-api の sign と public_keys は、tenant_jwt と set の鍵だけ（ADR 0022）。
 // - sender、rp-kit、demo-rp の行はない（資格情報もない）。
 // - sub の導出（pairwise_sub）、idp の保存の id（oidc_storage_id）、確認コード（email_verify_code）の MAC は idp だけ（ADR 0018）。
-//   承認のチャレンジ（approval_challenge）の MAC も idp だけ（ADR 0023）。
+//   承認のチャレンジ（approval_challenge）の MAC も idp だけ（ADR 0023）。回復コードの照合（recovery_code）も idp だけ
+//   （ADR 0027）。
 // - 操作ごとの承認の鍵（op_approval）で署名できるのは idp だけ。窓口の ID の MAC（desk_id、desk_lookup）は
 //   company-api だけ（ADR 0026）。
 //
@@ -34,6 +35,7 @@ export const ACL: ReadonlyArray<readonly [KeysvcCaller, KeysvcOp, AclTarget]> = 
   ['idp', 'mac', 'oidc_storage_id'],
   ['idp', 'mac', 'email_verify_code'],
   ['idp', 'mac', 'approval_challenge'],
+  ['idp', 'mac', 'recovery_code'],
   ['idp', 'derive_alias', 'alias_derive'],
   ['idp', 'sign', 'id_token'],
   ['idp', 'public_keys', 'id_token'],

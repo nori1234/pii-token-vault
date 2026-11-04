@@ -1,0 +1,129 @@
+-- 0009：回復（plan 4章、ADR 0003、ADR 0027）。利用者の範囲（withWarifuUser）でだけ読み書きする。
+-- - 回復コードは平文で置かない。照合用の mac(recovery_code, …) だけ（不変条件4、ADR 0012 の決定4）。
+-- - 協力関係は、内部 ID の組だけ（PRN-91）。表示名は協力者の端末の中だけに置く。
+-- - 招待と、協力者の承認の結び付けは、プロセスのメモリに置き、DB には置かない（ADR 0027 の O-74、O-76）。
+SET ROLE warifu_owner;
+
+-- 回復の後の制限（7日）と、取消の後に回復を始められない期間（14日）。
+ALTER TABLE idp.users ADD COLUMN recovered_at timestamptz;
+ALTER TABLE idp.users ADD COLUMN recovery_locked_until timestamptz;
+
+-- パスキーの状態。pending は、回復の途中で新しい端末に作ったもの（ログインにも承認にも使えない）。
+-- suspended は、回復が成立したときに一時停止したもの（ADR 0003）。
+ALTER TABLE idp.credentials ADD COLUMN state text NOT NULL DEFAULT 'active'
+  CHECK (state IN ('active', 'suspended', 'pending'));
+ALTER TABLE idp.credentials ADD COLUMN recovery_attempt_id uuid;
+ALTER TABLE idp.credentials
+  ADD CONSTRAINT credentials_pending_attempt CHECK ((state = 'pending') = (recovery_attempt_id IS NOT NULL));
+
+-- 回復コード。利用者ごとに1つ。
+CREATE TABLE idp.recovery_codes (
+  user_id uuid PRIMARY KEY REFERENCES idp.users (user_id),
+  code_mac bytea NOT NULL CHECK (octet_length(code_mac) = 32),
+  created_at timestamptz NOT NULL
+);
+
+-- 協力関係。P0 は持ち主ごとに1人（ADR 0003）。relationship_id は、協力者の端末が表示名を引くためだけに使う。
+CREATE TABLE idp.helpers (
+  relationship_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL UNIQUE REFERENCES idp.users (user_id),
+  helper_user_id uuid NOT NULL REFERENCES idp.users (user_id),
+  created_at timestamptz NOT NULL,
+  CHECK (owner_user_id <> helper_user_id)
+);
+CREATE INDEX helpers_helper ON idp.helpers (helper_user_id);
+
+-- 回復の記録。進行中（awaiting_helper、waiting）は、利用者ごとに1つだけ。
+CREATE TABLE idp.recovery_attempts (
+  attempt_id uuid PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES idp.users (user_id),
+  -- 始めた時点の協力者（協力者を入れ替えても、この回復の承認者は変わらない）。
+  helper_user_id uuid NOT NULL REFERENCES idp.users (user_id),
+  state text NOT NULL CHECK (state IN ('awaiting_helper', 'waiting', 'completed', 'cancelled', 'expired')),
+  -- 要求の端末（User-Agent から決めた OS の大まかな種類だけ。ADR 0023 の O-49）。
+  request_device text NOT NULL
+    CHECK (request_device IN ('iphone', 'ipad', 'android', 'windows', 'chromeos', 'mac', 'linux', 'other')),
+  started_at timestamptz NOT NULL,
+  -- 協力者の承認を待つ期限（ADR 0027 の O-77）。
+  helper_deadline timestamptz NOT NULL,
+  approved_at timestamptz,
+  ready_at timestamptz,
+  ended_at timestamptz,
+  purge_after timestamptz,
+  CHECK (helper_user_id <> user_id),
+  CHECK (helper_deadline > started_at),
+  CHECK ((approved_at IS NULL) = (ready_at IS NULL)),
+  CHECK (ready_at IS NULL OR ready_at > approved_at),
+  CHECK (state <> 'waiting' OR ready_at IS NOT NULL),
+  CHECK (state <> 'completed' OR ready_at IS NOT NULL),
+  CHECK ((state IN ('completed', 'cancelled', 'expired')) = (ended_at IS NOT NULL)),
+  CHECK ((ended_at IS NULL) = (purge_after IS NULL))
+);
+CREATE UNIQUE INDEX recovery_attempts_active ON idp.recovery_attempts (user_id)
+  WHERE state IN ('awaiting_helper', 'waiting');
+
+ALTER TABLE idp.credentials
+  ADD CONSTRAINT credentials_recovery_attempt FOREIGN KEY (recovery_attempt_id)
+  REFERENCES idp.recovery_attempts (attempt_id);
+
+ALTER TABLE idp.recovery_codes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE idp.recovery_codes FORCE ROW LEVEL SECURITY;
+ALTER TABLE idp.helpers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE idp.helpers FORCE ROW LEVEL SECURITY;
+ALTER TABLE idp.recovery_attempts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE idp.recovery_attempts FORCE ROW LEVEL SECURITY;
+
+-- idp.users に、回復の2つの列を書き換える UPDATE を足す（いまの利用者の行だけ）。
+CREATE POLICY idp_update ON idp.users FOR UPDATE TO warifu_idp
+  USING (user_id = warifu.current_user_id()) WITH CHECK (user_id = warifu.current_user_id());
+
+CREATE POLICY idp_select ON idp.recovery_codes FOR SELECT TO warifu_idp
+  USING (user_id = warifu.current_user_id());
+CREATE POLICY idp_insert ON idp.recovery_codes FOR INSERT TO warifu_idp
+  WITH CHECK (user_id = warifu.current_user_id());
+CREATE POLICY idp_update ON idp.recovery_codes FOR UPDATE TO warifu_idp
+  USING (user_id = warifu.current_user_id()) WITH CHECK (user_id = warifu.current_user_id());
+CREATE POLICY idp_delete ON idp.recovery_codes FOR DELETE TO warifu_idp
+  USING (user_id = warifu.current_user_id());
+
+-- 協力関係：持ち主も協力者も読める（どちらも、自分が組の片方である行だけ）。書くのは持ち主だけ。
+CREATE POLICY idp_select ON idp.helpers FOR SELECT TO warifu_idp
+  USING (owner_user_id = warifu.current_user_id() OR helper_user_id = warifu.current_user_id());
+CREATE POLICY idp_insert ON idp.helpers FOR INSERT TO warifu_idp
+  WITH CHECK (owner_user_id = warifu.current_user_id());
+CREATE POLICY idp_delete ON idp.helpers FOR DELETE TO warifu_idp
+  USING (owner_user_id = warifu.current_user_id());
+
+CREATE POLICY idp_select ON idp.recovery_attempts FOR SELECT TO warifu_idp
+  USING (user_id = warifu.current_user_id());
+CREATE POLICY idp_insert ON idp.recovery_attempts FOR INSERT TO warifu_idp
+  WITH CHECK (user_id = warifu.current_user_id());
+CREATE POLICY idp_update ON idp.recovery_attempts FOR UPDATE TO warifu_idp
+  USING (user_id = warifu.current_user_id()) WITH CHECK (user_id = warifu.current_user_id());
+CREATE POLICY idp_delete ON idp.recovery_attempts FOR DELETE TO warifu_idp
+  USING (user_id = warifu.current_user_id());
+
+-- 列単位の権限。
+GRANT SELECT (recovered_at, recovery_locked_until), UPDATE (recovered_at, recovery_locked_until)
+  ON idp.users TO warifu_idp;
+GRANT SELECT (state, recovery_attempt_id), INSERT (state, recovery_attempt_id),
+      UPDATE (state, recovery_attempt_id)
+  ON idp.credentials TO warifu_idp;
+GRANT SELECT (user_id, code_mac, created_at), INSERT (user_id, code_mac, created_at),
+      UPDATE (code_mac, created_at)
+  ON idp.recovery_codes TO warifu_idp;
+GRANT DELETE ON idp.recovery_codes TO warifu_idp;
+-- 協力関係は、作った後に変えない（入れ替えは、消してから作る）。
+GRANT SELECT (relationship_id, owner_user_id, helper_user_id, created_at),
+      INSERT (relationship_id, owner_user_id, helper_user_id, created_at)
+  ON idp.helpers TO warifu_idp;
+GRANT DELETE ON idp.helpers TO warifu_idp;
+-- 回復の記録。作った後に変えられるのは、状態と、その時刻と、消す予定だけ。
+GRANT SELECT (attempt_id, user_id, helper_user_id, state, request_device, started_at, helper_deadline,
+              approved_at, ready_at, ended_at, purge_after),
+      INSERT (attempt_id, user_id, helper_user_id, state, request_device, started_at, helper_deadline),
+      UPDATE (state, approved_at, ready_at, ended_at, purge_after)
+  ON idp.recovery_attempts TO warifu_idp;
+GRANT DELETE ON idp.recovery_attempts TO warifu_idp;
+
+RESET ROLE;
