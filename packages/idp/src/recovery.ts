@@ -430,6 +430,14 @@ async function restrictedUntilIn(tx: Tx, now: Date): Promise<Date | null> {
   return until > now ? until : null;
 }
 
+/** 回復の後の制限の終わり（制限の中でなければ null）。PWA の画面に出す。 */
+export async function recoveryRestrictedUntil(
+  deps: RepoDeps,
+  userId: WarifuUserId,
+): Promise<Date | null> {
+  return deps.db.withWarifuUser(userId, (tx) => restrictedUntilIn(tx, deps.now()));
+}
+
 /** 回復の後の制限の中か（PRN-90）。協力者の変更、パスキーの削除、メールの登録と変更、高リスクの承認の前に呼ぶ。 */
 export async function isRecoveryRestricted(deps: RepoDeps, userId: WarifuUserId): Promise<boolean> {
   return deps.db.withWarifuUser(

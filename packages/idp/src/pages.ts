@@ -18,6 +18,12 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = Object.freeze(
   'permissions-policy': 'camera=(), microphone=(), geolocation=()',
 });
 
+/**
+ * 協力者の画面（/helper）だけは、QR を読み取るために、同じオリジンにだけカメラを許す（ADR 0027 の O-82）。
+ * ほかの画面と応答は、SECURITY_HEADERS のとおり、カメラを使わせない。
+ */
+export const CAMERA_PERMISSIONS_POLICY = 'camera=(self), microphone=(), geolocation=()';
+
 /** HTML の応答の CSP。nonce は応答ごとの乱数。 */
 export function htmlCsp(nonce: string): string {
   return [

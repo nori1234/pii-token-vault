@@ -4,7 +4,7 @@ import { fromBase64Url, newWarifuUserId, toBase64Url } from '@pii-token-vault/wa
 import { currentAlias } from '../alias.ts';
 import { confirmEmailVerification, startEmailVerification } from '../email.ts';
 import { bodyOf, cookieOf, FAILED, isRecord, RATE_LIMITED, RESTRICTED } from '../http.ts';
-import { isRecoveryRestricted } from '../recovery.ts';
+import { isRecoveryRestricted, recoveryRestrictedUntil } from '../recovery.ts';
 import {
   addCredential,
   createAccount,
@@ -79,10 +79,11 @@ export function registerPwaRoutes(ctx: RouteContext): void {
     const current = await ctx.requireSession(request, reply);
     if (current === undefined) return reply;
     const { userId } = current.session;
-    const [email, credentials, connections] = await Promise.all([
+    const [email, credentials, connections, restrictedUntil] = await Promise.all([
       emailStatus(repo, userId),
       listCredentials(repo, userId),
       listConnections(repo, userId),
+      recoveryRestrictedUntil(repo, userId),
     ]);
     const companies = [];
     for (const connection of connections) {
@@ -106,8 +107,12 @@ export function registerPwaRoutes(ctx: RouteContext): void {
         synced: c.backupEligible,
         createdAt: c.createdAt.toISOString(),
         lastUsedAt: c.lastUsedAt?.toISOString() ?? null,
+        // 回復で一時停止したパスキー（ログインにも承認にも使えない。ADR 0027 の O-80）。
+        suspended: c.state === 'suspended',
       })),
       companies,
+      // 回復の後の制限の終わり（制限の中でなければ null。PRN-90）。
+      restrictedUntil: restrictedUntil?.toISOString() ?? null,
     };
   });
 

@@ -203,3 +203,85 @@ ul.inbox li {
 .fixed-warning p {
   margin: 0;
 }
+
+/* 回復と協力者の画面（DESIGN.md 2章、ADR 0027 の O-82）。 */
+.code-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.code-label {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+/* CodeDisplay（DESIGN.md 6章）：等幅で、3文字ごとに区切る。 */
+.code-display {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: var(--text-xl);
+  letter-spacing: 0.08em;
+  word-break: break-all;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* QR は白地に黒で描く（暗い画面でも読み取れるよう、周りに白の余白を付ける）。 */
+canvas.qr {
+  display: block;
+  width: min(100%, 288px);
+  height: auto;
+  image-rendering: pixelated;
+  background: #ffffff;
+  padding: var(--space-3);
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius);
+}
+
+.qr-video {
+  display: block;
+  width: min(100%, 320px);
+  border-radius: var(--radius);
+}
+
+.shown-name {
+  font-size: var(--text-xl);
+  font-weight: 700;
+}
+
+ul.helping,
+ul.links {
+  padding-left: var(--space-6);
+}
+
+ul.helping li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+details {
+  margin-top: var(--space-3);
+}
+
+details summary {
+  min-height: var(--tap-min);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}

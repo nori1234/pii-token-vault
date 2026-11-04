@@ -143,6 +143,12 @@ describe('漏えい：回復（plan 11章 テスト3）', () => {
     for (const path of ['/recover', '/recovery', '/helper']) {
       const page = await browser.get(path);
       expect(page.status).toBe(200);
+      // カメラを許すのは、QR を読み取る協力者の画面だけ（同じオリジンだけ。ADR 0027 の O-82）。
+      expect(page.headers.get('permissions-policy')).toBe(
+        path === '/helper'
+          ? 'camera=(self), microphone=(), geolocation=()'
+          : 'camera=(), microphone=(), geolocation=()',
+      );
       expect(page.text).not.toMatch(/type="(email|tel)"/i);
       expect(page.text).not.toMatch(/autocomplete="[^"]*(email|tel|name)[^"]*"/i);
       expect(page.text).not.toMatch(/name="(email|phone|tel|name)"/i);

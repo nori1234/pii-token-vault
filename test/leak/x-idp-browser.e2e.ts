@@ -6,7 +6,7 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
-import { type CDPSession, expect, type Page, test } from '@playwright/test';
+import { type Browser, type CDPSession, expect, type Page, test } from '@playwright/test';
 import {
   createLocalJWKSet,
   exportJWK,
@@ -33,6 +33,7 @@ const TENANT = {
   relayDomain: 'e2e.relay.warifu.test',
 };
 const CLIENT_ID = 'rp-e2e';
+const RECOVERY_WAIT_SECONDS = 4;
 /** M6 には製品の承認待ちの型がまだないので、E2E の型を使う（ADR 0023）。 */
 const E2E_APPROVAL: ApprovalType = {
   type: 'e2e.pickup_change',
@@ -131,6 +132,8 @@ test.beforeAll(async () => {
     keysvc: { socketPath: keysvc.socketPath, credential: keysvc.credentials.idp },
     db: { host: cluster.host, port: cluster.port, database: DATABASE },
     mailer: outbox,
+    // 回復の待機を短くする（http のオリジンだけで許す。本番の https では24時間以上を起動時に強制する。ADR 0027 の O-77）。
+    recovery: { waitSeconds: RECOVERY_WAIT_SECONDS },
     logWrite: () => {},
   });
   await idp.app.listen({ host: 'localhost', port });
@@ -567,4 +570,201 @@ test('窓口での承認：相手からかかってきた電話だと答える�
   );
   await expect(page.getByRole('button', { name: '承認する' })).toHaveCount(0);
   expect(problems, 'CSP 違反やスクリプトのエラーがない').toEqual([]);
+});
+
+// ---- 回復（ADR 0003、ADR 0027。DESIGN.md 2章の回復と協力者の画面） ----
+
+/** 新しいブラウザの文脈（別の人や別の端末）を、仮想認証器と問題の監視つきで作る。 */
+async function newDevice(browser: Browser) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const problems = watchProblems(page);
+  await addVirtualAuthenticator(page);
+  return { context, page, problems };
+}
+
+/** PWA でアカウントを作る。 */
+async function registerOnPwa(page: Page) {
+  await page.goto(`${origin}/`);
+  await page.getByRole('button', { name: '割符のアカウントを作る' }).click();
+  await expect(page.getByRole('heading', { name: '受信箱' })).toBeVisible();
+}
+
+/** 承認用のオリジンの画面を開き、パスキーで確かめる（セッションがなければ）。 */
+async function openApproval(page: Page, path: string) {
+  await page.goto(`${approvalOrigin}${path}`);
+  const login = page.getByRole('button', { name: 'パスキーで確かめる' });
+  if (await login.isVisible()) await login.click();
+}
+
+/** 画面の CodeDisplay から、区切りのないコードを読む。 */
+async function shownCode(page: Page): Promise<string> {
+  const parts = await page.locator('.code-display').first().locator('span').allTextContents();
+  return parts.join('');
+}
+
+async function enterCode(page: Page, label: string, code: string) {
+  const summary = page.getByText('QR を読み取れないとき');
+  if (await summary.isVisible()) await summary.click();
+  await page.getByLabel(label).fill(code);
+  await page
+    .getByLabel(label)
+    .locator('xpath=ancestor::form')
+    .getByRole('button', { name: 'コードを入力する' })
+    .click();
+}
+
+/** 持ち主（回復コードと協力者を持つ）と協力者を、画面で作る。持ち主の回復コードを返す。 */
+async function ownerAndHelperThroughScreens(owner: Page, helper: Page, helperCallsOwner: string) {
+  await registerOnPwa(owner);
+  await registerOnPwa(helper);
+  await openApproval(owner, '/recovery');
+  await owner.getByRole('button', { name: '回復コードを作る' }).click();
+  await expect(owner.getByRole('heading', { name: '回復コード' })).toBeFocused();
+  const code = await shownCode(owner);
+  expect(code).toMatch(/^[0-9A-HJKMNP-TV-Z]{42}$/);
+  await expect(
+    owner.getByText('メール、クラウド、写真には保存しないでください。', { exact: false }),
+  ).toBeVisible();
+  await expect(owner.getByRole('button', { name: /共有|送る/ })).toHaveCount(0);
+  await owner.getByRole('button', { name: '保管しました（設定に戻る）' }).click();
+
+  await owner.getByRole('button', { name: '協力者を招待する' }).click();
+  await expect(owner.getByRole('heading', { name: '回復協力者の招待' })).toBeFocused();
+  await expect(owner.locator('canvas.qr')).toHaveCount(1);
+  await expect(owner.getByRole('note')).toContainText(
+    '協力者には、あなたが直接会って頼んだ、よく知っている人だけを選んでください。',
+  );
+  const invite = await shownCode(owner);
+  expect(invite).toMatch(/^[0-9A-HJKMNP-TV-Z]{24}$/);
+
+  await openApproval(helper, '/helper');
+  await helper.getByLabel('この人の呼び名').fill(helperCallsOwner);
+  await enterCode(helper, '招待コード', invite);
+  await expect(helper.getByRole('heading', { name: '招待を受け入れました' })).toBeFocused();
+  await expect(helper.locator('.shown-name')).toHaveText(`${helperCallsOwner}さん`);
+
+  await owner.getByRole('button', { name: '協力者として確定する' }).click();
+  await expect(owner.getByRole('status')).toHaveText('回復協力者を登録しました。');
+  return code;
+}
+
+test('回復：回復コードと協力者の承認と待機で、新しい端末から回復し、前の端末は使えなくなる', async ({
+  browser,
+}) => {
+  // 攻撃者が持っている情報：（正規の利用者の回復の流れ）。回復の画面には、メール・電話・氏名の入力欄がないことを確かめる
+  // 試す経路：画面で、回復コードを作り、協力者を招待して確定する。新しい端末で回復を始め、協力者が結び付けのコードで
+  //           承認し、待機の後に回復を完了する。前の端末で、承認用のオリジンにパスキーで入り直す
+  // 期待する結果：回復の画面の入力欄は回復コードだけ。新しい端末に QR とコードが出て、協力者を特定できる情報は出ない。
+  //               持ち主の端末に回復の通知（警告文 F と取消）が出る。協力者の画面に警告文 C（呼び名と時刻）が出る。
+  //               待機の後に回復が完了し、新しい回復コードが出る。前の端末のパスキーは使えない。CSP の違反がない
+  // plan 11章：テスト3
+  const owner = await newDevice(browser);
+  const helper = await newDevice(browser);
+  const fresh = await newDevice(browser);
+  try {
+    const code = await ownerAndHelperThroughScreens(owner.page, helper.page, '割符花子');
+
+    await fresh.page.goto(`${approvalOrigin}/recover`);
+    const inputs = fresh.page.locator('input');
+    await expect(inputs).toHaveCount(1);
+    for (const attribute of ['type', 'autocomplete', 'name']) {
+      expect((await inputs.first().getAttribute(attribute)) ?? '').not.toMatch(
+        /email|tel|name|phone/,
+      );
+    }
+    await expect(fresh.page.getByRole('note')).toContainText('回復コードを、割符や企業が');
+    await fresh.page.getByLabel('回復コード').fill(code);
+    await fresh.page.getByRole('button', { name: '回復を始める' }).click();
+    await expect(
+      fresh.page.getByRole('heading', { name: '協力者の承認を待っています' }),
+    ).toBeVisible();
+    await expect(fresh.page.locator('canvas.qr')).toHaveCount(1);
+    await expect(fresh.page.getByText('割符花子')).toHaveCount(0);
+    const binding = await shownCode(fresh.page);
+    expect(binding).toMatch(/^[0-9A-HJKMNP-TV-Z]{24}$/);
+
+    await openApproval(owner.page, '/recovery');
+    await expect(
+      owner.page.getByRole('heading', { name: 'アカウントの回復が始まっています' }),
+    ).toBeFocused();
+    await expect(owner.page.getByText('要求した端末：', { exact: false })).toBeVisible();
+    await expect(owner.page.getByRole('note').first()).toContainText(
+      'あなたが回復を始めていないなら、取り消してください。',
+    );
+    await expect(owner.page.getByRole('button', { name: '回復を取り消す' })).toBeVisible();
+
+    await openApproval(helper.page, '/helper');
+    await enterCode(helper.page, '新しい端末に出ているコード', binding);
+    await expect(helper.page.getByRole('heading', { name: '割符花子さんの回復' })).toBeFocused();
+    await expect(helper.page.getByRole('note')).toContainText(
+      'このコードを入力すると、割符花子さんのアカウントが、',
+    );
+    await expect(
+      helper.page.getByRole('button', { name: '入力しない（本人に確かめられない）' }),
+    ).toBeVisible();
+    await helper.page.getByRole('button', { name: '承認する' }).click();
+    await expect(helper.page.getByRole('status')).toContainText('承認しました。');
+
+    await fresh.page.getByRole('button', { name: '回復の続きを確かめる' }).click();
+    await expect(fresh.page.getByRole('heading', { name: '回復の待機中です' })).toBeVisible();
+    await expect(fresh.page.getByRole('button', { name: /短く|急ぐ|自分ではない/ })).toHaveCount(0);
+    await fresh.page.waitForTimeout((RECOVERY_WAIT_SECONDS + 1) * 1000);
+    await fresh.page.getByRole('button', { name: '回復の続きを確かめる' }).click();
+    await expect(fresh.page.getByRole('heading', { name: '回復が完了しました' })).toBeVisible();
+    const next = await shownCode(fresh.page);
+    expect(next).toMatch(/^[0-9A-HJKMNP-TV-Z]{42}$/);
+    expect(next).not.toBe(code);
+
+    await owner.page.goto(`${approvalOrigin}/recovery`);
+    await owner.page.getByRole('button', { name: 'パスキーで確かめる' }).click();
+    await expect(owner.page.getByRole('status')).toHaveText(
+      'パスキーでの確認ができませんでした。もう一度お試しください。',
+    );
+
+    for (const device of [owner, helper, fresh]) {
+      expect(device.problems, 'CSP 違反やスクリプトのエラーがない').toEqual([]);
+    }
+  } finally {
+    for (const device of [owner, helper, fresh]) await device.context.close();
+  }
+});
+
+test('回復：持ち主が登録済みの端末で取り消すと、新しい端末の回復は続けられない', async ({
+  browser,
+}) => {
+  // 攻撃者が持っている情報：盗んだ回復コード
+  // 試す経路：攻撃者の端末で回復を始める。持ち主が回復の通知から「回復を取り消す」をパスキーで確かめる。攻撃者の端末で
+  //           続きを確かめる
+  // 期待する結果：取消を案内する文が出て、攻撃者の端末は続けられない（最初からやり直す案内だけ）。CSP の違反がない
+  // plan 11章：テスト3
+  const owner = await newDevice(browser);
+  const helper = await newDevice(browser);
+  const attacker = await newDevice(browser);
+  try {
+    const code = await ownerAndHelperThroughScreens(owner.page, helper.page, '割符次郎');
+    await attacker.page.goto(`${approvalOrigin}/recover`);
+    await attacker.page.getByLabel('回復コード').fill(code);
+    await attacker.page.getByRole('button', { name: '回復を始める' }).click();
+    await expect(
+      attacker.page.getByRole('heading', { name: '協力者の承認を待っています' }),
+    ).toBeVisible();
+
+    await owner.page.goto(`${approvalOrigin}/recovery`);
+    await owner.page.getByRole('button', { name: '回復を取り消す' }).click();
+    await expect(owner.page.getByRole('status')).toContainText('回復を取り消しました。');
+    await expect(
+      owner.page.getByRole('heading', { name: 'アカウントの回復が始まっています' }),
+    ).toHaveCount(0);
+
+    await attacker.page.getByRole('button', { name: '回復の続きを確かめる' }).click();
+    await expect(attacker.page.getByRole('status')).toContainText(
+      'この端末で進めている回復を確かめられませんでした。',
+    );
+    for (const device of [owner, helper, attacker]) {
+      expect(device.problems, 'CSP 違反やスクリプトのエラーがない').toEqual([]);
+    }
+  } finally {
+    for (const device of [owner, helper, attacker]) await device.context.close();
+  }
 });

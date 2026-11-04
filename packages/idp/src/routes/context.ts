@@ -56,6 +56,8 @@ export interface RouteContext {
     request: FastifyRequest,
     reply: FastifyReply,
     html: (nonce: string) => string,
+    /** camera を true にすると、同じオリジンにだけカメラを許す（協力者の画面の QR の読み取り）。 */
+    options?: { readonly camera?: boolean },
   ): FastifyReply;
   setCookie(reply: FastifyReply, name: string, value: string): void;
   clearCookie(reply: FastifyReply, name: string): void;

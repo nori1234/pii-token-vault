@@ -50,6 +50,7 @@ import {
 import { type Mailer, MemoryOutbox } from './mailer.ts';
 import {
   type Assets,
+  CAMERA_PERMISSIONS_POLICY,
   DEFAULT_CSP,
   htmlCsp,
   loadAssets,
@@ -262,7 +263,9 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
 
   app.addHook('onSend', async (request, reply, payload) => {
     reply.headers(SECURITY_HEADERS);
-    const nonce = (request as FastifyRequest & { cspNonce?: string }).cspNonce;
+    const marked = request as FastifyRequest & { cspNonce?: string; cameraSelf?: boolean };
+    if (marked.cameraSelf === true) reply.header('permissions-policy', CAMERA_PERMISSIONS_POLICY);
+    const nonce = marked.cspNonce;
     reply.header('content-security-policy', nonce === undefined ? DEFAULT_CSP : htmlCsp(nonce));
     return payload;
   });
@@ -276,9 +279,16 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
   });
   app.setNotFoundHandler((_request, reply) => reply.code(404).send({ error: 'not_found' }));
 
-  function sendHtml(request: FastifyRequest, reply: FastifyReply, html: (nonce: string) => string) {
+  function sendHtml(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    html: (nonce: string) => string,
+    pageOptions?: { readonly camera?: boolean },
+  ) {
     const nonce = newNonce(randomBytesOf(16));
-    (request as FastifyRequest & { cspNonce?: string }).cspNonce = nonce;
+    const marked = request as FastifyRequest & { cspNonce?: string; cameraSelf?: boolean };
+    marked.cspNonce = nonce;
+    if (pageOptions?.camera === true) marked.cameraSelf = true;
     return reply.type('text/html; charset=utf-8').send(html(nonce));
   }
 

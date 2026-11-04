@@ -102,7 +102,9 @@ export function registerRecoveryRoutes(ctx: RouteContext): void {
     ['/helper', 'helper'],
   ] as const) {
     app.get(path, onApproval, async (request, reply) =>
-      ctx.sendHtml(request, reply, (nonce) => renderPage({ nonce, page })),
+      ctx.sendHtml(request, reply, (nonce) => renderPage({ nonce, page }), {
+        camera: page === 'helper',
+      }),
     );
   }
 
