@@ -571,6 +571,7 @@ export async function removeHelper(deps: RepoDeps, ownerUserId: WarifuUserId): P
 /**
  * 協力者の範囲で、その持ち主との協力関係の ID を引く。協力者でなければ undefined。
  * 協力者が、直近14日以内に回復したか、パスキーを足していれば（最初のパスキーは除く）、eligible は false（PRN-87）。
+ * 足した時刻は idp.users に残しておくので、足したパスキーを消しても、足してから14日は false のまま。
  */
 export async function helperRelationship(
   deps: RepoDeps,
@@ -584,8 +585,9 @@ export async function helperRelationship(
     );
     if (row === undefined) return undefined;
     const since = new Date(deps.now().getTime() - RECOVERY_TIMES.helperFreshDays * DAY_MS);
-    const [user] = await tx.query<{ recovered_at: Date | null }>(
-      sql`SELECT recovered_at FROM idp.users`,
+    const [user] = await tx.query<{ recovered_at: Date | null; added_recently: boolean }>(
+      sql`SELECT recovered_at, coalesce(credential_added_at > ${since}, false) AS added_recently
+            FROM idp.users`,
     );
     // 最初のパスキーは、アカウントと同じトランザクションで作るので、作成の時刻が同じ（除く）。比べるのは DB の中で
     // 行う（JS の Date はミリ秒までなので、マイクロ秒の差を見落とさない）。
@@ -597,7 +599,7 @@ export async function helperRelationship(
     const recentlyRecovered = user?.recovered_at != null && user.recovered_at > since;
     return {
       relationshipId: row.relationship_id,
-      eligible: !recentlyRecovered && added === undefined,
+      eligible: !recentlyRecovered && user?.added_recently !== true && added === undefined,
     };
   });
 }

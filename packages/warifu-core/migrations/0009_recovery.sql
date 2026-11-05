@@ -11,6 +11,9 @@ SET ROLE warifu_owner;
 -- 回復の後の制限（7日）と、取消の後に回復を始められない期間（14日）。
 ALTER TABLE idp.users ADD COLUMN recovered_at timestamptz;
 ALTER TABLE idp.users ADD COLUMN recovery_locked_until timestamptz;
+-- 最初のパスキーの後にパスキーを足した、いちばん新しい時刻。パスキーの行を消しても残す（協力者の14日の判定。
+-- PRN-87。足してから消せば判定を抜けられる、を防ぐ。オーナーの5回目のレビュー）。
+ALTER TABLE idp.users ADD COLUMN credential_added_at timestamptz;
 
 -- パスキーの状態。pending は、回復の途中で新しい端末に作ったもの（ログインにも承認にも使えない）。
 -- suspended は、回復が成立したときに一時停止したもの（ADR 0003）。
@@ -130,7 +133,7 @@ ALTER TABLE idp.helper_notice_outbox FORCE ROW LEVEL SECURITY;
 ALTER TABLE idp.recovery_notice_queue ENABLE ROW LEVEL SECURITY;
 ALTER TABLE idp.recovery_notice_queue FORCE ROW LEVEL SECURITY;
 
--- idp.users に、回復の2つの列を書き換える UPDATE を足す（いまの利用者の行だけ）。
+-- idp.users に、回復の3つの列を書き換える UPDATE を足す（いまの利用者の行だけ）。
 CREATE POLICY idp_update ON idp.users FOR UPDATE TO warifu_idp
   USING (user_id = warifu.current_user_id()) WITH CHECK (user_id = warifu.current_user_id());
 
@@ -179,7 +182,8 @@ CREATE POLICY idp_delete ON idp.recovery_notice_queue FOR DELETE TO warifu_idp
   USING (tenant_id = warifu.current_tenant_id());
 
 -- 列単位の権限。
-GRANT SELECT (recovered_at, recovery_locked_until), UPDATE (recovered_at, recovery_locked_until)
+GRANT SELECT (recovered_at, recovery_locked_until, credential_added_at),
+      UPDATE (recovered_at, recovery_locked_until, credential_added_at)
   ON idp.users TO warifu_idp;
 GRANT SELECT (state, recovery_attempt_id), INSERT (state, recovery_attempt_id),
       UPDATE (state, recovery_attempt_id)

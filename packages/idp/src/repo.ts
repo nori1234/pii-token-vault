@@ -191,6 +191,8 @@ export async function addCredential(
 ): Promise<void> {
   await deps.db.withWarifuUser(userId, async (tx) => {
     await insertCredential(tx, userId, credential);
+    // 足した時刻は、パスキーを消しても残す（協力者の14日の判定。PRN-87、ADR 0027 の O-76）。
+    await tx.execute(sql`UPDATE idp.users SET credential_added_at = ${deps.now()}`);
     const count = await countCredentials(tx);
     // 全端末への知らせ（plan 4章、ADR 0023）。追加と同じトランザクションで入れる。
     await insertNotice(tx, {

@@ -326,8 +326,14 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
   'idp.users': {
     warifu_idp: {
       INSERT: ['user_id'],
-      SELECT: ['created_at', 'recovered_at', 'recovery_locked_until', 'user_id'],
-      UPDATE: ['recovered_at', 'recovery_locked_until'],
+      SELECT: [
+        'created_at',
+        'credential_added_at',
+        'recovered_at',
+        'recovery_locked_until',
+        'user_id',
+      ],
+      UPDATE: ['credential_added_at', 'recovered_at', 'recovery_locked_until'],
     },
   },
   // relay の表（0005。ADR 0021）。UPDATE はない。配送ログの Message-ID の MAC は、書けるが読めない。

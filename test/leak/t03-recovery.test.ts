@@ -294,6 +294,53 @@ describe('漏えい：回復（plan 11章 テスト3）', () => {
     expect((await helperApprove(helper.approval, bindingCodeOf(later.register))).status).toBe(200);
   });
 
+  it('パスキーを足してから消した協力者も、足してから14日は承認できない（409）', async () => {
+    // 攻撃者が持っている情報：盗んだ回復コードと、協力者のアカウントに足した攻撃者のパスキー（協力者のなりすまし）
+    // 試す経路：協力者のアカウントにパスキーを足し、足したパスキーを消してから（追加の行が残らない）、新しい端末に
+    //           出た結び付けのコードで承認を試みる
+    // 期待する結果：協力者の画面と儀式は 409 { error: 'helper_not_eligible' } で、回復は協力者の承認待ちのまま。
+    //               足してから14日を過ぎれば承認できる（オーナーの5回目のレビュー）
+    // plan 11章：テスト3（PRN-87）
+    const { helper, code } = await ownerWithHelper();
+    const addedAt = clock;
+    await addPasskey(helper.pwa);
+    const added = helper.pwa.authenticator.credentials[1];
+    if (added === undefined) throw new Error('準備に失敗した');
+    const deleted = await helper.pwa.post('/api/passkeys/delete', {
+      id: Buffer.from(added.id).toString('base64url'),
+    });
+    expect(deleted.status).toBe(200);
+    // 消したパスキーは、認証器からも外す（残った元のパスキーで、承認用のオリジンにログインし直す）。
+    helper.pwa.authenticator.credentials.pop();
+    const left = await serviceDb('idp');
+    try {
+      const rows = await left.withWarifuUser(helper.userId, (tx) =>
+        tx.query(sql`SELECT credential_id FROM idp.credentials`),
+      );
+      expect(rows).toHaveLength(1);
+    } finally {
+      await left.close();
+    }
+
+    clock += 13 * DAY;
+    await ensureApproval(helper.approval);
+    const device = await startOnNewDevice(t, code);
+    const binding = bindingCodeOf(device.register);
+    const view = await helper.approval.post('/api/recovery/helper/view', { code: binding });
+    expect(view.status).toBe(409);
+    expect(view.json).toEqual({ error: 'helper_not_eligible' });
+    const approve = await helperApprove(helper.approval, binding);
+    expect(approve.status).toBe(409);
+    expect(approve.json).toEqual({ error: 'helper_not_eligible' });
+    expect((await resume(device.browser)).json.state).toBe('awaiting_helper');
+
+    clock = addedAt + 15 * DAY;
+    await ensureApproval(helper.approval);
+    const later = await startOnNewDevice(t, code);
+    expect(later.register?.status).toBe(200);
+    expect((await helperApprove(helper.approval, bindingCodeOf(later.register))).status).toBe(200);
+  });
+
   it('直近14日以内に回復した協力者の承認は受け付けない（409）', async () => {
     // 攻撃者が持っている情報：盗んだ回復コードと、協力者のアカウント（攻撃者が先に協力者のアカウントを回復で奪った）
     // 試す経路：協力者が自分の回復を成立させた直後に、持ち主の回復を承認する
