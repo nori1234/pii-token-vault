@@ -18,11 +18,21 @@ describe('能力の表の性質（不変条件3）', () => {
     expect(allowedTarget('relay', 'encrypt', 'relay_queue')).toBe(true);
   });
 
-  it('dkim の鍵で署名できるのは relay だけ。id_token の鍵で署名できるのは idp だけ', () => {
+  it('dkim の鍵で署名できるのは relay だけ。id_token と op_approval の鍵で署名できるのは idp だけ', () => {
     const signers = (key: string) =>
       ACL.filter(([, op, target]) => op === 'sign' && target === key).map(([caller]) => caller);
     expect(signers('dkim')).toEqual(['relay']);
     expect(signers('id_token')).toEqual(['idp']);
+    expect(signers('op_approval')).toEqual(['idp']);
+  });
+
+  it('窓口の ID の MAC（desk_id、desk_lookup）は company-api だけ', () => {
+    for (const purpose of ['desk_id', 'desk_lookup']) {
+      const callers = ACL.filter(([, op, target]) => op === 'mac' && target === purpose).map(
+        ([caller]) => caller,
+      );
+      expect(callers).toEqual(['company-api']);
+    }
   });
 
   it('返信、リプレイ、Message-ID の MAC は relay だけ', () => {

@@ -46,3 +46,22 @@ export const APPROVAL_DECIDED = defineAuditEvent('idp.approval.decided', {
   channel: { enum: ['device'] },
   tenant_id: 'uuid',
 });
+
+// 窓口の操作別承認（ADR 0026 の O-71）。申請ID、変更ID、JWT は入れない。
+
+/** 窓口の申請を、利用者がパスキー（UV）で承認した（利用者の範囲）。 */
+export const DESK_APPROVED = defineAuditEvent('idp.desk.approved', {
+  tenant_id: 'uuid',
+  action: { enum: ['case_status_read', 'order_status_read', 'case_create'] },
+});
+
+/** 窓口の申請を承認しなかった（テナントの範囲。利用者はまだ分からない）。 */
+export const DESK_DECLINED = defineAuditEvent('idp.desk.declined', {
+  tenant_id: 'uuid',
+  reason: { enum: ['denied', 'unrecognized', 'incoming_call'] },
+});
+
+/** 窓口の作成の取消を頼んだ（利用者の範囲）。 */
+export const DESK_CANCEL_REQUESTED = defineAuditEvent('idp.desk.cancel_requested', {
+  tenant_id: 'uuid',
+});

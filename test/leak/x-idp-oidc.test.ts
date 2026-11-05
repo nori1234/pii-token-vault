@@ -30,7 +30,9 @@ describe('漏えい：idp の OIDC の守り', () => {
     // 攻撃者が持っている情報：なし（公開の discovery を読む）
     // 試す経路：/oidc/.well-known/openid-configuration を読む
     // 期待する結果：署名と企業の認証は ES256 と private_key_jwt だけ。sub は pairwise だけ。response_type は code だけ。
-    //               userinfo、登録、introspection、revocation、ログアウト、CIBA、PAR の入口がない
+    //               userinfo、登録、introspection、revocation、ログアウト、CIBA、デバイスの入口がない。PAR の入口は
+    //               窓口の承認のためにある（ADR 0025）。要求オブジェクトは使えない。RAR の型は warifu_desk だけ（ADR 0026）。
+    //               操作ごとの承認の鍵の場所（ID トークンの鍵とは別）を出す
     // plan 11章：テスト8（ライブラリに渡すアルゴリズムの設定）
     const discovery = (await (
       await fetch(`${t.issuer}/.well-known/openid-configuration`)
@@ -49,11 +51,16 @@ describe('漏えい：idp の OIDC の守り', () => {
       'revocation_endpoint',
       'end_session_endpoint',
       'backchannel_authentication_endpoint',
-      'pushed_authorization_request_endpoint',
       'device_authorization_endpoint',
     ]) {
       expect(discovery).not.toHaveProperty(name);
     }
+    expect(discovery.pushed_authorization_request_endpoint).toBe(`${t.issuer}/request`);
+    expect(discovery).not.toHaveProperty('require_pushed_authorization_requests');
+    expect(discovery).not.toHaveProperty('request_parameter_supported');
+    expect(discovery.request_uri_parameter_supported).toBe(false);
+    expect(discovery.authorization_details_types_supported).toEqual(['warifu_desk']);
+    expect(discovery.warifu_op_approval_jwks_uri).toBe(`${t.origin}/op-approval/jwks`);
     const jwks = (await (await fetch(`${t.issuer}/jwks`)).json()) as {
       keys: Record<string, unknown>[];
     };
