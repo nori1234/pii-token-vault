@@ -5,14 +5,14 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createLocalJWKSet, jwtVerify } from 'jose';
+import { createLocalJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { deliverRecoveryNotices } from '../../packages/idp/src/recovery.ts';
 import { sql } from '../../packages/warifu-core/src/db/sql.ts';
 import { createDeskClient } from '../../packages/warifu-core/src/desk/client.ts';
 import type { TenantId } from '../../packages/warifu-core/src/ids.ts';
 import { newApprover, userIdOf } from '../setup/approvals.ts';
-import { ISSUER } from '../setup/company-api.ts';
+import { ISSUER, startTestCompanyApi } from '../setup/company-api.ts';
 import { serviceDb } from '../setup/db.ts';
 import { type DeskWorld, deskDetail, deskFlow, pwaLogin, startDeskWorld } from '../setup/desk.ts';
 import {
@@ -334,6 +334,111 @@ describe('漏えい：回復を企業に知らせる（plan 11章 テスト3、�
 });
 
 describe('漏えい：企業に渡せないときも、知らせは失われない（ADR 0027 の O-79、O-81）', () => {
+  it('緊急停止の間に回復しても、知らせは company-api に残り、停止を解いた後に届く。登録簿にないテナントへの知らせは受け取らない', async () => {
+    // 攻撃者が持っている情報：企業が緊急停止している間に成立させた回復（停止を解いた後も、企業に知られないことを期待する）
+    // 試す経路：company-api の登録で、テナントを緊急停止にして配備し直す（同じ DB）。その間に、そのテナントに接続した
+    //           利用者の回復を成立させ、配送の回を回す。停止を解いて配備し直し、配送の回を回す。別に、登録簿にない
+    //           テナントを含む知らせを、idp の資格情報で内部 API に渡す
+    // 期待する結果：停止の間は SET を送らず、company-api の送信待ちに残る（idp の送信待ちは空）。停止を解くと、その企業の
+    //               sub で回復の SET が届く。登録簿にないテナントを含む知らせは 404 で、どのテナントにも入れない
+    //               （idp は送信待ちに残して送り直す）
+    // plan 11章：テスト3、テスト12（ADR 0027 の O-81。オーナーの再々レビュー）
+    const tenant = world.company.tenants[0];
+    if (tenant === undefined || tenant.client === undefined) throw new Error('準備に失敗した');
+    const dir = await mkdtemp(join(tmpdir(), 'warifu-recovery-'));
+    const secret = randomBytes(32);
+    const stopped = await startTestCompanyApi({
+      tenants: [
+        {
+          tenantId: tenant.tenantId,
+          relayDomain: tenant.relayDomain,
+          client: tenant.client,
+          ...(tenant.webhookUrl === undefined ? {} : { webhookUrl: tenant.webhookUrl }),
+          scopes: ['company_api', 'desk'] as const,
+          suspended: true,
+        },
+      ],
+      sender: {
+        socketPath: world.sender.sender.socketPath,
+        credential: world.sender.credentials['company-api'],
+      },
+      deskInternal: { socketPath: join(dir, 'company-api.sock'), credentials: { idp: secret } },
+      now: () => new Date(clock),
+    });
+    const idp = await startTestIdp(
+      { tenants: 1, clients: [{ tenant: 0 }] },
+      () => new Date(clock),
+      {
+        tenantIds: [tenant.tenantId],
+        desk: {
+          socketPath: join(dir, 'company-api.sock'),
+          credential: `idp.${secret.toString('base64url')}`,
+        },
+      },
+    );
+    try {
+      const owner = await connectedOwner(idp, idp.clients);
+      const device = await readyToComplete(idp, owner.code, owner.helper.approval);
+      expect((await resume(device)).json.state).toBe('completed');
+      const userId = userIdOf(owner.browser.authenticator);
+      const db = await serviceDb('idp');
+      let attemptId: string;
+      try {
+        const [row] = await db.withWarifuUser(userId, (tx) =>
+          tx.query<{ attempt_id: string }>(
+            sql`SELECT attempt_id FROM idp.recovery_attempts WHERE state = 'completed'`,
+          ),
+        );
+        attemptId = row?.attempt_id ?? '';
+      } finally {
+        await db.close();
+      }
+      expect(await queuedFor(tenant.tenantId, attemptId)).toEqual([]);
+      const rowsOf = async () =>
+        (await recoveredRows(tenant.tenantId)).filter((row) => row.recovery_ref === attemptId);
+      expect(await rowsOf()).toHaveLength(1);
+
+      const sentTo = (from: number) =>
+        world.sender.requests
+          .slice(from)
+          .map((request) => decodeJwt(request.body))
+          .filter((claims) => RECOVERED in ((claims.events as object | undefined) ?? {}))
+          .map((claims) => (claims.sub_id as { id: string }).id);
+      world.sender.respondWith(202);
+      clock += 7 * HOUR;
+      const before = world.sender.requests.length;
+      await stopped.api.deliverDue();
+      expect(sentTo(before)).not.toContain(owner.subs[0]);
+      expect(await rowsOf()).toHaveLength(1);
+
+      // 停止を解いて配備し直した company-api（world.company は、同じテナントを停止なしで登録している）。
+      await world.company.api.deliverDue();
+      expect(sentTo(before)).toContain(owner.subs[0]);
+      expect(await rowsOf()).toEqual([]);
+
+      const desk = createDeskClient({
+        socketPath: join(dir, 'company-api.sock'),
+        credential: `idp.${secret.toString('base64url')}`,
+      });
+      const unknownAttempt = randomUUID();
+      await expect(
+        desk.accountRecovered({
+          userId,
+          attemptId: unknownAttempt,
+          tenantIds: [tenant.tenantId, randomUUID() as TenantId],
+          recoveredDay: Math.floor(clock / DAY) * 86_400,
+        }),
+      ).rejects.toThrow();
+      expect(
+        (await recoveredRows(tenant.tenantId)).filter((row) => row.recovery_ref === unknownAttempt),
+      ).toEqual([]);
+    } finally {
+      await idp.stop();
+      await stopped.stop();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('company-api に届かない、または idp に窓口の内部 API がないとき、回復は成立し、知らせは idp の送信待ちに残る', async () => {
     // 攻撃者が持っている情報：回復コードと協力者の承認（company-api が止まっている間に回復し、企業の保留を避けたい）
     // 試す経路：company-api の内部 API に届かない idp と、内部 API を設定していない idp で、企業に接続した利用者の

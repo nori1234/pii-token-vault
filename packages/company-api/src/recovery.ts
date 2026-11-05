@@ -2,8 +2,9 @@
 // （idp は、成立と同じトランザクションで自分の送信待ちに置き、渡せるまで送り直す）。
 //
 // - 利用者が接続しているテナントごとに、回復の SET を送信待ちに入れる。sub は置かず、送るときにテナントの範囲で
-//   aliases.subject から引く。緊急停止したテナント、受け口のないテナント、sub のないテナントには入れない
-//   （ID トークンの recovered_at では伝わる）。
+//   aliases.subject から引く。緊急停止したテナントと受け口のないテナントにも入れておき、配送の回は、再開した後
+//   （受け口を登録した後）に送る（回復の知らせを失わない。オーナーの再レビュー）。
+// - 登録簿にないテナントが1つでもあれば、何も入れずに失敗を返す（idp は送信待ちに残し、送り直す）。
 // - 同じ回復（回復の記録の ID）の送り直しは、二重に入れない（テナントと recovery_ref の一意制約）。回復した日は、
 //   idp が成立の時刻から決めて送信待ちに持たせた値なので、送り直しが日付をまたいでも変わらない。
 // - 初めて送る時刻は、テナントごとに独立した0〜6時間の乱数だけ遅らせる（同じ回復を複数の企業が受け取るので、
@@ -40,16 +41,12 @@ export async function enqueueRecovered(
     readonly tenantIds: readonly TenantId[];
     readonly recoveredDay: number;
   },
-): Promise<number> {
+): Promise<{ readonly ok: true; readonly queued: number } | { readonly ok: false }> {
+  const tenantIds = [...new Set(input.tenantIds)];
+  if (!tenantIds.every((tenantId) => config.tenants.has(tenantId))) return { ok: false };
   let queued = 0;
-  for (const tenantId of new Set(input.tenantIds)) {
-    const tenant = config.tenants.get(tenantId);
-    if (tenant === undefined || tenant.suspended || tenant.webhookUrl === undefined) continue;
+  for (const tenantId of tenantIds) {
     queued += await deps.db.withTenant(tenantId, async (tx) => {
-      const [subject] = await tx.query<{ sub: string }>(
-        sql`SELECT sub FROM aliases.subject WHERE user_id = ${input.userId}`,
-      );
-      if (subject === undefined) return 0;
       const inserted = await tx.execute(
         sql`INSERT INTO company_api.set_outbox
               (event_id, tenant_id, event_type, state, user_id, recovery_ref, recovered_day, deliver_after)
@@ -63,7 +60,7 @@ export async function enqueueRecovered(
       return inserted;
     });
   }
-  return queued;
+  return { ok: true, queued };
 }
 
 /** 回復の SET の宛先（テナントの sub）と、回復した日。行がなければ undefined。 */

@@ -230,13 +230,18 @@ export async function startDeskInternalApi(
         ) {
           return undefined;
         }
-        const queued = await enqueueRecovered(deps, config, {
+        const result = await enqueueRecovered(deps, config, {
           userId: body.userId as WarifuUserId,
           attemptId: body.attemptId,
           tenantIds: body.tenantIds as TenantId[],
           recoveredDay: body.recoveredDay,
         });
-        log.info({ event: 'company_api.recovery_notified', count: queued });
+        // 登録簿にないテナントは、受け取ったことにしない（idp が送り直す。設定の食い違いを、黙って失わない）。
+        if (!result.ok) {
+          log.warn({ event: 'company_api.recovery_unknown_tenant' });
+          return [404, DESK_ERROR_BODY.not_found];
+        }
+        log.info({ event: 'company_api.recovery_notified', count: result.queued });
         return [204, ''];
       }
     }
