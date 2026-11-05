@@ -129,7 +129,7 @@
 | CAP-22 | sender は、URL を https に限る。名前解決した IP がプライベートなら拒否し、その IP に直接つなぐ（DNS rebinding 対策）。MX の名前解決の結果にも同じ制限をかける。リダイレクトに従わず、サイズと時間に上限を設ける |
 | CAP-23 | Web Push の宛先は、既知のプッシュサービスのホストに限る（実配信は P1） |
 | CAP-24 | DNS は、注入したリゾルバを通してだけ引く（mailauth の `resolver` を使う） |
-| CAP-25 | oidc-provider では、`jwks_uri`、`sector_identifier_uri`、`request_uri` を受け付けず、動的クライアント登録を無効にする。企業の鍵は登録時に `jwks` で受け取る。ロゴは登録時に取り込み、割符の側で配信する |
+| CAP-25 | oidc-provider では、`jwks_uri`、`sector_identifier_uri` を受け付けず、動的クライアント登録を無効にする。`request_uri` は、割符の PAR の受け口が発行した urn だけを受け付け、外へ取りに行かない（ADR 0025）。企業の鍵は登録時に `jwks` で受け取る。ロゴは登録時に取り込み、割符の側で配信する |
 | CAP-26 | relay から本物のアドレスへの配送は、署名と封印を付けたメッセージを sender の内部 API に渡し、sender が MX を引いて接続する（ADR 0021、ADR 0022）。実配送は、受け取ったメールの永続化と再試行を作るまで始めない（ADR 0021 の O-19） |
 | CAP-27 | 割符の内部の接続は、この文書の表で必要としたサービスの組だけに限る。本番では、それ以外の組をネットワークの設定でも塞ぐ（plan 2章「内部の API」。侵害の後の横展開への備え） |
 
@@ -176,7 +176,7 @@
 - relay の内部配送 API は、割符の内部からだけ呼べる（呼ぶのは idp）。
 - P1：利用者アカウントの凍結と、法令に基づく開示。開示の対象・請求者・承認の手順を ADR で決めるまで実装しない。法令に基づく開示は、テスト6の唯一の例外として扱い、2人承認、根拠法令の記録、監査ログへの追記を必須にする（plan 4章）。
 - テナントの封じ込め（緊急停止、別名の再発行）は、P0 では運用の手順として行う。静的な設定を直して配備し直す（company-api の登録の `suspended`、relay と idp の登録からテナントとクライアントを外す。ADR 0022）。管理 API も不変条件8の新しい例外も作らない。管理の機能にする場合は、2人承認と実行までの遅延を付ける（plan 2章）。
-- oidc-provider で既定で有効な機能のうち、使わないもの（devInteractions、PAR、DPoP、rpInitiatedLogout、userinfo、resourceIndicators）は、明示的に無効にする（ADR 0006。DPoP の扱いは P1 で決める）。
+- oidc-provider で既定で有効な機能のうち、使わないもの（devInteractions、DPoP、rpInitiatedLogout、userinfo、resourceIndicators）は、明示的に無効にする（ADR 0006。DPoP の扱いは P1 で決める）。PAR は、M7 で操作に結び付いた step-up に使う（ADR 0025。M6 までは無効）。
 - CAP-37 の確かめ方：配信物（HTML、JavaScript、CSS）は、`test/leak/x-idp-routes` で CSP（応答ごとの nonce、Trusted Types、インラインのスクリプトがないこと）を確かめ、principle-review の観点7で、配信物に鍵や資格情報の文字列がないことを読む（ADR 0018）。
 - 内部の API に外から届かないことの確かめ方：keysvc は、TCP と UDP で待ち受けないこと、ソケットとディレクトリの権限、資格情報と能力の表を、t08-keysvc-isolation、t08-keysvc-auth、t08-keysvc-acl で確かめる（ADR 0013）。relay の内部配送 API は、ソケットの親のディレクトリの権限、資格情報、パスとメソッド、受け付ける入力を `test/leak/x-relay-internal-api` で確かめる。受け付ける入力は、割符が定めた種類（宛先確認と、旧アドレスへの知らせ）と利用者 ID と確認コードだけで、宛先、件名、本文を呼び出し側から受け取らない（ADR 0021）。sender は、資格情報、呼び出し元ごとの口、パスとメソッド、本文の形、ソケットの権限を `test/leak/x-sender-internal-api` で確かめる（ADR 0022）。
 - トークンの期限と無効化（CAP-39）の未定（plan 2章）：ID トークンとセッションの有効期間とリフレッシュトークンは M3 で決めた（ID トークン5分、リフレッシュトークンなし、パスキーを削除したらその利用者のセッションをすべて消す。ADR 0018）。パスキーの一時停止（回復の後）のときの扱いは M8。テナントの JWT は ES256 で5分、scope は1つ（M5では別名の入れ替えと検証SET）、リフレッシュトークンなし。窓口・初回移行用の限定scopeはM7・M9で設計する。緊急停止にして配備し直すと、発行済みのものも断る（M5。ADR 0022）。操作ごとの承認の有効期間は M7。
