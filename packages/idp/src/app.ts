@@ -50,6 +50,7 @@ import {
 import { type Mailer, MemoryOutbox } from './mailer.ts';
 import {
   type Assets,
+  CAMERA_PERMISSIONS_POLICY,
   DEFAULT_CSP,
   htmlCsp,
   loadAssets,
@@ -58,6 +59,7 @@ import {
 } from './pages.ts';
 import { buildProvider, OIDC_MOUNT } from './provider.ts';
 import { RateLimiter } from './rate-limit.ts';
+import { deliverRecoveryNotices, RECOVERY_TIMES } from './recovery.ts';
 import { parseRegistry, type Registry } from './registry.ts';
 import { findCredential, type RepoDeps, recordCredentialUse } from './repo.ts';
 import { registerApprovalRoutes } from './routes/approvals.ts';
@@ -66,6 +68,7 @@ import { registerDeskRoutes } from './routes/desk.ts';
 import { registerInboxRoutes } from './routes/inbox.ts';
 import { registerInteractionRoutes } from './routes/interaction.ts';
 import { registerPwaRoutes } from './routes/pwa.ts';
+import { registerRecoveryRoutes } from './routes/recovery.ts';
 import { registerScreenRoutes } from './routes/screens.ts';
 import {
   APPROVAL_SESSION_COOKIE,
@@ -75,6 +78,7 @@ import {
 } from './sessions.ts';
 import { loadSigningKey } from './signing-key.ts';
 import { MacMemoryStore, StorageFullError } from './storage.ts';
+import { createUserSerial } from './user-serial.ts';
 import { Ceremonies } from './webauthn.ts';
 
 export interface IdpOptions {
@@ -96,6 +100,12 @@ export interface IdpOptions {
   readonly mailer?: Mailer;
   /** company-api の窓口の内部 API（ADR 0026）。なければ、窓口の作成の承認と取消を受け付けない（照会は受け付ける）。 */
   readonly desk?: DeskConnection;
+  /**
+   * 回復（ADR 0027）。waitSeconds は協力者の承認から回復が成立するまでの待機（既定72時間）。オリジンが https のとき
+   * （本番）は、24時間未満を起動時に断る（ADR 0003、PRN-88）。noticeIntervalMs は、企業への回復の知らせの送信待ちを
+   * 見る間隔（既定30秒。0 なら自分では回さない。テストが deliverRecoveryNotices を呼ぶ）。
+   */
+  readonly recovery?: { readonly waitSeconds?: number; readonly noticeIntervalMs?: number };
   readonly now?: () => Date;
   readonly logLevel?: LogLevel;
   readonly logWrite?: (line: string) => void;
@@ -114,6 +124,8 @@ export interface Idp {
   readonly db: Db;
   /** Fastify に登録したルート（メソッドとパス。承認用のオリジンのものは末尾に「 (approval)」）。x-idp-routes で一覧を固定する。 */
   routes(): readonly string[];
+  /** 企業への回復の知らせの送信待ちを、いま1回送る（すべてのテナント。ADR 0027 の O-81）。 */
+  deliverRecoveryNotices(): Promise<{ readonly delivered: number; readonly retry: number }>;
   /**
    * 承認待ちを作る（M7 の CIBA などが使う。HTTP のルートはない）。型は approvalTypes で渡したものだけ。
    */
@@ -158,6 +170,18 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
   const onApproval = { constraints: { host: approvalHost } };
   const issuer = `${options.origin}${OIDC_MOUNT}`;
   const secureCookie = originUrl.protocol === 'https:';
+  const recoveryWaitSeconds = options.recovery?.waitSeconds ?? RECOVERY_TIMES.defaultWaitSeconds;
+  if (
+    !Number.isSafeInteger(recoveryWaitSeconds) ||
+    recoveryWaitSeconds < 1 ||
+    (secureCookie && recoveryWaitSeconds < RECOVERY_TIMES.minProductionWaitSeconds)
+  ) {
+    throw new Error('回復の待機は、本番（https）では24時間以上にする（ADR 0003）');
+  }
+  const noticeIntervalMs = options.recovery?.noticeIntervalMs ?? 30_000;
+  if (!Number.isSafeInteger(noticeIntervalMs) || noticeIntervalMs < 0) {
+    throw new Error('回復の知らせの配送の間隔は、0以上の整数（ミリ秒）にする');
+  }
   const now = options.now ?? (() => new Date());
   const nowMs = () => now().getTime();
 
@@ -171,6 +195,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
   const approvalTypes = new ApprovalTypes(options.approvalTypes ?? []);
   const inboxDeps = { ...repo, approvalTypes };
   const limiter = new RateLimiter(nowMs);
+  const userSerial = createUserSerial();
   const mailer = options.mailer ?? new MemoryOutbox();
   const ceremonies = new Ceremonies(store, {
     rpId: options.rpId,
@@ -247,7 +272,9 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
 
   app.addHook('onSend', async (request, reply, payload) => {
     reply.headers(SECURITY_HEADERS);
-    const nonce = (request as FastifyRequest & { cspNonce?: string }).cspNonce;
+    const marked = request as FastifyRequest & { cspNonce?: string; cameraSelf?: boolean };
+    if (marked.cameraSelf === true) reply.header('permissions-policy', CAMERA_PERMISSIONS_POLICY);
+    const nonce = marked.cspNonce;
     reply.header('content-security-policy', nonce === undefined ? DEFAULT_CSP : htmlCsp(nonce));
     return payload;
   });
@@ -261,9 +288,16 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
   });
   app.setNotFoundHandler((_request, reply) => reply.code(404).send({ error: 'not_found' }));
 
-  function sendHtml(request: FastifyRequest, reply: FastifyReply, html: (nonce: string) => string) {
+  function sendHtml(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    html: (nonce: string) => string,
+    pageOptions?: { readonly camera?: boolean },
+  ) {
     const nonce = newNonce(randomBytesOf(16));
-    (request as FastifyRequest & { cspNonce?: string }).cspNonce = nonce;
+    const marked = request as FastifyRequest & { cspNonce?: string; cameraSelf?: boolean };
+    marked.cspNonce = nonce;
+    if (pageOptions?.camera === true) marked.cameraSelf = true;
     return reply.type('text/html; charset=utf-8').send(html(nonce));
   }
 
@@ -293,6 +327,31 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
     return { session, cookie };
   }
 
+  const deskClient = options.desk === undefined ? undefined : createDeskClient(options.desk);
+  /** 企業への回復の知らせの送信待ちを渡す。例外を投げない（渡せなかったものは、次の回に送り直す）。 */
+  async function deliverRecoveryNoticesNow(
+    tenantIds?: readonly TenantId[],
+  ): Promise<{ readonly delivered: number; readonly retry: number }> {
+    if (deskClient === undefined) return { delivered: 0, retry: 0 };
+    try {
+      const counts = await deliverRecoveryNotices(
+        repo,
+        deskClient,
+        tenantIds ?? [...registry.tenants.keys()],
+      );
+      if (counts.retry > 0) {
+        app.log.warn({ event: 'idp.recovery_notice_deferred', count: counts.retry });
+      }
+      return counts;
+    } catch (error) {
+      app.log.warn({
+        event: 'idp.recovery_notice_failed',
+        errorName: error instanceof Error ? error.name : 'Error',
+      });
+      return { delivered: 0, retry: 0 };
+    }
+  }
+
   const ctx: RouteContext = {
     app,
     onMain,
@@ -308,10 +367,12 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
     approvalSessions,
     approvalTypes,
     limiter,
+    userSerial,
     ceremonies,
     emailDeps,
     provider,
-    desk: options.desk === undefined ? undefined : createDeskClient(options.desk),
+    desk: deskClient,
+    recoveryWaitSeconds,
     assets,
     nowMs,
     sendHtml,
@@ -320,6 +381,27 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
     },
     clearCookie(reply, name) {
       reply.header('set-cookie', `${name}=; ${cookieAttributes(['Max-Age=0'])}`);
+    },
+    async deliverRecoveryNotices(tenantIds) {
+      await deliverRecoveryNoticesNow(tenantIds);
+    },
+    revokeUserSessions(userId) {
+      sessions.revokeUser(userId);
+      approvalSessions.revokeUser(userId);
+      const ofUser = (value: unknown) => isRecord(value) && value.accountId === userId;
+      for (const kind of ['Session', 'AuthorizationCode', 'AccessToken'] as const) {
+        store.deleteWhere(kind, ofUser);
+      }
+      // ログインを終えたが、まだ企業に戻っていないインタラクション（その結果で企業に戻らせない）。
+      store.deleteWhere(
+        'Interaction',
+        (value) =>
+          isRecord(value) &&
+          ((isRecord(value.session) && value.session.accountId === userId) ||
+            (isRecord(value.result) &&
+              isRecord(value.result.login) &&
+              value.result.login.accountId === userId)),
+      );
     },
     requireSession: (request, reply) =>
       requireSessionIn(sessions, PWA_SESSION_COOKIE, request, reply),
@@ -353,8 +435,23 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
   registerApprovalRoutes(ctx);
   registerInteractionRoutes(ctx);
   registerDeskRoutes(ctx);
+  registerRecoveryRoutes(ctx);
 
   let approvalServer: Server | undefined;
+
+  // 企業への回復の知らせの配送の回（利用者の操作によらない。ADR 0027 の O-81）。
+  let noticeTimer: ReturnType<typeof setInterval> | undefined;
+  let noticeRunning: Promise<unknown> | undefined;
+  const runNotices = () => {
+    noticeRunning ??= deliverRecoveryNoticesNow().finally(() => {
+      noticeRunning = undefined;
+    });
+    return noticeRunning;
+  };
+  if (noticeIntervalMs > 0) {
+    noticeTimer = setInterval(runNotices, noticeIntervalMs);
+    noticeTimer.unref();
+  }
 
   return {
     app,
@@ -366,6 +463,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
     store,
     db,
     routes: () => [...routes].sort(),
+    deliverRecoveryNotices: () => deliverRecoveryNoticesNow(),
     requestApproval: (input) => requestApproval(inboxDeps, input),
     async listenApproval(input) {
       await app.ready();
@@ -380,6 +478,8 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
       approvalServer = server;
     },
     async close() {
+      if (noticeTimer !== undefined) clearInterval(noticeTimer);
+      await noticeRunning;
       const server = approvalServer;
       if (server !== undefined) {
         await new Promise<void>((resolve) => {

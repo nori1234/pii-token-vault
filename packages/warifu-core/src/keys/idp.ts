@@ -12,7 +12,8 @@ export type IdpMacPurpose =
   | 'pairwise_sub'
   | 'oidc_storage_id'
   | 'email_verify_code'
-  | 'approval_challenge';
+  | 'approval_challenge'
+  | 'recovery_code';
 const MAC_PURPOSES: readonly IdpMacPurpose[] = [
   'alias_lookup',
   'audit_chain',
@@ -20,6 +21,7 @@ const MAC_PURPOSES: readonly IdpMacPurpose[] = [
   'oidc_storage_id',
   'email_verify_code',
   'approval_challenge',
+  'recovery_code',
 ];
 
 /** id_token：ID トークン。op_approval：操作ごとの承認（ADR 0026）。 */

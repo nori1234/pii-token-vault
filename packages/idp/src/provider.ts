@@ -19,6 +19,7 @@ import Provider, { errors } from 'oidc-provider';
 import { currentAlias } from './alias.ts';
 import { deskDetailFromParam, parseDeskDetail, sameDeskDetail } from './desk.ts';
 import type { RateLimiter } from './rate-limit.ts';
+import { recoveredDay } from './recovery.ts';
 import { type ClientEntry, OUTBOUND_CLIENT_METADATA, type Registry } from './registry.ts';
 import { hasConnection, type RepoDeps, userExists } from './repo.ts';
 import type { KeysvcSigningKey } from './signing-key.ts';
@@ -136,7 +137,8 @@ export function buildProvider(deps: ProviderDeps): Provider {
     },
     scopes: ['openid', 'email'],
     claims: {
-      openid: ['sub'],
+      // recovered_at は回復した日（UTC の0時。ADR 0027 の O-81）。企業は制限を強める方向にだけ使う（RP-54）。
+      openid: ['sub', 'recovered_at'],
       email: ['email', 'email_verified', 'contact_alias'],
       acr: null,
       auth_time: null,
@@ -211,6 +213,8 @@ export function buildProvider(deps: ProviderDeps): Provider {
         // sub 以外は、scope が email のときの別名だけ。本物の連絡先、氏名などは返さない（不変条件4・5）。
         claims: async (_use, scope) => {
           const out: { sub: string; [key: string]: unknown } = { sub: userId };
+          const recoveredAt = await recoveredDay(repo, userId);
+          if (recoveredAt !== undefined) out.recovered_at = recoveredAt;
           if (
             !String(scope ?? '')
               .split(' ')

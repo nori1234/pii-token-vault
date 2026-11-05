@@ -74,11 +74,13 @@ export const DESK_TIMES = Object.freeze({
 
 /** 内部 API のソケットのファイル名。 */
 export const DESK_SOCKET_NAME = 'company-api.sock';
-export type DeskOp = 'approve' | 'status' | 'cancel';
+/** recovered は、回復の成立を企業へ知らせる送信待ちに入れる（ADR 0027 の O-81）。 */
+export type DeskOp = 'approve' | 'status' | 'cancel' | 'recovered';
 export const DESK_PATHS: Readonly<Record<DeskOp, string>> = Object.freeze({
   approve: '/v1/desk_approve',
   status: '/v1/desk_status',
   cancel: '/v1/desk_cancel',
+  recovered: '/v1/account_recovered',
 });
 /** 内部 API を呼べるのは idp だけ。 */
 export type DeskCaller = 'idp';
@@ -110,12 +112,24 @@ export interface DeskCancelRequest {
   readonly changeRef: string;
 }
 
+export interface AccountRecoveredRequest {
+  readonly userId: WarifuUserId;
+  /** 回復の記録の ID（同じ回復の再送で、二重に送信待ちに入れない）。 */
+  readonly attemptId: string;
+  /** 利用者が接続しているテナント（idp.connections）。 */
+  readonly tenantIds: readonly TenantId[];
+  /** 回復した日（UTC の0時の秒。ADR 0027 の O-81）。 */
+  readonly recoveredDay: number;
+}
+
 export const DESK_LIMITS = Object.freeze({
   requestBodyBytes: 8192,
   responseBodyBytes: 16_384,
   clientTimeoutMs: 5000,
   /** 1回の状態の照会で頼める項目の数。 */
   statusItems: 50,
+  /** 回復の知らせで頼めるテナントの数。 */
+  recoveredTenants: 100,
 } as const);
 
 /** エラーの本文。理由によらず、同じ種類のエラーはバイト単位で同じ本文にする。 */

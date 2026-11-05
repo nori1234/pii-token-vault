@@ -3,7 +3,7 @@
 //
 // - 資格情報は `Authorization: Bearer idp.<32バイトの base64url>`。形が違う、知らない呼び出し元、長さが違うときも、
 //   ダミーと比べてから失敗にする（所要時間をそろえる。relay の内部配送 API と同じ。ADR 0021）。
-// - POST /v1/desk_approve、/v1/desk_status、/v1/desk_cancel だけ。JSON の本文は 8KB まで。ほかはすべて 404。
+// - POST /v1/desk_approve、/v1/desk_status、/v1/desk_cancel、/v1/account_recovered（ADR 0027）だけ。JSON の本文は 8KB まで。ほかはすべて 404。
 // - テナントは、company-api の登録簿にあるものだけ。利用者 ID は idp が自分の認証から渡す。company-api は、
 //   行の利用者が頼んだ利用者と同じかも確かめる（BOLA の二重の守り。D-41）。
 // - 応答の本文に、受け取った値（申請ID など）を入れない。ログは固定の事象の名前だけ（不変条件4）。
@@ -28,6 +28,7 @@ import {
 import type { Logger } from '@pii-token-vault/warifu-core/log';
 import type { CompanyApiConfig } from './config.ts';
 import { acceptCancel, type DeskDeps, recordApproval, statusOf } from './desk.ts';
+import { enqueueRecovered } from './recovery.ts';
 
 const SECRET_BYTES = 32;
 const BEARER_PATTERN = /^Bearer (idp)\.([A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$/;
@@ -213,6 +214,35 @@ export async function startDeskInternalApi(
         return result.reason === 'closed'
           ? [409, DESK_ERROR_BODY.closed]
           : [404, DESK_ERROR_BODY.not_found];
+      }
+      case 'recovered': {
+        const body = objectWithKeys(value, ['userId', 'attemptId', 'tenantIds', 'recoveredDay']);
+        if (
+          body === undefined ||
+          !isUuid(body.userId) ||
+          !isUuid(body.attemptId) ||
+          !Array.isArray(body.tenantIds) ||
+          body.tenantIds.length > DESK_LIMITS.recoveredTenants ||
+          !body.tenantIds.every((tenantId) => isUuid(tenantId)) ||
+          typeof body.recoveredDay !== 'number' ||
+          !Number.isSafeInteger(body.recoveredDay) ||
+          body.recoveredDay % 86_400 !== 0
+        ) {
+          return undefined;
+        }
+        const result = await enqueueRecovered(deps, config, {
+          userId: body.userId as WarifuUserId,
+          attemptId: body.attemptId,
+          tenantIds: body.tenantIds as TenantId[],
+          recoveredDay: body.recoveredDay,
+        });
+        // 登録簿にないテナントは、受け取ったことにしない（idp が送り直す。設定の食い違いを、黙って失わない）。
+        if (!result.ok) {
+          log.warn({ event: 'company_api.recovery_unknown_tenant' });
+          return [404, DESK_ERROR_BODY.not_found];
+        }
+        log.info({ event: 'company_api.recovery_notified', count: result.queued });
+        return [204, ''];
       }
     }
   }

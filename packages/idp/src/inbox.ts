@@ -60,7 +60,7 @@ export interface DisplayLine {
 
 // ---- 知らせ ----
 
-/** 知らせの型（M6）。plan 4章の「全端末に知らせる」もの。回復、窓口での変更、協力者は M7・M8 で足す。 */
+/** 知らせの型（M6、M8）。plan 4章の「全端末に知らせる」もの。回復と協力者は M8（ADR 0027）。 */
 export const NOTICE_TYPES = Object.freeze({
   'passkey.added': {
     title: 'パスキーが追加されました',
@@ -74,6 +74,29 @@ export const NOTICE_TYPES = Object.freeze({
   'passkey.removed': { title: 'パスキーが削除されました', lines: () => [] },
   'email.registered': { title: 'メールアドレスが登録されました', lines: () => [] },
   'email.changed': { title: 'メールアドレスが変更されました', lines: () => [] },
+  // 回復（ADR 0027）。持ち主の受信箱（全端末）に入れる。
+  'recovery.code_issued': { title: '回復コードを作りました', lines: () => [] },
+  'recovery.code_reissued': { title: '回復コードを作り直しました', lines: () => [] },
+  'recovery.started': {
+    title: '回復が始まりました',
+    lines: (content: InboxContent): readonly DisplayLine[] =>
+      isDeviceKind(content.device)
+        ? [{ label: '要求した端末', value: DEVICE_KINDS[content.device] }]
+        : [],
+  },
+  'recovery.approved': { title: '協力者が回復を承認しました', lines: () => [] },
+  'recovery.cancelled': { title: '回復を取り消しました', lines: () => [] },
+  'recovery.expired': { title: '回復の期限が切れました', lines: () => [] },
+  'recovery.completed': { title: '回復が完了しました', lines: () => [] },
+  'helper.set': { title: '協力者を登録しました', lines: () => [] },
+  'helper.removed': { title: '協力者を外しました', lines: () => [] },
+  // 協力者の受信箱に入れるもの。中身は協力関係の ID だけ（表示名は協力者の端末の中だけ。PRN-91）。
+  'helper.added': { title: '協力者になりました', lines: () => [] },
+  'helper.ended': { title: '協力者ではなくなりました', lines: () => [] },
+  'helper.recovery_started': { title: '協力している人が回復を始めました', lines: () => [] },
+  'helper.recovery_cancelled': { title: '協力している人の回復が取り消されました', lines: () => [] },
+  'helper.recovery_completed': { title: '協力している人の回復が完了しました', lines: () => [] },
+  'helper.code_reissued': { title: '協力している人が回復コードを作り直しました', lines: () => [] },
 } satisfies Record<
   string,
   { title: string; lines: (content: InboxContent) => readonly DisplayLine[] }
@@ -137,6 +160,11 @@ export interface ApprovalType {
   parse(details: unknown): InboxContent | undefined;
   /** 画面に出す項目。parse の結果だけから作る。 */
   lines(content: InboxContent): readonly DisplayLine[];
+  /**
+   * 高リスクの操作（配送先・返金先・支払い手段の変更、解約、高額の取引など。不変条件1(a)）。true の型は、回復の後の
+   * 7日間、承認を受け付けない（拒否は受け付ける。ADR 0027 の O-80）。P0 には、まだ高リスクの型はない。
+   */
+  readonly highRisk?: boolean;
 }
 
 export class ApprovalTypes {
@@ -275,6 +303,8 @@ export async function insertNotice(
     readonly type: NoticeType;
     readonly content?: InboxContent;
     readonly now: Date;
+    /** 項目の ID。渡すと、同じ ID の知らせを二重に置かない（送り直しの知らせ。ADR 0027 の O-79）。 */
+    readonly itemId?: string;
   },
 ): Promise<void> {
   const content = input.content ?? {};
@@ -282,8 +312,10 @@ export async function insertNotice(
   await purgeInbox(tx, input.now);
   await tx.execute(
     sql`INSERT INTO idp.inbox (item_id, user_id, kind, type, tenant_id, content, state, created_at, purge_after)
-        VALUES (${randomUuid()}, ${input.userId}, 'notice', ${input.type}, ${null}, ${JSON.stringify(content)}::jsonb,
-                'unread', ${input.now}, ${new Date(input.now.getTime() + NOTICE_KEEP_DAYS * DAY_MS)})`,
+        VALUES (${input.itemId ?? randomUuid()}, ${input.userId}, 'notice', ${input.type}, ${null},
+                ${JSON.stringify(content)}::jsonb, 'unread', ${input.now},
+                ${new Date(input.now.getTime() + NOTICE_KEEP_DAYS * DAY_MS)})
+        ON CONFLICT (item_id) DO NOTHING`,
   );
 }
 

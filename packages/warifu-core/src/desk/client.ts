@@ -5,6 +5,7 @@
 import { isUuid } from '../ids.ts';
 import { UdsError, udsPost } from '../internal/uds-client.ts';
 import {
+  type AccountRecoveredRequest,
   DESK_CHANGE_STATES,
   DESK_EXTERNAL_ID_PATTERN,
   DESK_LIMITS,
@@ -48,6 +49,8 @@ export interface DeskClient {
   approve(request: DeskApproveRequest): Promise<DeskApproveResult>;
   status(request: DeskStatusRequest): Promise<readonly DeskStatusItem[]>;
   cancel(request: DeskCancelRequest): Promise<DeskCancelResult>;
+  /** 回復の成立を、企業への送信待ちに入れる（ADR 0027 の O-81）。入れられなければ DeskClientError。 */
+  accountRecovered(request: AccountRecoveredRequest): Promise<void>;
 }
 
 const CREDENTIAL_PATTERN = /^idp\.[A-Za-z0-9_-]{43}$/;
@@ -204,6 +207,27 @@ export function createDeskClient(connection: DeskConnection): DeskClient {
       }
       if (response.status === 404) return { ok: false, reason: 'not_found' };
       throw new DeskClientError('unavailable');
+    },
+
+    async accountRecovered(request: AccountRecoveredRequest): Promise<void> {
+      if (
+        !isUuid(request?.userId) ||
+        !isUuid(request.attemptId) ||
+        !Array.isArray(request.tenantIds) ||
+        request.tenantIds.length > DESK_LIMITS.recoveredTenants ||
+        !request.tenantIds.every((tenantId) => isUuid(tenantId)) ||
+        !Number.isSafeInteger(request.recoveredDay) ||
+        request.recoveredDay % 86_400 !== 0
+      ) {
+        throw new DeskClientError('invalid_request');
+      }
+      const response = await call('recovered', {
+        userId: request.userId,
+        attemptId: request.attemptId,
+        tenantIds: [...request.tenantIds],
+        recoveredDay: request.recoveredDay,
+      });
+      if (response.status !== 204) throw new DeskClientError('unavailable');
     },
   });
 }

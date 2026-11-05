@@ -35,6 +35,7 @@ export type MacPurpose =
   | 'oidc_storage_id'
   | 'email_verify_code'
   | 'approval_challenge'
+  | 'recovery_code'
   | 'desk_id'
   | 'desk_lookup'
   | 'relay_replay'
@@ -47,6 +48,7 @@ export const MAC_PURPOSES: readonly MacPurpose[] = Object.freeze([
   'oidc_storage_id',
   'email_verify_code',
   'approval_challenge',
+  'recovery_code',
   'desk_id',
   'desk_lookup',
   'relay_replay',

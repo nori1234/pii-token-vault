@@ -19,6 +19,7 @@ type Combo =
   | 'mac/oidc_storage_id'
   | 'mac/email_verify_code'
   | 'mac/approval_challenge'
+  | 'mac/recovery_code'
   | 'mac/desk_id'
   | 'mac/desk_lookup'
   | 'mac/relay_replay'
@@ -47,6 +48,7 @@ const COMBOS: readonly Combo[] = [
   'mac/oidc_storage_id',
   'mac/email_verify_code',
   'mac/approval_challenge',
+  'mac/recovery_code',
   'mac/desk_id',
   'mac/desk_lookup',
   'mac/relay_replay',
@@ -75,6 +77,7 @@ const ALLOWED: Readonly<Record<Caller, readonly Combo[]>> = {
     'mac/oidc_storage_id',
     'mac/email_verify_code',
     'mac/approval_challenge',
+    'mac/recovery_code',
     'derive_alias',
     'sign/id_token',
     'public_keys/id_token',
@@ -166,6 +169,8 @@ function bodyFor(combo: Combo): { op: string; body: unknown } {
       return { op: 'mac', body: { purpose: 'email_verify_code', message: b64('m') } };
     case 'mac/approval_challenge':
       return { op: 'mac', body: { purpose: 'approval_challenge', message: b64('m') } };
+    case 'mac/recovery_code':
+      return { op: 'mac', body: { purpose: 'recovery_code', message: b64('m') } };
     case 'mac/desk_id':
       return { op: 'mac', body: { purpose: 'desk_id', message: b64('m') } };
     case 'mac/desk_lookup':

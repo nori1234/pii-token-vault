@@ -1,7 +1,7 @@
 // ルートの群が共有するもの。createIdp が1つ作り、各群の register 関数に渡す。
 // ルートは onMain（本来のオリジン）か onApproval（承認用のオリジン）のどちらか一方にだけ登録する（ADR 0023）。
 
-import type { WarifuUserId } from '@pii-token-vault/warifu-core';
+import type { TenantId, WarifuUserId } from '@pii-token-vault/warifu-core';
 import type { DeskClient } from '@pii-token-vault/warifu-core/desk/client';
 import type { IdpKeyClient } from '@pii-token-vault/warifu-core/keys/idp';
 import type { FastifyInstance, FastifyReply, FastifyRequest, RouteShorthandOptions } from 'fastify';
@@ -14,6 +14,7 @@ import type { Registry } from '../registry.ts';
 import type { findCredential, RepoDeps } from '../repo.ts';
 import type { PwaSession, PwaSessions } from '../sessions.ts';
 import type { MacMemoryStore } from '../storage.ts';
+import type { UserSerial } from '../user-serial.ts';
 import type { Ceremonies } from '../webauthn.ts';
 
 export interface CurrentSession {
@@ -42,11 +43,18 @@ export interface RouteContext {
   readonly approvalSessions: PwaSessions;
   readonly approvalTypes: ApprovalTypes;
   readonly limiter: RateLimiter;
+  /**
+   * 利用者ごとの直列化（プロセスの中）。協力者の資格を変える書き込み（パスキーの追加、回復の成立）と、協力者の承認
+   * （資格の判定から記録まで）を通す（ADR 0027 の O-76）。
+   */
+  readonly userSerial: UserSerial;
   readonly ceremonies: Ceremonies;
   readonly emailDeps: EmailFlowDeps;
   readonly provider: Provider;
   /** company-api の窓口の内部 API（ADR 0026）。なければ、窓口の作成と取消を受け付けない。 */
   readonly desk: DeskClient | undefined;
+  /** 協力者の承認から回復が成立するまでの待機（秒。ADR 0027 の O-77）。 */
+  readonly recoveryWaitSeconds: number;
   readonly assets: Assets;
   readonly nowMs: () => number;
   /** HTML を返す。CSP の nonce を作って、onSend の CSP に渡す。 */
@@ -54,9 +62,22 @@ export interface RouteContext {
     request: FastifyRequest,
     reply: FastifyReply,
     html: (nonce: string) => string,
+    /** camera を true にすると、同じオリジンにだけカメラを許す（協力者の画面の QR の読み取り）。 */
+    options?: { readonly camera?: boolean },
   ): FastifyReply;
   setCookie(reply: FastifyReply, name: string, value: string): void;
   clearCookie(reply: FastifyReply, name: string): void;
+  /**
+   * 利用者のセッションをすべて消す（PWA、承認用のオリジン、OIDC の SSO のセッション、その利用者でログインした進行中の
+   * インタラクション、発行済みの認可コードとアクセストークン）。パスキーの削除と、回復の成立で呼ぶ（ADR 0018、
+   * ADR 0027 の O-79）。
+   */
+  revokeUserSessions(userId: WarifuUserId): void;
+  /**
+   * 企業への回復の知らせの送信待ちを、company-api の内部 API へ渡す（ADR 0027 の O-81）。tenantIds を省くと、
+   * 登録簿のすべてのテナント。例外を投げない（渡せなかったものは、配送の回が送り直す）。
+   */
+  deliverRecoveryNotices(tenantIds?: readonly TenantId[]): Promise<void>;
   /**
    * PWA のセッション（本来のオリジンのルートだけが呼ぶ）。なければ 401 を送って undefined を返す。
    * undefined のときは、呼び出し側は reply をそのまま返す。

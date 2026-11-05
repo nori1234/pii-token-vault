@@ -3,8 +3,10 @@
 
 import { bodyOf, FAILED, RATE_LIMITED } from '../http.ts';
 import { type InboxItem, isItemId, listInbox, markNoticeRead, NOTICE_TYPES } from '../inbox.ts';
+import { collectHelperNotices } from '../recovery.ts';
 import type { RouteContext } from './context.ts';
 import { deskItemEntries } from './desk.ts';
+import { recoverySummary } from './recovery.ts';
 
 export function registerInboxRoutes(ctx: RouteContext): void {
   const { app, onMain, repo, registry, approvalTypes, limiter } = ctx;
@@ -45,6 +47,13 @@ export function registerInboxRoutes(ctx: RouteContext): void {
     if (!limiter.take('inboxByUser', current.session.userId)) {
       return reply.code(429).send(RATE_LIMITED);
     }
+    // 協力している人の回復の知らせ（持ち主の送信待ちにある、自分あてのもの）を、自分の受信箱へ移す（ADR 0027 の
+    // O-79）。移せなくても、受信箱は読める（次に読むときに移す）。
+    try {
+      await collectHelperNotices(repo, current.session.userId);
+    } catch {
+      request.log.warn({ event: 'idp.helper_notice_deferred' });
+    }
     const items = await listInbox(repo, current.session.userId);
     const entries = items.map(inboxEntryOf).filter((entry) => entry !== undefined);
     return {
@@ -52,6 +61,8 @@ export function registerInboxRoutes(ctx: RouteContext): void {
       pendingApprovals: entries.filter((e) => e.kind === 'approval' && e.state === 'pending')
         .length,
       desk: await deskItemEntries(ctx, current.session.userId),
+      // 進行中の回復（ADR 0027）。取り消すのは承認用のオリジン（警告文 F）。
+      recovery: await recoverySummary(ctx, current.session.userId),
     };
   });
 

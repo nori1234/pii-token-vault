@@ -130,12 +130,13 @@
 | RP-50 | SET を受け取ったら、割符の鍵による署名（ES256）と、`iss`、`aud`（自分のテナント）、`jti`、`iat` を検証しなければならない | P0（Webhook。SSF への完全対応は P1） | SDK |
 | RP-51 | Webhook の受け口は https にし、公開の IP アドレスに解決されるようにしなければならない。それ以外の宛先には、送信サービスが送らない | P0 | 割符（テスト11） |
 | RP-52 | イベントを受けたとき、連絡先（メール、SMS、電話）による再確認に逃がしてはならない | P0 | 監査 |
-| RP-53 | 回復の直後は、高リスクの操作を保留する期間を設けなければならない。回復は、独自クレーム `recovered_at` と SET で届く | P0 | 監査（テスト3で `recovered_at` が届くことを確かめる） |
+| RP-53 | 回復の直後は、`recovered_at` から8日の間、高リスクの操作を保留しなければならない。回復は、独自クレーム `recovered_at` と SET で届く | P0 | 監査（テスト3の `t03-recovery-companies` で、`recovered_at` と回復の SET が届くことを確かめる） |
 | RP-54 | `recovered_at` は、制限を強める方向にだけ使わなければならない。本人確認や許可の根拠にしてはならない（PRN-51） | P0 | 監査 |
 
-- 割符は、回復の後7日間、高リスクの承認を出さない（plan 4）。RP-53 の保留期間の長さは、未定（M8 で決める）。
+- 割符は、回復の後7日間、高リスクの承認を出さない（plan 4）。RP-53 の保留期間の8日は、割符の7日に、`recovered_at` を日にまるめた分（最大1日）を足したもの（[ADR 0027](../adr/0027-recovery-details.md) の O-81）。
+- `recovered_at` は、ID トークンの独自クレーム（scope `openid` で常に出す。回復していなければ出さない）と、回復の SET の中身の両方で、回復した日の UTC の0時を秒の UNIX 時刻で表す。正確な時刻は渡さない（企業をまたいだ突き合わせを弱めるため。不変条件5）。
 - SET の送信時刻はテナントごとにランダムにずらし、`jti` はテナントごとの乱数にする（テスト12）。
-- P0 で送るイベントは、検証のイベント（SSF の `verification`。企業が `POST /v1/events/verification` で頼み、受け口を確かめる）と、窓口の取消のイベント（`urn:warifu:secevent:desk-cancellation`。M7）と、回復のイベント（M8）。SET は割符の鍵の ES256 で署名し（`typ` は `secevent+jwt`、検証の鍵は company-api の `GET /jwks`）、`aud` はテナント ID、`jti` はイベントごとの乱数。受け口が受け取らなければ、同じ `jti` で6回まで送り直す（[ADR 0022](../adr/0022-company-api-sender.md)）。
+- P0 で送るイベントは、検証のイベント（SSF の `verification`。企業が `POST /v1/events/verification` で頼み、受け口を確かめる）と、窓口の取消のイベント（`urn:warifu:secevent:desk-cancellation`。M7）と、回復のイベント（`urn:warifu:secevent:account-recovered`。M8）。SET は割符の鍵の ES256 で署名し（`typ` は `secevent+jwt`、検証の鍵は company-api の `GET /jwks`）、`aud` はテナント ID、`jti` はイベントごとの乱数。受け口が受け取らなければ、同じ `jti` で6回まで送り直す（[ADR 0022](../adr/0022-company-api-sender.md)）。
 - 窓口の取消のイベント（[ADR 0026](../adr/0026-desk-step-up-details.md) の O-67）：中身は `change_id`、`cancellation_id`、`accepted`（`within_window`）。初めて送るのは、取消の受理から0〜60秒の後。割符は、受け口の `202` だけを配送済みとし、取消の SET は諦めずに送り直す。送り直しでは `jti` と `iat` が新しくなることがあるので、企業は `jti` ではなく、`change_id` と `cancellation_id` の組で1回だけ適用する。受け口は、次の形で応答する（RFC 8935 の応答への、本製品の追加規則）。
   - 受け取った：`202`。
   - 署名、宛先、形式は正しく、`iat` が300秒より古い：`400` で `{"err":"invalid_request","warifu_reason":"set_too_old"}`（割符は、5秒あけて、新しい `jti` と `iat` で送り直す。3回続くと保留）。
@@ -143,6 +144,7 @@
   - 一時的に受け取れない：`429` か `5xx`（割符は、1分から6時間の間隔で送り直す）。そのほかの `4xx`、リダイレクト、`202` 以外の `2xx` は、割符が保留にする。
   - 保留になったら、企業は受け口を直して、検証の SET を `POST /v1/events/verification` で頼む。検証の SET に `202` を返すと、割符は保留にした取消の SET を送り直す。割符の側の原因なら、割符が設定を直して配備し直す（[ADR 0026](../adr/0026-desk-step-up-details.md) の O-72）。受理済みの取消は、`cancellation-status` の `cancellation_pending` で確かめられる。
   - 割符は、`description` を読まない。
+- 回復のイベント（[ADR 0027](../adr/0027-recovery-details.md) の O-81）：利用者が回復したことを、接続している企業ごとに知らせる。宛先の利用者は、SET の最上位の `sub_id`（`{"format":"opaque","id":"<その企業の sub>"}`）で示す。中身は `recovered_at`（回復した日の UTC の0時。秒）だけ。初めて送るのは、割符の側で回復が成立し、知らせが送信待ちに入ってから0〜6時間の後（テナントごとに独立の乱数。割符の内部で送り直したときは、さらに遅れる）。割符は、成立した回復だけを送る（取消と競合して成立しなかった回復は送らない）。`recovered_at` は成立した日で、送り直しても変わらない。企業の緊急停止の間に成立した回復の SET は、停止を解いた後に送る。割符の側で sub の索引が欠けていれば、索引を戻した後に送る。受け口の応答の規則と、送り直しと保留の扱いは、窓口の取消のイベントと同じ。同じ回復の送り直しでは `jti` と `iat` が新しくなることがあるので、企業は `sub_id` と `recovered_at` の組で1回だけ適用する。割符は、成立と同じトランザクションで知らせを送信待ちに置くので、知らせは失われない。
 
 ## 8. 代わりの手順
 

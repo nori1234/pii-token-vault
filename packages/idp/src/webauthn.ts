@@ -76,11 +76,23 @@ export interface WebAuthnConfig {
   readonly approvalOrigin: string;
 }
 
-export type RegistrationPurpose = 'create' | 'add';
-export type AuthenticationPurpose = 'login' | 'stepup' | 'approval_login';
+/** recovery は、回復の新しい端末で、回復待ちのパスキーを作る（承認用のオリジン。ADR 0027 の O-75）。 */
+export type RegistrationPurpose = 'create' | 'add' | 'recovery';
+/** recovery_resume は、新しい端末が回復待ちのパスキーで回復の状態を読み直す（承認用のオリジン）。 */
+export type AuthenticationPurpose = 'login' | 'stepup' | 'approval_login' | 'recovery_resume';
 export type ApprovalCeremonyDecision = 'approved' | 'denied';
-/** 内容に結び付いた儀式（承認用のオリジン）。窓口の承認と、窓口の作成の取消（ADR 0026）。 */
-export type BoundPurpose = 'desk_approve' | 'desk_cancel';
+/**
+ * 内容に結び付いた儀式（承認用のオリジン）。窓口の承認と、窓口の作成の取消（ADR 0026）。回復コードの作成、協力者の
+ * 確定と削除、協力者の承認、回復の取消（ADR 0027）。
+ */
+export type BoundPurpose =
+  | 'desk_approve'
+  | 'desk_cancel'
+  | 'recovery_code_issue'
+  | 'helper_confirm'
+  | 'helper_remove'
+  | 'recovery_helper_approve'
+  | 'recovery_cancel';
 
 interface RegistrationCeremony {
   readonly kind: 'registration';
@@ -89,6 +101,8 @@ interface RegistrationCeremony {
   readonly userId: WarifuUserId;
   /** インタラクションの uid か、PWA のセッションの参照。空文字は結び付けなし。 */
   readonly bind: string;
+  /** 呼び出し側が覚えておく参照（回復では、確かめた回復コードを作った時刻）。 */
+  readonly ref?: string;
 }
 
 interface AuthenticationCeremony {
@@ -127,7 +141,12 @@ interface BoundCeremony {
 type Ceremony = RegistrationCeremony | AuthenticationCeremony | ApprovalCeremony | BoundCeremony;
 
 export type RegistrationResult =
-  | { readonly ok: true; readonly userId: WarifuUserId; readonly credential: NewCredential }
+  | {
+      readonly ok: true;
+      readonly userId: WarifuUserId;
+      readonly credential: NewCredential;
+      readonly ref?: string;
+    }
   | { readonly ok: false };
 
 export type AuthenticationResult =
@@ -276,6 +295,7 @@ export class Ceremonies {
     readonly bind: string;
     /** 追加のとき、同じ認証器に2つ目を作らせない。 */
     readonly excludeCredentialIds?: readonly Uint8Array[];
+    readonly ref?: string;
   }): Promise<{ ceremonyId: string; options: PublicKeyCredentialCreationOptionsJSON }> {
     // 認証器の画面に出る名前。個人を指す情報を入れず、乱数のラベルにする（不変条件1(d)、4）。
     const label = `warifu-${Buffer.from(randomBytesOf(3)).toString('hex')}`;
@@ -298,6 +318,7 @@ export class Ceremonies {
       challenge: options.challenge,
       userId: input.userId,
       bind: input.bind,
+      ...(input.ref === undefined ? {} : { ref: input.ref }),
     });
     return { ceremonyId, options };
   }
@@ -321,7 +342,9 @@ export class Ceremonies {
       const result = await verifyRegistrationResponse({
         response: input.response as unknown as RegistrationResponseJSON,
         expectedChallenge: ceremony.challenge,
-        expectedOrigin: this.#config.origin,
+        // 回復の新しい端末は、承認用のオリジンでだけパスキーを作る（CAP-36）。
+        expectedOrigin:
+          ceremony.purpose === 'recovery' ? this.#config.approvalOrigin : this.#config.origin,
         expectedRPID: this.#config.rpId,
         expectedType: 'webauthn.create',
         requireUserPresence: true,
@@ -338,6 +361,7 @@ export class Ceremonies {
       return {
         ok: true,
         userId: ceremony.userId,
+        ...(ceremony.ref === undefined ? {} : { ref: ceremony.ref }),
         credential: {
           credentialId,
           publicKey,
@@ -374,9 +398,11 @@ export class Ceremonies {
     return { ceremonyId, options };
   }
 
-  /** 目的ごとの expectedOrigin。承認用のログインだけ、承認用のオリジン。 */
+  /** 目的ごとの expectedOrigin。承認用のログインと、回復の新しい端末の読み直しは、承認用のオリジン。 */
   #originOf(purpose: AuthenticationPurpose): string {
-    return purpose === 'approval_login' ? this.#config.approvalOrigin : this.#config.origin;
+    return purpose === 'approval_login' || purpose === 'recovery_resume'
+      ? this.#config.approvalOrigin
+      : this.#config.origin;
   }
 
   /**

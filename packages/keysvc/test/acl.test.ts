@@ -77,6 +77,7 @@ describe('能力の表の性質（不変条件3）', () => {
       'oidc_storage_id',
       'email_verify_code',
       'approval_challenge',
+      'recovery_code',
     ]) {
       const callers = ACL.filter(([, op, target]) => op === 'mac' && target === purpose).map(
         ([caller]) => caller,

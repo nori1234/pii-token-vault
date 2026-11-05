@@ -1,7 +1,7 @@
 // 承認用のオリジン：承認用のログイン、承認待ちの一覧、承認と拒否（DESIGN.md 原則8、ADR 0023）。
 
 import { randomBytesOf, toBase64Url, type WarifuUserId } from '@pii-token-vault/warifu-core';
-import { bodyOf, FAILED, RATE_LIMITED } from '../http.ts';
+import { bodyOf, FAILED, RATE_LIMITED, RESTRICTED } from '../http.ts';
 import {
   type ApprovalDecision,
   approvalChallengeMessage,
@@ -11,6 +11,7 @@ import {
   listPendingApprovals,
   type PendingApproval,
 } from '../inbox.ts';
+import { isRecoveryRestricted } from '../recovery.ts';
 import { APPROVAL_SESSION_COOKIE } from '../sessions.ts';
 import type { RouteContext } from './context.ts';
 
@@ -39,6 +40,16 @@ export function registerApprovalRoutes(ctx: RouteContext): void {
       expiresAt: item.expiresAt.toISOString(),
       warning: WARNING_OF[def.channel],
     };
+  }
+
+  /** 回復の後の7日間は、高リスクの型の承認を断る（拒否は通す。ADR 0027 の O-80）。 */
+  async function restrictedFor(
+    item: PendingApproval,
+    userId: WarifuUserId,
+    decision: ApprovalDecision,
+  ): Promise<boolean> {
+    if (decision !== 'approved' || approvalTypes.get(item.type)?.highRisk !== true) return false;
+    return isRecoveryRestricted(repo, userId);
   }
 
   async function approvalChallenge(
@@ -101,6 +112,9 @@ export function registerApprovalRoutes(ctx: RouteContext): void {
     if (item === undefined || approvalCardOf(item) === undefined) {
       return reply.code(400).send(FAILED);
     }
+    if (await restrictedFor(item, userId, decision as ApprovalDecision)) {
+      return reply.code(409).send(RESTRICTED);
+    }
     const nonce = toBase64Url(randomBytesOf(16));
     const challenge = await approvalChallenge(
       item,
@@ -124,6 +138,7 @@ export function registerApprovalRoutes(ctx: RouteContext): void {
     if (current === undefined) return reply;
     const { userId, ref } = current.session;
     const body = bodyOf(request);
+    let restricted = false;
     const result = await ceremonies.verifyApproval({
       ceremonyId: body.ceremonyId,
       response: body.response,
@@ -134,9 +149,15 @@ export function registerApprovalRoutes(ctx: RouteContext): void {
       recompute: async ({ itemId, decision, nonce }) => {
         const item = await findPendingApproval(repo, userId, itemId);
         if (item === undefined) return undefined;
+        // 選択肢を出した後に回復が成立していたら、高リスクの承認は通さない。
+        if (await restrictedFor(item, userId, decision)) {
+          restricted = true;
+          return undefined;
+        }
         return toBase64Url(await approvalChallenge(item, userId, decision, ref, nonce));
       },
     });
+    if (restricted) return reply.code(409).send(RESTRICTED);
     if (!result.ok) return reply.code(401).send(FAILED);
     await ctx.recordUse(result);
     // 状態の変更は1つの文で行う。同じ要求に、承認と拒否の両方は通らない（ADR 0006、ADR 0023）。

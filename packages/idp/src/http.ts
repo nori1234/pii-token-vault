@@ -6,6 +6,8 @@ import type { FastifyRequest } from 'fastify';
 export const FAILED = Object.freeze({ error: 'failed' });
 export const RATE_LIMITED = Object.freeze({ error: 'rate_limited' });
 export const LOGIN_REQUIRED = Object.freeze({ error: 'login_required' });
+/** 回復の後の制限の中（ADR 0027 の O-80）。 */
+export const RESTRICTED = Object.freeze({ error: 'restricted' });
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

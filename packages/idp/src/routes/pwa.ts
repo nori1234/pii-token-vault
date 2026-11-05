@@ -3,7 +3,8 @@
 import { fromBase64Url, newWarifuUserId, toBase64Url } from '@pii-token-vault/warifu-core';
 import { currentAlias } from '../alias.ts';
 import { confirmEmailVerification, startEmailVerification } from '../email.ts';
-import { bodyOf, cookieOf, FAILED, isRecord, RATE_LIMITED } from '../http.ts';
+import { bodyOf, cookieOf, FAILED, RATE_LIMITED, RESTRICTED } from '../http.ts';
+import { isRecoveryRestricted, recoveryRestrictedUntil } from '../recovery.ts';
 import {
   addCredential,
   createAccount,
@@ -78,10 +79,11 @@ export function registerPwaRoutes(ctx: RouteContext): void {
     const current = await ctx.requireSession(request, reply);
     if (current === undefined) return reply;
     const { userId } = current.session;
-    const [email, credentials, connections] = await Promise.all([
+    const [email, credentials, connections, restrictedUntil] = await Promise.all([
       emailStatus(repo, userId),
       listCredentials(repo, userId),
       listConnections(repo, userId),
+      recoveryRestrictedUntil(repo, userId),
     ]);
     const companies = [];
     for (const connection of connections) {
@@ -105,8 +107,12 @@ export function registerPwaRoutes(ctx: RouteContext): void {
         synced: c.backupEligible,
         createdAt: c.createdAt.toISOString(),
         lastUsedAt: c.lastUsedAt?.toISOString() ?? null,
+        // 回復で一時停止したパスキー（ログインにも承認にも使えない。ADR 0027 の O-80）。
+        suspended: c.state === 'suspended',
       })),
       companies,
+      // 回復の後の制限の終わり（制限の中でなければ null。PRN-90）。
+      restrictedUntil: restrictedUntil?.toISOString() ?? null,
     };
   });
 
@@ -141,6 +147,10 @@ export function registerPwaRoutes(ctx: RouteContext): void {
   app.post('/api/email/start', onMain, async (request, reply) => {
     const current = await ctx.requireFreshSession(request, reply);
     if (current === undefined) return reply;
+    // 回復の後7日間は、配送先（本物のメール）の登録と変更を受け付けない（PRN-90、ADR 0027 の O-80）。
+    if (await isRecoveryRestricted(ctx.repo, current.session.userId)) {
+      return reply.code(409).send(RESTRICTED);
+    }
     const result = await startEmailVerification(ctx.emailDeps, {
       userId: current.session.userId,
       email: bodyOf(request).email,
@@ -186,13 +196,19 @@ export function registerPwaRoutes(ctx: RouteContext): void {
       bind: current.session.ref,
     });
     if (!result.ok || result.userId !== current.session.userId) return reply.code(400).send(FAILED);
-    await addCredential(repo, result.userId, result.credential);
+    // 足した時刻は、協力者の資格を変える（PRN-87）。協力者の承認と直列にする（ADR 0027 の O-76）。
+    const { userId, credential } = result;
+    await ctx.userSerial.run(userId, () => addCredential(repo, userId, credential));
     return { ok: true };
   });
 
   app.post('/api/passkeys/delete', onMain, async (request, reply) => {
     const current = await ctx.requireFreshSession(request, reply);
     if (current === undefined) return reply;
+    // 回復の後7日間は、ほかのパスキーの削除を受け付けない（PRN-90）。
+    if (await isRecoveryRestricted(ctx.repo, current.session.userId)) {
+      return reply.code(409).send(RESTRICTED);
+    }
     const id = bodyOf(request).id;
     let credentialId: Uint8Array;
     try {
@@ -204,12 +220,7 @@ export function registerPwaRoutes(ctx: RouteContext): void {
     const deleted = await deleteCredential(repo, current.session.userId, credentialId);
     if (!deleted) return reply.code(400).send(FAILED);
     // パスキーを消したら、その利用者のセッション（PWA、承認用のオリジン、OIDC）をすべて消す（ADR 0018、ADR 0023）。
-    sessions.revokeUser(current.session.userId);
-    ctx.approvalSessions.revokeUser(current.session.userId);
-    ctx.store.deleteWhere(
-      'Session',
-      (value) => isRecord(value) && value.accountId === current.session.userId,
-    );
+    ctx.revokeUserSessions(current.session.userId);
     ctx.clearCookie(reply, PWA_SESSION_COOKIE);
     return { ok: true, reloginRequired: true };
   });

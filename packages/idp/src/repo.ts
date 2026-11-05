@@ -29,10 +29,17 @@ export interface NewCredential {
   readonly backedUp: boolean;
 }
 
+/**
+ * パスキーの状態（ADR 0027）。active だけがログインと承認に使える。suspended は回復の成立で一時停止したもの、
+ * pending は回復の途中で新しい端末に作ったもの。
+ */
+export type CredentialState = 'active' | 'suspended' | 'pending';
+
 export interface StoredCredential extends NewCredential {
   readonly userId: WarifuUserId;
   readonly createdAt: Date;
   readonly lastUsedAt: Date | null;
+  readonly state: CredentialState;
 }
 
 interface CredentialRow {
@@ -47,6 +54,7 @@ interface CredentialRow {
   backed_up: boolean;
   created_at: Date;
   last_used_at: Date | null;
+  state: CredentialState;
 }
 
 function toCredential(row: CredentialRow): StoredCredential {
@@ -62,6 +70,7 @@ function toCredential(row: CredentialRow): StoredCredential {
     backedUp: row.backed_up,
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at,
+    state: row.state,
   };
 }
 
@@ -71,13 +80,20 @@ export interface RepoDeps {
   readonly now: () => Date;
 }
 
-async function insertCredential(tx: Tx, userId: WarifuUserId, c: NewCredential): Promise<void> {
+/** パスキーを置く。recoveryAttemptId を渡すと、回復待ち（pending）のパスキーになる（ADR 0027 の O-75）。 */
+export async function insertCredential(
+  tx: Tx,
+  userId: WarifuUserId,
+  c: NewCredential,
+  recoveryAttemptId: string | null = null,
+): Promise<void> {
   await tx.execute(
     sql`INSERT INTO idp.credentials
           (credential_id, user_id, public_key, alg, rsa_bits, sign_count, transports, backup_eligible,
-           backed_up)
+           backed_up, state, recovery_attempt_id)
         VALUES (${c.credentialId}, ${userId}, ${c.publicKey}, ${c.alg}, ${c.rsaBits}, ${c.signCount},
-                ${[...c.transports]}, ${c.backupEligible}, ${c.backedUp})`,
+                ${[...c.transports]}, ${c.backupEligible}, ${c.backedUp},
+                ${recoveryAttemptId === null ? 'active' : 'pending'}, ${recoveryAttemptId})`,
   );
 }
 
@@ -103,18 +119,20 @@ export async function createAccount(
 /**
  * ログインで、資格情報 ID から保存済みの資格情報を引く（ADR 0007 の3、ADR 0018）。
  * 境界は、アサーションの userHandle（= 利用者 ID）。その利用者の資格情報の中で ID が一致しなければ undefined。
- * 別の利用者の資格情報 ID でも、存在しない ID でも、同じ undefined になる。
+ * 別の利用者の資格情報 ID でも、存在しない ID でも、同じ undefined になる。引くのは有効（active）なものだけ
+ * （一時停止と回復待ちのパスキーは、ログインにも承認にも使えない。ADR 0027）。
  */
 export async function findCredential(
   deps: RepoDeps,
   userId: WarifuUserId,
   credentialId: Uint8Array,
+  state: CredentialState = 'active',
 ): Promise<StoredCredential | undefined> {
   return deps.db.withWarifuUser(userId, async (tx) => {
     const [row] = await tx.query<CredentialRow>(
       sql`SELECT credential_id, user_id, public_key, alg, rsa_bits, sign_count, transports, backup_eligible,
-                 backed_up, created_at, last_used_at
-            FROM idp.credentials WHERE credential_id = ${credentialId}`,
+                 backed_up, created_at, last_used_at, state
+            FROM idp.credentials WHERE credential_id = ${credentialId} AND state = ${state}`,
     );
     return row === undefined ? undefined : toCredential(row);
   });
@@ -141,10 +159,11 @@ export async function listCredentials(
   userId: WarifuUserId,
 ): Promise<StoredCredential[]> {
   return deps.db.withWarifuUser(userId, async (tx) => {
+    // 回復待ちのパスキーは、管理の画面に出さない（回復が成立するまで、利用者のパスキーではない）。
     const rows = await tx.query<CredentialRow>(
       sql`SELECT credential_id, user_id, public_key, alg, rsa_bits, sign_count, transports, backup_eligible,
-                 backed_up, created_at, last_used_at
-            FROM idp.credentials ORDER BY created_at, credential_id`,
+                 backed_up, created_at, last_used_at, state
+            FROM idp.credentials WHERE state <> 'pending' ORDER BY created_at, credential_id`,
     );
     return rows.map(toCredential);
   });
@@ -160,7 +179,7 @@ export async function userExists(deps: RepoDeps, userId: WarifuUserId): Promise<
 
 async function countCredentials(tx: Tx): Promise<number> {
   const row = await tx.one<{ count: string }>(
-    sql`SELECT pg_catalog.count(*) AS count FROM idp.credentials`,
+    sql`SELECT pg_catalog.count(*) AS count FROM idp.credentials WHERE state = 'active'`,
   );
   return Number(row.count);
 }
@@ -172,6 +191,8 @@ export async function addCredential(
 ): Promise<void> {
   await deps.db.withWarifuUser(userId, async (tx) => {
     await insertCredential(tx, userId, credential);
+    // 足した時刻は、パスキーを消しても残す（協力者の14日の判定。PRN-87、ADR 0027 の O-76）。
+    await tx.execute(sql`UPDATE idp.users SET credential_added_at = ${deps.now()}`);
     const count = await countCredentials(tx);
     // 全端末への知らせ（plan 4章、ADR 0023）。追加と同じトランザクションで入れる。
     await insertNotice(tx, {
@@ -195,22 +216,30 @@ export async function addCredential(
  * ロックしないと、2つの削除が同時に「残り2つ」と数え、最後の1つまで消せてしまう。
  * 行は決まった順番でロックするので、2つの削除がデッドロックすることはない。
  */
-async function lockCredentials(tx: Tx): Promise<number> {
-  const rows = await tx.query(
-    sql`SELECT credential_id FROM idp.credentials ORDER BY credential_id FOR UPDATE`,
+async function lockCredentials(tx: Tx): Promise<{ credential_id: Uint8Array; state: string }[]> {
+  return tx.query<{ credential_id: Uint8Array; state: string }>(
+    sql`SELECT credential_id, state FROM idp.credentials ORDER BY credential_id FOR UPDATE`,
   );
-  return rows.length;
 }
 
-/** 最後の1つは消させない（回復の手段が整うまで、ログインできなくなるため）。消せたら true。 */
+/**
+ * 最後の有効なパスキーは消させない（ログインできなくなるため）。一時停止したものは、有効なものが残る限り消せる。
+ * 回復待ちのものは、ここでは消さない（回復の取消と期限切れで消す）。消せたら true。
+ */
 export async function deleteCredential(
   deps: RepoDeps,
   userId: WarifuUserId,
   credentialId: Uint8Array,
 ): Promise<boolean> {
   return deps.db.withWarifuUser(userId, async (tx) => {
-    const count = await lockCredentials(tx);
-    if (count <= 1) return false;
+    const rows = await lockCredentials(tx);
+    const target = rows.find((row) =>
+      Buffer.from(row.credential_id).equals(Buffer.from(credentialId)),
+    );
+    const active = rows.filter((row) => row.state === 'active').length;
+    if (target === undefined || target.state === 'pending') return false;
+    if (target.state === 'active' && active <= 1) return false;
+    const count = rows.filter((row) => row.state !== 'pending').length;
     const deleted = await tx.execute(
       sql`DELETE FROM idp.credentials WHERE credential_id = ${credentialId}`,
     );
