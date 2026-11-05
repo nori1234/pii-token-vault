@@ -139,9 +139,13 @@ export async function startTestIdp(
     db: { host: String(config.host), port: Number(config.port), database: String(config.database) },
     mailer: options?.mailer ?? outbox,
     ...(options?.desk === undefined ? {} : { desk: options.desk }),
-    ...(options?.recoveryWaitSeconds === undefined
-      ? {}
-      : { recovery: { waitSeconds: options.recoveryWaitSeconds } }),
+    // 企業への回復の知らせの配送の回は、テストが idp.deliverRecoveryNotices で回す（自分では回さない）。
+    recovery: {
+      noticeIntervalMs: 0,
+      ...(options?.recoveryWaitSeconds === undefined
+        ? {}
+        : { waitSeconds: options.recoveryWaitSeconds }),
+    },
     logWrite: (line) => {
       lines.push(line);
     },

@@ -55,10 +55,11 @@ async function dumpRows(userIds: readonly WarifuUserId[], tenantId: TenantId): P
       });
     }
     await idp.withTenant(tenantId, async (tx) => {
-      for (const row of await tx.query<{ line: string }>(
+      for (const statement of [
         sql`SELECT row_to_json(t)::text AS line FROM audit.events AS t`,
-      )) {
-        out.push(row.line);
+        sql`SELECT row_to_json(t)::text AS line FROM idp.recovery_notice_queue AS t`,
+      ]) {
+        for (const row of await tx.query<{ line: string }>(statement)) out.push(row.line);
       }
     });
   } finally {

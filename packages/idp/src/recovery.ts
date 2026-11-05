@@ -6,8 +6,11 @@
 // - 協力関係は、内部 ID の組だけ（PRN-91）。表示名は協力者の端末の中だけ。
 // - 招待と、協力者の承認の結び付けは、プロセスのメモリ（MacMemoryStore）に置く（10分、1回だけ。O-74、O-76）。
 // - DB は、持ち主か協力者の、どちらか1人の範囲（withWarifuUser）でだけ読み書きする（不変条件8）。
-// - 協力者への知らせは、持ち主の変更と同じトランザクションで送信待ち（idp.helper_notice_outbox）に置き、確定の後に
-//   flushHelperNotices で協力者の受信箱へ移す。移せなくても、持ち主の変更は取り消さず、後で送り直す（O-79）。
+// - 協力者への知らせは、持ち主の変更と同じトランザクションで送信待ち（idp.helper_notice_outbox）に置く。協力者が
+//   自分の受信箱を読むときに、協力者の範囲で、自分あての行を受信箱へ移す（collectHelperNotices。持ち主の操作に
+//   よらない。O-79）。
+// - 企業への知らせは、成立と同じトランザクションで送信待ち（idp.recovery_notice_queue）に置く。idp の配送の回が、
+//   テナントの範囲で読んで company-api に渡す（deliverRecoveryNotices。利用者の操作によらない。O-81）。
 
 import {
   constantTimeEqual,
@@ -15,11 +18,13 @@ import {
   lengthPrefixed,
   randomBytesOf,
   randomUuid,
+  type TenantId,
   uuidBytes,
   type WarifuUserId,
 } from '@pii-token-vault/warifu-core';
 import { appendAudit } from '@pii-token-vault/warifu-core/audit';
 import { sql, type Tx } from '@pii-token-vault/warifu-core/db';
+import type { DeskClient } from '@pii-token-vault/warifu-core/desk/client';
 import type { IdpKeyClient } from '@pii-token-vault/warifu-core/keys/idp';
 import {
   RECOVERY_CANCELLED,
@@ -268,41 +273,40 @@ async function queueHelperNotice(
 }
 
 /**
- * 持ち主の送信待ちにある協力者への知らせを、協力者の受信箱へ移す。協力者の受信箱には、送信待ちの ID を項目の ID に
- * して置くので、途中で失敗して送り直しても、同じ知らせは1つだけになる。移した数を返す。失敗したら例外にする
- * （呼び出し元は、持ち主の変更を取り消さず、後で送り直す）。
+ * 協力者あての知らせを、協力者の受信箱へ移す（協力者の範囲の1つのトランザクションで、受信箱に置いて送信待ちから
+ * 消す）。送信待ちの ID を受信箱の項目の ID にするので、同じ知らせは1つだけになる。協力者の受信箱を読むたびに呼ぶ
+ * （持ち主の操作によらない）。移した数を返す。
  */
-export async function flushHelperNotices(
+export async function collectHelperNotices(
   deps: RepoDeps,
-  ownerUserId: WarifuUserId,
+  helperUserId: WarifuUserId,
 ): Promise<number> {
-  const pending = await deps.db.withWarifuUser(ownerUserId, (tx) =>
-    tx.query<{
+  return deps.db.withWarifuUser(helperUserId, async (tx) => {
+    // 消してから置く（同時に読んだ別の要求は、消した行を待ってから0件になる）。
+    const rows = await tx.query<{
       notice_id: string;
-      helper_user_id: string;
       relationship_id: string;
       type: NoticeType;
+      created_at: Date;
     }>(
-      sql`SELECT notice_id, helper_user_id, relationship_id, type FROM idp.helper_notice_outbox
-           ORDER BY created_at, notice_id LIMIT 20`,
-    ),
-  );
-  for (const row of pending) {
-    const helperUserId = row.helper_user_id as WarifuUserId;
-    await deps.db.withWarifuUser(helperUserId, (tx) =>
-      insertNotice(tx, {
+      sql`DELETE FROM idp.helper_notice_outbox
+           WHERE notice_id IN (SELECT notice_id FROM idp.helper_notice_outbox
+                                WHERE helper_user_id = ${helperUserId}
+                                ORDER BY created_at, notice_id LIMIT 50)
+       RETURNING notice_id, relationship_id, type, created_at`,
+    );
+    rows.sort((a, b) => a.created_at.getTime() - b.created_at.getTime());
+    for (const row of rows) {
+      await insertNotice(tx, {
         userId: helperUserId,
         type: row.type,
         content: { relationship: row.relationship_id },
-        now: deps.now(),
+        now: row.created_at,
         itemId: row.notice_id,
-      }),
-    );
-    await deps.db.withWarifuUser(ownerUserId, (tx) =>
-      tx.execute(sql`DELETE FROM idp.helper_notice_outbox WHERE notice_id = ${row.notice_id}`),
-    );
-  }
-  return pending.length;
+      });
+    }
+    return rows.length;
+  });
 }
 
 interface HelperRow {
@@ -870,9 +874,9 @@ export async function activeRecovery(
 
 /**
  * 回復を成立させる。待機を終えた記録と、その回復待ちのパスキーのときだけ。ほかの有効なパスキーを一時停止し、
- * recovered_at を置き、回復コードを作り直す（新しいコードの平文は返り値だけ）。協力者への知らせは送信待ちに置く
- * だけで、ここでは送らない。企業への知らせは、準備（呼び出し側が成立の前に行う）を、成立の後に確定する必要が
- * あることを記録する（companyNoticePending。確定は confirmCompanyNotices で、届くまで送り直す。O-79、O-81）。
+ * recovered_at を置き、回復コードを作り直す（新しいコードの平文は返り値だけ）。協力者への知らせと、接続している
+ * 企業への知らせは、同じトランザクションで送信待ちに置く（成立しなかった回復の知らせは、どこにも残らない。O-79、
+ * O-81）。企業に渡す回復した日は、成立の時刻から決める。
  */
 export async function completeRecovery(
   deps: RepoDeps,
@@ -883,8 +887,8 @@ export async function completeRecovery(
     readonly credentialId: Uint8Array;
     /** 成立の時刻（企業への知らせの recovered_at と同じ日にするため、呼び出し側が決める）。 */
     readonly at: Date;
-    /** 企業への知らせを準備した（接続している企業がある）か。 */
-    readonly companyNoticePending: boolean;
+    /** 利用者が接続しているテナント（企業への知らせの宛先）。 */
+    readonly tenantIds: readonly TenantId[];
   },
 ): Promise<{ readonly code: string; readonly recoveredAt: Date } | undefined> {
   const secret = randomBytesOf(SECRET_BYTES);
@@ -894,8 +898,7 @@ export async function completeRecovery(
     const updated = await tx.execute(
       sql`UPDATE idp.recovery_attempts
              SET state = 'completed', ended_at = ${now},
-                 purge_after = ${new Date(now.getTime() + RECOVERY_TIMES.keepAfterEndDays * DAY_MS)},
-                 company_notice_pending = ${input.companyNoticePending}
+                 purge_after = ${new Date(now.getTime() + RECOVERY_TIMES.keepAfterEndDays * DAY_MS)}
            WHERE attempt_id = ${input.attemptId} AND state = 'waiting' AND ready_at <= ${now}`,
     );
     if (updated !== 1) return undefined;
@@ -926,6 +929,14 @@ export async function completeRecovery(
         });
       }
     }
+    for (const tenantId of new Set(input.tenantIds)) {
+      await tx.execute(
+        sql`INSERT INTO idp.recovery_notice_queue
+              (notice_id, tenant_id, user_id, attempt_id, recovered_day, next_attempt_at, created_at)
+            VALUES (${randomUuid()}, ${tenantId}, ${input.userId}, ${input.attemptId}, ${recoveredDayOf(now)},
+                    ${now}, ${now})`,
+      );
+    }
     await appendAudit(tx, deps.keys, RECOVERY_COMPLETED, {}, { now: deps.now });
     await appendAudit(tx, deps.keys, RECOVERY_CODE_ISSUED, { reissued: true }, { now: deps.now });
     return { recoveredAt: now };
@@ -934,32 +945,81 @@ export async function completeRecovery(
   return { code: formatRecoveryCode(input.userId, secret), recoveredAt: done.recoveredAt };
 }
 
-/** 成立した回復のうち、企業への知らせの確定がまだのもの（持ち主の範囲）。回復の記録の ID を返す。 */
-export async function pendingCompanyNotices(
-  deps: RepoDeps,
-  userId: WarifuUserId,
-): Promise<string[]> {
-  const rows = await deps.db.withWarifuUser(userId, (tx) =>
-    tx.query<{ attempt_id: string }>(
-      sql`SELECT attempt_id FROM idp.recovery_attempts
-           WHERE state = 'completed' AND company_notice_pending ORDER BY ended_at, attempt_id`,
-    ),
-  );
-  return rows.map((row) => row.attempt_id);
+// ---- 企業への知らせの配送（O-81） ----
+
+/** 送り直すまでの間隔（ミリ秒）。1分、5分、30分、2時間、以後6時間ごと。諦めない（成立した回復は必ず知らせる）。 */
+const NOTICE_RETRY_MS = [60_000, 300_000, 1_800_000, 7_200_000, 21_600_000] as const;
+/** 渡している間、ほかの配送の回に同じ行を渡させない時間（ミリ秒）。 */
+const NOTICE_LEASE_MS = 60_000;
+const NOTICE_BATCH = 20;
+
+interface QueuedNotice {
+  notice_id: string;
+  user_id: string;
+  attempt_id: string;
+  recovered_day: string;
+  attempts: number;
 }
 
-/** 企業への知らせを確定できたことを記録する。 */
-export async function markCompanyNoticeConfirmed(
+/**
+ * 企業への回復の知らせの送信待ちを、テナントごとに company-api の内部 API へ渡す（idp の配送の回が呼ぶ。利用者の
+ * 操作によらない）。テナントの範囲で読み、渡せたら消し、渡せなければ回数を数えて間隔を空ける。回復した日は、
+ * 送信待ちの行の値（成立の時刻から決めたもの）をそのまま渡す。
+ */
+export async function deliverRecoveryNotices(
   deps: RepoDeps,
-  userId: WarifuUserId,
-  attemptId: string,
-): Promise<void> {
-  await deps.db.withWarifuUser(userId, (tx) =>
-    tx.execute(
-      sql`UPDATE idp.recovery_attempts SET company_notice_pending = false
-           WHERE attempt_id = ${attemptId} AND state = 'completed'`,
-    ),
-  );
+  desk: Pick<DeskClient, 'accountRecovered'>,
+  tenantIds: Iterable<TenantId>,
+): Promise<{ readonly delivered: number; readonly retry: number }> {
+  const counts = { delivered: 0, retry: 0 };
+  for (const tenantId of new Set(tenantIds)) {
+    const claimed = await deps.db.withTenant(tenantId, async (tx) => {
+      const now = deps.now();
+      return tx.query<QueuedNotice>(
+        sql`UPDATE idp.recovery_notice_queue
+               SET next_attempt_at = ${new Date(now.getTime() + NOTICE_LEASE_MS)}
+             WHERE notice_id IN (
+                     SELECT notice_id FROM idp.recovery_notice_queue
+                      WHERE next_attempt_at <= ${now}
+                      ORDER BY next_attempt_at, notice_id
+                      LIMIT ${NOTICE_BATCH}
+                      FOR UPDATE SKIP LOCKED)
+         RETURNING notice_id, user_id, attempt_id, recovered_day, attempts`,
+      );
+    });
+    for (const row of claimed) {
+      let ok = false;
+      try {
+        await desk.accountRecovered({
+          userId: row.user_id as WarifuUserId,
+          attemptId: row.attempt_id,
+          tenantIds: [tenantId],
+          recoveredDay: Number(row.recovered_day),
+        });
+        ok = true;
+      } catch {
+        ok = false;
+      }
+      await deps.db.withTenant(tenantId, async (tx) => {
+        if (ok) {
+          await tx.execute(
+            sql`DELETE FROM idp.recovery_notice_queue WHERE notice_id = ${row.notice_id}`,
+          );
+          return;
+        }
+        const delay = NOTICE_RETRY_MS[Math.min(row.attempts, NOTICE_RETRY_MS.length - 1)] ?? 0;
+        await tx.execute(
+          sql`UPDATE idp.recovery_notice_queue
+                 SET attempts = ${row.attempts + 1},
+                     next_attempt_at = ${new Date(deps.now().getTime() + delay)}
+               WHERE notice_id = ${row.notice_id}`,
+        );
+      });
+      if (ok) counts.delivered += 1;
+      else counts.retry += 1;
+    }
+  }
+  return counts;
 }
 
 /** recovered_at を、企業に渡す日の値（UTC の0時の秒）にする（O-81。企業をまたいだ突き合わせを弱める）。 */

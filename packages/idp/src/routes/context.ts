@@ -1,7 +1,7 @@
 // ルートの群が共有するもの。createIdp が1つ作り、各群の register 関数に渡す。
 // ルートは onMain（本来のオリジン）か onApproval（承認用のオリジン）のどちらか一方にだけ登録する（ADR 0023）。
 
-import type { WarifuUserId } from '@pii-token-vault/warifu-core';
+import type { TenantId, WarifuUserId } from '@pii-token-vault/warifu-core';
 import type { DeskClient } from '@pii-token-vault/warifu-core/desk/client';
 import type { IdpKeyClient } from '@pii-token-vault/warifu-core/keys/idp';
 import type { FastifyInstance, FastifyReply, FastifyRequest, RouteShorthandOptions } from 'fastify';
@@ -67,6 +67,11 @@ export interface RouteContext {
    * ADR 0027 の O-79）。
    */
   revokeUserSessions(userId: WarifuUserId): void;
+  /**
+   * 企業への回復の知らせの送信待ちを、company-api の内部 API へ渡す（ADR 0027 の O-81）。tenantIds を省くと、
+   * 登録簿のすべてのテナント。例外を投げない（渡せなかったものは、配送の回が送り直す）。
+   */
+  deliverRecoveryNotices(tenantIds?: readonly TenantId[]): Promise<void>;
   /**
    * PWA のセッション（本来のオリジンのルートだけが呼ぶ）。なければ 401 を送って undefined を返す。
    * undefined のときは、呼び出し側は reply をそのまま返す。

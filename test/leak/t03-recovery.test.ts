@@ -3,11 +3,10 @@
 // （plan 11章の「ハーネスが時間を進める」。DB の時刻を書き換えずに、idp の時刻だけを進める）。
 // 企業への知らせ（recovered_at と回復の SET）は t03-recovery-companies で確かめる。
 
-import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { FAILED, RESTRICTED } from '../../packages/idp/src/http.ts';
 import { type ApprovalType, NOTICE_TYPES } from '../../packages/idp/src/inbox.ts';
-import { flushHelperNotices } from '../../packages/idp/src/recovery.ts';
+import { collectHelperNotices } from '../../packages/idp/src/recovery.ts';
 import type { RepoDeps } from '../../packages/idp/src/repo.ts';
 import { sql } from '../../packages/warifu-core/src/db/sql.ts';
 import type { TenantId, WarifuUserId } from '../../packages/warifu-core/src/ids.ts';
@@ -449,64 +448,46 @@ describe('漏えい：回復（plan 11章 テスト3）', () => {
     }
   });
 
-  it('協力者への知らせが送れなくても持ち主の変更は残り、後で1回だけ届く', async () => {
-    // 攻撃者が持っている情報：（障害）協力者の受信箱への書き込みが一時的に失敗する状態
-    // 試す経路：持ち主の送信待ちに協力者への知らせがあるときに、協力者の範囲の書き込みを失敗させて送る。次に、協力者の
-    //           受信箱には書けたが、持ち主の送信待ちを消せなかった状態にする。その後で、持ち主の受信箱を読む
-    // 期待する結果：失敗しても送信待ちは残る。送り直すと、協力者の受信箱に、同じ知らせが1つだけ届き、送信待ちは空になる
-    // plan 11章：テスト3（ADR 0027 の O-79。オーナーのレビュー）
-    const { owner, helper, relationshipId } = await ownerWithHelper();
-    const helperId = helper.userId;
+  it('協力者への知らせは、持ち主が何もしなくても、協力者が受信箱を読むと届く。移せなくても残り、1回だけ届く', async () => {
+    // 攻撃者が持っている情報：盗んだ回復コード（持ち主は端末を使っていない。協力者に知らせが届かないことを期待する）
+    // 試す経路：回復を始めた後、持ち主は何もしない。協力者の範囲の書き込みを失敗させてから、協力者が受信箱を読む。
+    //           もう一度読む
+    // 期待する結果：失敗しても、知らせは送信待ちに残る。協力者が受信箱を読むと、持ち主の操作なしに届く。同じ知らせは
+    //               1つだけ。送信待ちは、持ち主の範囲からは読めない（協力者あての行は、協力者だけが読んで消す）
+    // plan 11章：テスト3（ADR 0027 の O-79。オーナーの再レビュー）
+    const { owner, helper, code } = await ownerWithHelper();
+    const startedTitle = title('helper.recovery_started');
+    const startedCount = async () =>
+      (await titles(helper.pwa)).filter((t) => t === startedTitle).length;
+    const before = await startedCount();
     const db = await serviceDb('idp');
     try {
-      const noticeId = randomUUID();
-      await db.withWarifuUser(owner.userId, (tx) =>
-        tx.execute(
-          sql`INSERT INTO idp.helper_notice_outbox
-                (notice_id, owner_user_id, helper_user_id, relationship_id, type, created_at)
-              VALUES (${noticeId}, ${owner.userId}, ${helperId}, ${relationshipId},
-                      'helper.code_reissued', ${new Date(clock)})`,
-        ),
-      );
-      const pending = () =>
-        db.withWarifuUser(owner.userId, (tx) =>
+      const pendingFor = (userId: WarifuUserId) =>
+        db.withWarifuUser(userId, (tx) =>
           tx.query(sql`SELECT notice_id FROM idp.helper_notice_outbox`),
         );
-      const reissuedCount = async () =>
-        (await titles(helper.pwa)).filter((t) => t === title('helper.code_reissued')).length;
-      const deps = (failOn: 'helper' | 'owner-delete' | undefined): RepoDeps => {
-        let ownerCalls = 0;
-        return {
-          db: {
-            ...db,
-            withWarifuUser: ((userId: WarifuUserId, fn: never) => {
-              if (failOn === 'helper' && userId === helperId) {
-                return Promise.reject(new Error('書き込みの失敗（テスト）'));
-              }
-              if (failOn === 'owner-delete' && userId === owner.userId) {
-                ownerCalls += 1;
-                if (ownerCalls >= 2) return Promise.reject(new Error('削除の失敗（テスト）'));
-              }
-              return db.withWarifuUser(userId, fn);
-            }) as RepoDeps['db']['withWarifuUser'],
-          } as RepoDeps['db'],
-          keys: undefined as never,
-          now: () => new Date(clock),
-        };
+      // 持ち主は、この後なにもしない（受信箱も回復の設定も読まない）。
+      expect((await startOnNewDevice(t, code)).register?.status).toBe(200);
+      expect(await pendingFor(helper.userId)).toHaveLength(1);
+      expect(await pendingFor(owner.userId)).toHaveLength(0);
+
+      const failing: RepoDeps = {
+        db: {
+          ...db,
+          withWarifuUser: (() =>
+            Promise.reject(
+              new Error('書き込みの失敗（テスト）'),
+            )) as RepoDeps['db']['withWarifuUser'],
+        } as RepoDeps['db'],
+        keys: undefined as never,
+        now: () => new Date(clock),
       };
-      const before = await reissuedCount();
-      await expect(flushHelperNotices(deps('helper'), owner.userId)).rejects.toThrow();
-      expect(await pending()).toHaveLength(1);
-      expect(await reissuedCount()).toBe(before);
+      await expect(collectHelperNotices(failing, helper.userId)).rejects.toThrow();
+      expect(await pendingFor(helper.userId)).toHaveLength(1);
 
-      await expect(flushHelperNotices(deps('owner-delete'), owner.userId)).rejects.toThrow();
-      expect(await pending()).toHaveLength(1);
-      expect(await reissuedCount()).toBe(before + 1);
-
-      // 持ち主の受信箱を読むと、送信待ちを送り直す（同じ知らせは二重に届かない）。
-      expect((await owner.pwa.get('/api/inbox')).status).toBe(200);
-      expect(await pending()).toHaveLength(0);
-      expect(await reissuedCount()).toBe(before + 1);
+      expect(await startedCount()).toBe(before + 1);
+      expect(await pendingFor(helper.userId)).toHaveLength(0);
+      expect(await startedCount()).toBe(before + 1);
     } finally {
       await db.close();
     }

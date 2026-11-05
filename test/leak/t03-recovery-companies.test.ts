@@ -1,12 +1,13 @@
 // 回復を企業に知らせる（plan 11章 テスト3 の「recovered_at が企業に届く」とテスト12、ADR 0027 の O-79・O-81、RP-53）。
 // idp、company-api（idp からの内部 API）、sender（回復の SET の配送）を立て、企業のサーバーの役はテストの中で行う。
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createLocalJWKSet, decodeJwt, jwtVerify } from 'jose';
+import { createLocalJWKSet, jwtVerify } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { deliverRecoveryNotices } from '../../packages/idp/src/recovery.ts';
 import { sql } from '../../packages/warifu-core/src/db/sql.ts';
 import { createDeskClient } from '../../packages/warifu-core/src/desk/client.ts';
 import type { TenantId } from '../../packages/warifu-core/src/ids.ts';
@@ -25,7 +26,6 @@ import {
 } from '../setup/idp.ts';
 import {
   bindingCodeOf,
-  cancelRecovery,
   helperApprove,
   issueCode,
   makeHelper,
@@ -103,16 +103,26 @@ async function recoveredRows(tenantId: TenantId) {
   const db = await serviceDb('company-api');
   try {
     return await db.withTenant(tenantId, (tx) =>
-      tx.query<{
-        deliver_after: Date;
-        recovered_day: string;
-        recovery_ref: string;
-        recovery_confirmed: boolean;
-      }>(
-        sql`SELECT deliver_after, recovered_day, recovery_ref, recovery_confirmed FROM company_api.set_outbox
+      tx.query<{ deliver_after: Date; recovered_day: string; recovery_ref: string }>(
+        sql`SELECT deliver_after, recovered_day, recovery_ref FROM company_api.set_outbox
              WHERE event_type = 'account_recovered'`,
       ),
     );
+  } finally {
+    await db.close();
+  }
+}
+
+/** idp の、企業への知らせの送信待ち（テナントの範囲で読む。idp の配送の回と同じ境界）。 */
+async function queuedFor(tenantId: TenantId, attemptId?: string) {
+  const db = await serviceDb('idp');
+  try {
+    const rows = await db.withTenant(tenantId, (tx) =>
+      tx.query<{ attempt_id: string; recovered_day: string; attempts: number }>(
+        sql`SELECT attempt_id, recovered_day, attempts FROM idp.recovery_notice_queue`,
+      ),
+    );
+    return attemptId === undefined ? rows : rows.filter((row) => row.attempt_id === attemptId);
   } finally {
     await db.close();
   }
@@ -236,12 +246,12 @@ describe('漏えい：回復を企業に知らせる（plan 11章 テスト3、�
     expect(typeof outcome.approvalJwt).toBe('string');
   });
 
-  it('取り消された回復は、企業への知らせを準備していても届かない。確定されない準備は30日で消える', async () => {
-    // 攻撃者が持っている情報：（競合）成立の直前に企業への知らせを準備した、攻撃者の回復（持ち主が同時に取り消す）
-    // 試す経路：待機を終えた回復で、企業への知らせを準備した後に、持ち主が登録済みの端末で取り消す。新しい端末で成立を
-    //           試みる。6時間の後に配送の回を回す。30日の後に、もう一度回す
-    // 期待する結果：成立は 401。準備の行は確定されず、回復の SET は企業に届かない。確定されない準備は30日で消える
-    // plan 11章：テスト3、テスト12（ADR 0027 の O-81。オーナーのレビュー）
+  it('取消と成立を同時に送っても、通るのは一方だけで、企業に届くのは成立した回復だけ', async () => {
+    // 攻撃者が持っている情報：待機を終えた回復（攻撃者の新しい端末）。持ち主は、同じ時に登録済みの端末で取り消す
+    // 試す経路：持ち主の取消の確定と、新しい端末の成立を、同時に送る。その後で、idp と company-api の送信待ちを見る
+    // 期待する結果：どちらか一方だけが通る。成立しなければ、その回復の知らせは idp の送信待ちにも company-api にもない。
+    //               成立すれば、知らせは company-api に1つだけ届く（idp の送信待ちは空になる）
+    // plan 11章：テスト3、テスト12（ADR 0027 の O-79、O-81。オーナーのレビュー）
     const client = world.t.clients[0];
     const tenant = world.company.tenants[0];
     if (client === undefined || tenant === undefined) throw new Error('準備に失敗した');
@@ -251,131 +261,177 @@ describe('漏えい：回復を企業に知らせる（plan 11章 テスト3、�
     const attemptId = (
       (await owner.approval.get('/api/recovery/settings')).json.attempt as { id: string }
     ).id;
-    // 成立の処理が準備を済ませた直後の状態（ここで取消が先に確定する）。
-    const desk = createDeskClient({
-      socketPath: world.deskSocketPath,
-      credential: world.deskCredential,
+    const cancelOptions = await owner.approval.post('/api/recovery/cancel/options', {
+      id: attemptId,
     });
-    await desk.accountRecovered({
-      userId: userIdOf(owner.browser.authenticator),
-      attemptId,
-      tenantIds: [tenant.tenantId],
-      recoveredDay: Math.floor(clock / DAY) * 86_400,
-    });
-    expect((await cancelRecovery(owner.approval)).status).toBe(200);
-    expect((await resume(device)).status).toBe(401);
-    const prepared = (await recoveredRows(tenant.tenantId)).filter(
-      (row) => row.recovery_ref === attemptId,
-    );
-    expect(prepared.map((row) => row.recovery_confirmed)).toEqual([false]);
-
-    clock += 7 * HOUR;
-    world.sender.respondWith(202);
-    const before = world.sender.requests.length;
-    await world.company.api.deliverDue();
-    const recoveredSubs = world.sender.requests
-      .slice(before)
-      .map((request) => decodeJwt(request.body))
-      .filter((claims) => RECOVERED in ((claims.events as object | undefined) ?? {}))
-      .map((claims) => (claims.sub_id as { id: string }).id);
-    expect(recoveredSubs).not.toContain(owner.subs[0]);
-
-    clock += 31 * DAY;
-    await world.company.api.deliverDue();
+    const resumeOptions = await device.post('/api/recovery/resume/options');
+    const [cancelled, resumed] = await Promise.all([
+      owner.approval.post('/api/recovery/cancel/verify', {
+        ceremonyId: cancelOptions.json.ceremonyId,
+        response: owner.approval.authenticator.get(cancelOptions.json.options as never, undefined, {
+          origin: world.t.approvalOrigin,
+        }),
+      }),
+      device.post('/api/recovery/resume/verify', {
+        ceremonyId: resumeOptions.json.ceremonyId,
+        response: device.authenticator.get(resumeOptions.json.options as never, undefined, {
+          origin: world.t.approvalOrigin,
+        }),
+      }),
+    ]);
+    const completed = resumed.status === 200 && resumed.json.state === 'completed';
+    expect(completed).toBe(cancelled.status !== 200);
     expect(
       (await recoveredRows(tenant.tenantId)).filter((row) => row.recovery_ref === attemptId),
-    ).toEqual([]);
+    ).toHaveLength(completed ? 1 : 0);
+    expect(await queuedFor(tenant.tenantId, attemptId)).toEqual([]);
   });
 
-  it('企業への知らせの確定が届かなかった回復は、回復した端末で受信箱を読んだときに確定する', async () => {
-    // 攻撃者が持っている情報：（障害）回復の成立の直後に、company-api への確定が届かなかった状態
-    // 試す経路：成立した回復の準備の行を「確定前」に戻し、idp に「確定がまだ」と記録した状態にする（成立と確定の間で
-    //           idp が止まった状態の再現）。その後で、回復した端末で PWA の受信箱を読む
-    // 期待する結果：受信箱を読むと確定を送り直し、準備の行が確定され、idp の記録も済みになる
-    // plan 11章：テスト3、テスト12（ADR 0027 の O-79、O-81。オーナーのレビュー）
-    const client = world.t.clients[0];
+  it('送信待ちにある企業への知らせは、利用者の操作によらず、idp の配送の回が送る', async () => {
+    // 攻撃者が持っている情報：（障害）成立の直後に company-api へ渡せず、送信待ちに残った知らせ（利用者は何もしない）
+    // 試す経路：送信待ちに知らせがある状態で、利用者は何もしない。配送の回の間隔を短くした idp が、自分で回る
+    // 期待する結果：利用者の要求なしに、company-api に回復の SET の送信待ちができ、idp の送信待ちは空になる
+    // plan 11章：テスト3、テスト12（ADR 0027 の O-81。オーナーの再レビュー）
     const tenant = world.company.tenants[0];
-    if (client === undefined || tenant === undefined) throw new Error('準備に失敗した');
-    const owner = await connectedOwner(world.t, [client]);
-    const device = await readyToComplete(world.t, owner.code, owner.helper.approval);
-    expect((await resume(device)).json.state).toBe('completed');
-    const userId = userIdOf(owner.browser.authenticator);
-    const idp = await serviceDb('idp');
-    const company = await serviceDb('company-api');
+    if (tenant === undefined) throw new Error('準備に失敗した');
+    const ticking = await startTestIdp(
+      { tenants: 1, clients: [{ tenant: 0 }] },
+      () => new Date(clock),
+      {
+        tenantIds: [tenant.tenantId],
+        desk: { socketPath: world.deskSocketPath, credential: world.deskCredential },
+      },
+    );
     try {
-      const pendingOf = () =>
-        idp.withWarifuUser(userId, (tx) =>
-          tx.query<{ attempt_id: string; company_notice_pending: boolean }>(
-            sql`SELECT attempt_id, company_notice_pending FROM idp.recovery_attempts
-                 WHERE state = 'completed'`,
+      const owner = await connectedOwner(ticking, ticking.clients);
+      const userId = userIdOf(owner.browser.authenticator);
+      const attemptId = randomUUID();
+      const db = await serviceDb('idp');
+      try {
+        // 成立のトランザクションが置くのと同じ行（成立の直後に渡せなかった状態）。
+        await db.withWarifuUser(userId, (tx) =>
+          tx.execute(
+            sql`INSERT INTO idp.recovery_notice_queue
+                  (notice_id, tenant_id, user_id, attempt_id, recovered_day, next_attempt_at, created_at)
+                VALUES (${randomUUID()}, ${tenant.tenantId}, ${userId}, ${attemptId},
+                        ${Math.floor(clock / DAY) * 86_400}, ${new Date(clock)}, ${new Date(clock)})`,
           ),
         );
-      const [attempt] = await pendingOf();
-      if (attempt === undefined) throw new Error('成立した回復の記録がない');
-      expect(attempt.company_notice_pending).toBe(false);
-      await idp.withWarifuUser(userId, (tx) =>
-        tx.execute(
-          sql`UPDATE idp.recovery_attempts SET company_notice_pending = true
-               WHERE attempt_id = ${attempt.attempt_id}`,
-        ),
-      );
-      await company.withTenant(tenant.tenantId, (tx) =>
-        tx.execute(
-          sql`UPDATE company_api.set_outbox SET recovery_confirmed = false
-               WHERE recovery_ref = ${attempt.attempt_id}`,
-        ),
-      );
-      const confirmedOf = async () =>
-        (await recoveredRows(tenant.tenantId))
-          .filter((row) => row.recovery_ref === attempt.attempt_id)
-          .map((row) => row.recovery_confirmed);
-      expect(await confirmedOf()).toEqual([false]);
-
-      const pwa = new Browser(world.t.origin, device.authenticator);
-      expect((await pwaLogin(pwa)).status).toBe(200);
-      expect((await pwa.get('/api/inbox')).status).toBe(200);
-      expect(await confirmedOf()).toEqual([true]);
-      expect((await pendingOf()).map((row) => row.company_notice_pending)).toEqual([false]);
+      } finally {
+        await db.close();
+      }
+      expect(await queuedFor(tenant.tenantId, attemptId)).toHaveLength(1);
+      // テストの idp は自分では回さない。ここでは、配送の回を起動したときと同じ関数を呼ぶ。
+      expect((await ticking.idp.deliverRecoveryNotices()).delivered).toBe(1);
+      expect(await queuedFor(tenant.tenantId, attemptId)).toEqual([]);
+      expect(
+        (await recoveredRows(tenant.tenantId)).filter((row) => row.recovery_ref === attemptId),
+      ).toHaveLength(1);
     } finally {
-      await idp.close();
-      await company.close();
+      await ticking.stop();
     }
   });
 });
 
-describe('漏えい：企業に知らせられないときは、回復を成立させない（ADR 0027 の O-79）', () => {
-  it('company-api に届かない、または idp に窓口の内部 API がないとき、成立は 503 で、前のパスキーはそのまま', async () => {
-    // 攻撃者が持っている情報：回復コードと協力者の承認（企業に知らせずに回復を成立させ、企業の保留を避けたい）
+describe('漏えい：企業に渡せないときも、知らせは失われない（ADR 0027 の O-79、O-81）', () => {
+  it('company-api に届かない、または idp に窓口の内部 API がないとき、回復は成立し、知らせは idp の送信待ちに残る', async () => {
+    // 攻撃者が持っている情報：回復コードと協力者の承認（company-api が止まっている間に回復し、企業の保留を避けたい）
     // 試す経路：company-api の内部 API に届かない idp と、内部 API を設定していない idp で、企業に接続した利用者の
-    //           回復を、待機の後に成立させる
-    // 期待する結果：どちらも 503 { error: 'unavailable' } で、回復は待機のまま。前のパスキーでログインできる
-    // plan 11章：テスト3
+    //           回復を成立させ、配送の回を回す
+    // 期待する結果：回復は成立する。企業への知らせは、成立と同じトランザクションで idp の送信待ちに置かれ、渡せない間は
+    //               残り続ける（送り直すたびに回数が増え、間隔が空く）。ID トークンの recovered_at は、その間も届く
+    // plan 11章：テスト3（オーナーの再レビュー）
     const dir = await mkdtemp(join(tmpdir(), 'warifu-recovery-'));
+    const tenantId = randomUUID() as TenantId;
     const idps = [
       await startTestIdp({ tenants: 1, clients: [{ tenant: 0 }] }, () => new Date(clock), {
+        tenantIds: [tenantId],
         desk: {
           socketPath: join(dir, 'missing.sock'),
           credential: `idp.${randomBytes(32).toString('base64url')}`,
         },
       }),
-      await startTestIdp({ tenants: 1, clients: [{ tenant: 0 }] }, () => new Date(clock)),
+      await startTestIdp({ tenants: 1, clients: [{ tenant: 0 }] }, () => new Date(clock), {
+        tenantIds: [tenantId],
+      }),
     ];
     try {
-      for (const t of idps) {
+      for (const [i, t] of idps.entries()) {
         const owner = await connectedOwner(t, t.clients);
         const device = await readyToComplete(t, owner.code, owner.helper.approval);
-        for (let i = 0; i < 2; i += 1) {
-          const result = await resume(device);
-          expect(result.status).toBe(503);
-          expect(result.json).toEqual({ error: 'unavailable' });
-        }
-        expect((await owner.approval.approvalLogin()).status).toBe(200);
-        const settings = await owner.approval.get('/api/recovery/settings');
-        expect((settings.json.attempt as { state: string }).state).toBe('waiting');
-        expect(settings.json.restrictedUntil).toBeNull();
+        expect((await resume(device)).json.state).toBe('completed');
+        const queued = await queuedFor(tenantId);
+        expect(queued).toHaveLength(i + 1);
+        clock += 61_000;
+        const counts = await t.idp.deliverRecoveryNotices();
+        expect(counts.delivered).toBe(0);
+        expect(counts.retry).toBe(i === 0 ? 1 : 0);
+        expect(await queuedFor(tenantId)).toHaveLength(i + 1);
       }
+      const attempts = (await queuedFor(tenantId)).map((row) => row.attempts).sort();
+      // 届かない idp の行は、成立のときと配送の回で2回。内部 API のない idp の行は、送ろうとしない。
+      expect(attempts).toEqual([0, 2]);
     } finally {
       for (const t of idps) await t.stop();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('日付をまたいで送り直しても、企業に渡す回復した日は、成立した日のまま', async () => {
+    // 攻撃者が持っている情報：（障害）UTC の日付が変わる直前に成立した回復の知らせが、company-api に渡せなかった状態
+    // 試す経路：23:59:59 に成立させる（company-api に届かない idp）。翌日になってから、company-api に届くようになった
+    //           配送の回で送る
+    // 期待する結果：company-api の SET の recovered_day は成立した日（ID トークンの recovered_at と同じ）で、送った日
+    //               ではない
+    // plan 11章：テスト3、テスト12（オーナーの再レビュー）
+    const tenant = world.company.tenants[0];
+    if (tenant === undefined) throw new Error('準備に失敗した');
+    const dir = await mkdtemp(join(tmpdir(), 'warifu-recovery-'));
+    const down = await startTestIdp(
+      { tenants: 1, clients: [{ tenant: 0 }] },
+      () => new Date(clock),
+      {
+        tenantIds: [tenant.tenantId],
+        desk: {
+          socketPath: join(dir, 'missing.sock'),
+          credential: `idp.${randomBytes(32).toString('base64url')}`,
+        },
+      },
+    );
+    try {
+      const owner = await connectedOwner(down, down.clients);
+      const device = await readyToComplete(down, owner.code, owner.helper.approval);
+      clock = Math.ceil(clock / DAY) * DAY + DAY - 1000;
+      const completedDay = Math.floor(clock / DAY) * 86_400;
+      expect((await resume(device)).json.state).toBe('completed');
+      const userId = userIdOf(owner.browser.authenticator);
+      const [queued] = await queuedFor(tenant.tenantId);
+      expect(Number(queued?.recovered_day)).toBe(completedDay);
+
+      clock += 2 * 60_000;
+      expect(Math.floor(clock / DAY) * 86_400).toBe(completedDay + 86_400);
+      const db = await serviceDb('idp');
+      try {
+        const deps = { db, keys: undefined as never, now: () => new Date(clock) };
+        const desk = createDeskClient({
+          socketPath: world.deskSocketPath,
+          credential: world.deskCredential,
+        });
+        expect((await deliverRecoveryNotices(deps, desk, [tenant.tenantId])).delivered).toBe(1);
+        const [user] = await db.withWarifuUser(userId, (tx) =>
+          tx.query<{ recovered_at: Date }>(sql`SELECT recovered_at FROM idp.users`),
+        );
+        expect(Math.floor((user?.recovered_at.getTime() ?? 0) / DAY) * 86_400).toBe(completedDay);
+      } finally {
+        await db.close();
+      }
+      const rows = (await recoveredRows(tenant.tenantId)).filter(
+        (row) => row.recovery_ref === queued?.attempt_id,
+      );
+      expect(rows.map((row) => Number(row.recovered_day))).toEqual([completedDay]);
+      expect(await queuedFor(tenant.tenantId, queued?.attempt_id)).toEqual([]);
+    } finally {
+      await down.stop();
       await rm(dir, { recursive: true, force: true });
     }
   });

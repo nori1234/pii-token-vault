@@ -2,8 +2,10 @@
 -- - 回復コードは平文で置かない。照合用の mac(recovery_code, …) だけ（不変条件4、ADR 0012 の決定4）。
 -- - 協力関係は、内部 ID の組だけ（PRN-91）。表示名は協力者の端末の中だけに置く。
 -- - 招待と、協力者の承認の結び付けは、プロセスのメモリに置き、DB には置かない（ADR 0027 の O-74、O-76）。
--- - 協力者への知らせは、持ち主の変更と同じトランザクションで送信待ち（idp.helper_notice_outbox）に置き、確定の後に
---   協力者の受信箱へ移す（失敗しても後で送り直す。ADR 0027 の O-79）。
+-- - 協力者への知らせは、持ち主の変更と同じトランザクションで送信待ち（idp.helper_notice_outbox）に置く。協力者は、
+--   自分の範囲で、自分あての行だけを読み、自分の受信箱へ移す（持ち主の操作によらない。ADR 0027 の O-79）。
+-- - 企業への知らせは、成立と同じトランザクションで送信待ち（idp.recovery_notice_queue）に置く。書くのは利用者の範囲、
+--   読んで送るのはテナントの範囲（idp の配送の回。利用者の操作によらない。O-81）。
 SET ROLE warifu_owner;
 
 -- 回復の後の制限（7日）と、取消の後に回復を始められない期間（14日）。
@@ -52,10 +54,7 @@ CREATE TABLE idp.recovery_attempts (
   ready_at timestamptz,
   ended_at timestamptz,
   purge_after timestamptz,
-  -- 成立した回復の、企業への知らせの確定がまだか（ADR 0027 の O-81。確定できるまで送り直す）。
-  company_notice_pending boolean NOT NULL DEFAULT false,
   CHECK (helper_user_id <> user_id),
-  CHECK (NOT company_notice_pending OR state = 'completed'),
   CHECK (helper_deadline > started_at),
   CHECK ((approved_at IS NULL) = (ready_at IS NULL)),
   CHECK (ready_at IS NULL OR ready_at > approved_at),
@@ -71,8 +70,8 @@ ALTER TABLE idp.credentials
   ADD CONSTRAINT credentials_recovery_attempt FOREIGN KEY (recovery_attempt_id)
   REFERENCES idp.recovery_attempts (attempt_id);
 
--- 協力者への知らせの送信待ち（持ち主の範囲）。notice_id は、協力者の受信箱の項目の ID にもする（送り直しても、
--- 同じ知らせを二重に置かない）。中身は、内部 ID の組と知らせの種類だけ。
+-- 協力者への知らせの送信待ち。持ち主の範囲で書き、協力者の範囲で読んで消す。notice_id は、協力者の受信箱の項目の
+-- ID にもする（同じ知らせを二重に置かない）。中身は、内部 ID の組と知らせの種類だけ。
 CREATE TABLE idp.helper_notice_outbox (
   notice_id uuid PRIMARY KEY,
   owner_user_id uuid NOT NULL REFERENCES idp.users (user_id),
@@ -84,7 +83,23 @@ CREATE TABLE idp.helper_notice_outbox (
   created_at timestamptz NOT NULL,
   CHECK (owner_user_id <> helper_user_id)
 );
-CREATE INDEX helper_notice_outbox_owner ON idp.helper_notice_outbox (owner_user_id, created_at);
+CREATE INDEX helper_notice_outbox_helper ON idp.helper_notice_outbox (helper_user_id, created_at);
+
+-- 企業への回復の知らせの送信待ち（ADR 0027 の O-81）。成立と同じトランザクションで、利用者の範囲で書く。idp の配送の
+-- 回が、テナントの範囲で読み、company-api の内部 API に渡せたら消す。渡せなければ、間隔を空けて送り直す。
+-- recovered_day は、成立の時刻から決める（送り直しが日付をまたいでも、企業に渡す日は変わらない）。
+CREATE TABLE idp.recovery_notice_queue (
+  notice_id uuid PRIMARY KEY,
+  tenant_id uuid NOT NULL,
+  user_id uuid NOT NULL REFERENCES idp.users (user_id),
+  attempt_id uuid NOT NULL,
+  recovered_day bigint NOT NULL CHECK (recovered_day % 86400 = 0),
+  attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  next_attempt_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL,
+  UNIQUE (tenant_id, attempt_id)
+);
+CREATE INDEX recovery_notice_queue_due ON idp.recovery_notice_queue (tenant_id, next_attempt_at);
 
 -- 企業への回復の SET（ADR 0027 の O-81）。送るときに、テナントの範囲で sub を引く（sub は置かない）。
 -- recovery_ref は回復の記録の ID で、同じ回復の再送で二重に入れない。
@@ -95,15 +110,11 @@ ALTER TABLE company_api.set_outbox
 ALTER TABLE company_api.set_outbox ADD COLUMN user_id uuid;
 ALTER TABLE company_api.set_outbox ADD COLUMN recovery_ref uuid;
 ALTER TABLE company_api.set_outbox ADD COLUMN recovered_day bigint CHECK (recovered_day % 86400 = 0);
--- 回復の SET は、成立の前に準備（false）として入れ、成立の後の確定（true）で初めて配送できる（ADR 0027 の O-81）。
--- 取り消された回復は確定されないので、企業には届かない。確定されない行は、30日で消す。
-ALTER TABLE company_api.set_outbox ADD COLUMN recovery_confirmed boolean;
 ALTER TABLE company_api.set_outbox
   ADD CONSTRAINT set_outbox_recovery_check CHECK (
     (event_type = 'account_recovered') = (recovery_ref IS NOT NULL)
     AND (recovery_ref IS NULL) = (user_id IS NULL)
     AND (recovery_ref IS NULL) = (recovered_day IS NULL)
-    AND (recovery_ref IS NULL) = (recovery_confirmed IS NULL)
   );
 ALTER TABLE company_api.set_outbox
   ADD CONSTRAINT set_outbox_recovery_ref_key UNIQUE (tenant_id, recovery_ref);
@@ -116,6 +127,8 @@ ALTER TABLE idp.recovery_attempts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE idp.recovery_attempts FORCE ROW LEVEL SECURITY;
 ALTER TABLE idp.helper_notice_outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE idp.helper_notice_outbox FORCE ROW LEVEL SECURITY;
+ALTER TABLE idp.recovery_notice_queue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE idp.recovery_notice_queue FORCE ROW LEVEL SECURITY;
 
 -- idp.users に、回復の2つの列を書き換える UPDATE を足す（いまの利用者の行だけ）。
 CREATE POLICY idp_update ON idp.users FOR UPDATE TO warifu_idp
@@ -147,13 +160,23 @@ CREATE POLICY idp_update ON idp.recovery_attempts FOR UPDATE TO warifu_idp
 CREATE POLICY idp_delete ON idp.recovery_attempts FOR DELETE TO warifu_idp
   USING (user_id = warifu.current_user_id());
 
--- 協力者への知らせの送信待ち：持ち主の範囲だけ（協力者の範囲からは読めない）。
-CREATE POLICY idp_select ON idp.helper_notice_outbox FOR SELECT TO warifu_idp
-  USING (owner_user_id = warifu.current_user_id());
+-- 協力者への知らせの送信待ち：書くのは持ち主の範囲、読んで消すのは協力者の範囲（自分あての行だけ）。
 CREATE POLICY idp_insert ON idp.helper_notice_outbox FOR INSERT TO warifu_idp
   WITH CHECK (owner_user_id = warifu.current_user_id());
+CREATE POLICY idp_select ON idp.helper_notice_outbox FOR SELECT TO warifu_idp
+  USING (helper_user_id = warifu.current_user_id());
 CREATE POLICY idp_delete ON idp.helper_notice_outbox FOR DELETE TO warifu_idp
-  USING (owner_user_id = warifu.current_user_id());
+  USING (helper_user_id = warifu.current_user_id());
+
+-- 企業への知らせの送信待ち：書くのは利用者の範囲（自分の行だけ）、読む・変える・消すのはテナントの範囲。
+CREATE POLICY idp_insert ON idp.recovery_notice_queue FOR INSERT TO warifu_idp
+  WITH CHECK (user_id = warifu.current_user_id());
+CREATE POLICY idp_select ON idp.recovery_notice_queue FOR SELECT TO warifu_idp
+  USING (tenant_id = warifu.current_tenant_id());
+CREATE POLICY idp_update ON idp.recovery_notice_queue FOR UPDATE TO warifu_idp
+  USING (tenant_id = warifu.current_tenant_id()) WITH CHECK (tenant_id = warifu.current_tenant_id());
+CREATE POLICY idp_delete ON idp.recovery_notice_queue FOR DELETE TO warifu_idp
+  USING (tenant_id = warifu.current_tenant_id());
 
 -- 列単位の権限。
 GRANT SELECT (recovered_at, recovery_locked_until), UPDATE (recovered_at, recovery_locked_until)
@@ -172,20 +195,24 @@ GRANT SELECT (relationship_id, owner_user_id, helper_user_id, created_at),
 GRANT DELETE ON idp.helpers TO warifu_idp;
 -- 回復の記録。作った後に変えられるのは、状態と、その時刻と、消す予定だけ。
 GRANT SELECT (attempt_id, user_id, helper_user_id, state, request_device, started_at, helper_deadline,
-              approved_at, ready_at, ended_at, purge_after, company_notice_pending),
+              approved_at, ready_at, ended_at, purge_after),
       INSERT (attempt_id, user_id, helper_user_id, state, request_device, started_at, helper_deadline),
-      UPDATE (state, approved_at, ready_at, ended_at, purge_after, company_notice_pending)
+      UPDATE (state, approved_at, ready_at, ended_at, purge_after)
   ON idp.recovery_attempts TO warifu_idp;
 GRANT DELETE ON idp.recovery_attempts TO warifu_idp;
--- 協力者への知らせの送信待ちは、作った後に変えない（送ったら消す）。
+-- 協力者への知らせの送信待ちは、作った後に変えない（協力者の受信箱へ移したら消す）。
 GRANT SELECT (notice_id, owner_user_id, helper_user_id, relationship_id, type, created_at),
       INSERT (notice_id, owner_user_id, helper_user_id, relationship_id, type, created_at)
   ON idp.helper_notice_outbox TO warifu_idp;
 GRANT DELETE ON idp.helper_notice_outbox TO warifu_idp;
+-- 企業への知らせの送信待ち。作った後に変えられるのは、送り直しの回数と次の時刻だけ。
+GRANT SELECT (notice_id, tenant_id, user_id, attempt_id, recovered_day, attempts, next_attempt_at, created_at),
+      INSERT (notice_id, tenant_id, user_id, attempt_id, recovered_day, next_attempt_at, created_at),
+      UPDATE (attempts, next_attempt_at)
+  ON idp.recovery_notice_queue TO warifu_idp;
+GRANT DELETE ON idp.recovery_notice_queue TO warifu_idp;
 
-GRANT SELECT (user_id, recovery_ref, recovered_day, recovery_confirmed),
-      INSERT (user_id, recovery_ref, recovered_day, recovery_confirmed),
-      UPDATE (recovery_confirmed)
+GRANT SELECT (user_id, recovery_ref, recovered_day), INSERT (user_id, recovery_ref, recovered_day)
   ON company_api.set_outbox TO warifu_company_api;
 
 RESET ROLE;
