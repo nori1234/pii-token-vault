@@ -9,14 +9,14 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@fastify/middie": "9.3.5",
+    "@fastify/middie": "9.3.6",
     "@pii-token-vault/warifu-core": "0.0.0",
     "@simplewebauthn/browser": "14.0.0",
     "@simplewebauthn/server": "14.0.3",
     "fastify": "5.12.7",
-    "oidc-provider": "9.12.2"
+    "oidc-provider": "9.13.3"
   },
   "devDependencies": {
-    "@types/oidc-provider": "9.12.1"
+    "@types/oidc-provider": "9.13.0"
   }
 }
