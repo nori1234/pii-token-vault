@@ -11,6 +11,9 @@
 // - インタラクション（routes/interaction.ts）：GET /interaction/:uid と、その下の POST（ログイン、アカウント作成、接続の同意、中止）
 // - OIDC：/oidc/*（discovery、jwks、認可、トークン）
 // - 承認用のオリジン（routes/approvals.ts）：/api/approvals/*（承認用のログイン、承認待ちの一覧、承認と拒否）
+// - 窓口の操作別承認（routes/desk.ts。ADR 0026）：本来のオリジンの GET /interaction/:uid/desk/finish と
+//   GET /op-approval/jwks、承認用のオリジンの GET /desk と /api/desk/*（承認、承認しない）と /api/desk-items/*
+//   （窓口の作成の項目と取消）
 // 逆引き（sub・別名から本物の連絡先や属性を返す）ルートと、管理用のルートは作らない（不変条件2）。
 //
 // 守り：
@@ -24,6 +27,7 @@ import { createServer, type Server } from 'node:http';
 import middie from '@fastify/middie';
 import { randomBytesOf, type TenantId, type WarifuUserId } from '@pii-token-vault/warifu-core';
 import { createDb, type Db, type DbConnection } from '@pii-token-vault/warifu-core/db';
+import { createDeskClient, type DeskConnection } from '@pii-token-vault/warifu-core/desk/client';
 import { createIdpKeyClient, type IdpKeyClient } from '@pii-token-vault/warifu-core/keys/idp';
 import type { KeysvcConnection } from '@pii-token-vault/warifu-core/keys/protocol';
 import { createLogger, type LogLevel } from '@pii-token-vault/warifu-core/log';
@@ -58,6 +62,7 @@ import { parseRegistry, type Registry } from './registry.ts';
 import { findCredential, type RepoDeps, recordCredentialUse } from './repo.ts';
 import { registerApprovalRoutes } from './routes/approvals.ts';
 import type { CurrentSession, RouteContext } from './routes/context.ts';
+import { registerDeskRoutes } from './routes/desk.ts';
 import { registerInboxRoutes } from './routes/inbox.ts';
 import { registerInteractionRoutes } from './routes/interaction.ts';
 import { registerPwaRoutes } from './routes/pwa.ts';
@@ -89,6 +94,8 @@ export interface IdpOptions {
   readonly keysvc: KeysvcConnection;
   readonly db: DbConnection;
   readonly mailer?: Mailer;
+  /** company-api の窓口の内部 API（ADR 0026）。なければ、窓口の作成の承認と取消を受け付けない（照会は受け付ける）。 */
+  readonly desk?: DeskConnection;
   readonly now?: () => Date;
   readonly logLevel?: LogLevel;
   readonly logWrite?: (line: string) => void;
@@ -180,6 +187,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
     repo,
     store,
     signingKey,
+    limiter,
     ...(options.onOutboundAttempt === undefined
       ? {}
       : { onOutboundAttempt: options.onOutboundAttempt }),
@@ -289,7 +297,9 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
     app,
     onMain,
     onApproval,
+    origin: options.origin,
     approvalOrigin: options.approvalOrigin,
+    issuer,
     registry,
     keys,
     repo,
@@ -301,6 +311,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
     ceremonies,
     emailDeps,
     provider,
+    desk: options.desk === undefined ? undefined : createDeskClient(options.desk),
     assets,
     nowMs,
     sendHtml,
@@ -341,6 +352,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
   registerInboxRoutes(ctx);
   registerApprovalRoutes(ctx);
   registerInteractionRoutes(ctx);
+  registerDeskRoutes(ctx);
 
   let approvalServer: Server | undefined;
 

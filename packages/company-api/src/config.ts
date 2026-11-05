@@ -7,6 +7,10 @@
 //   なし、確かめた入り口は空（すべて「まだ残っている入り口」）だけを受け付ける（ADR 0010、plan 10章 M5）。
 // - 企業の鍵は jwks で受け取り、EC の P-256 の公開鍵に限る（不変条件7・9。jwks_uri は受け付けない）。
 // - 緊急停止（suspended）は、トークンの発行、企業向け API、SET の送信を止める（plan 2章。ADR 0022）。
+// - クライアントごとに、出してよいテナントの JWT の scope を決める（既定は company_api だけ。窓口の desk は
+//   ADR 0026 の O-65）。
+// - SET の受け口の設定の版（setDeliveryRevision）。保留にした取消の SET は、原因を直してこの版を変えて配備し直すと、
+//   送り直す（管理 API は作らない。ADR 0026 の O-72）。
 
 import { parseTenantId, type TenantId } from '@pii-token-vault/warifu-core';
 
@@ -20,9 +24,15 @@ export interface PublicEcJwk {
   readonly use?: 'sig';
 }
 
+/** テナントの JWT の scope。company_api：別名の入れ替えと検証の SET（ADR 0022）。desk：窓口（ADR 0026）。 */
+export type TokenScope = 'company_api' | 'desk';
+export const TOKEN_SCOPES: readonly TokenScope[] = Object.freeze(['company_api', 'desk']);
+
 export interface ApiClient {
   readonly clientId: string;
   readonly jwks: { readonly keys: readonly PublicEcJwk[] };
+  /** このクライアントに出してよい scope（1つ以上）。 */
+  readonly scopes: readonly TokenScope[];
 }
 
 export interface CompanyTenant {
@@ -40,6 +50,11 @@ export interface CompanyTenant {
   readonly apiClients: readonly ApiClient[];
   /** SET の受け口（RFC 8935）。https、443。宛先の検査は sender が送るたびに行う（RP-51）。 */
   readonly webhookUrl?: string;
+  /**
+   * SET の受け口の設定の版（0 以上の整数。既定は 0）。保留にした取消の SET は、保留にした時の版を覚えておき、
+   * 版が変わった配備で送り直す（ADR 0026 の O-72）。
+   */
+  readonly setDeliveryRevision: number;
 }
 
 export interface CompanyApiConfig {
@@ -66,8 +81,9 @@ const TENANT_KEYS: ReadonlySet<string> = new Set([
   'suspended',
   'apiClients',
   'webhookUrl',
+  'setDeliveryRevision',
 ]);
-const CLIENT_KEYS: ReadonlySet<string> = new Set(['clientId', 'jwks']);
+const CLIENT_KEYS: ReadonlySet<string> = new Set(['clientId', 'jwks', 'scopes']);
 const JWK_MEMBERS: ReadonlySet<string> = new Set(['kty', 'crv', 'x', 'y', 'kid', 'alg', 'use']);
 const CLIENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const COORDINATE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -120,7 +136,22 @@ function parseClient(input: unknown): ApiClient {
     throw new CompanyApiConfigError(`${clientId}：jwks の鍵は1〜4個`);
   }
   const keys = input.jwks.keys.map((jwk) => parseJwk(clientId, jwk));
-  return Object.freeze({ clientId, jwks: Object.freeze({ keys: Object.freeze(keys) }) });
+  const scopes = input.scopes ?? ['company_api'];
+  if (
+    !Array.isArray(scopes) ||
+    scopes.length < 1 ||
+    !scopes.every((scope) => (TOKEN_SCOPES as readonly unknown[]).includes(scope)) ||
+    new Set(scopes).size !== scopes.length
+  ) {
+    throw new CompanyApiConfigError(
+      `${clientId}：scopes は company_api と desk から1つ以上（重複なし）`,
+    );
+  }
+  return Object.freeze({
+    clientId,
+    jwks: Object.freeze({ keys: Object.freeze(keys) }),
+    scopes: Object.freeze([...scopes] as TokenScope[]),
+  });
 }
 
 function parseWebhookUrl(tenantId: string, value: unknown): string {
@@ -182,6 +213,15 @@ function parseTenant(input: unknown): CompanyTenant {
     throw new CompanyApiConfigError('apiClients は1〜4個');
   }
   const apiClients = Object.freeze(input.apiClients.map(parseClient));
+  const setDeliveryRevision = input.setDeliveryRevision ?? 0;
+  if (
+    typeof setDeliveryRevision !== 'number' ||
+    !Number.isSafeInteger(setDeliveryRevision) ||
+    setDeliveryRevision < 0 ||
+    setDeliveryRevision > 2_147_483_647
+  ) {
+    throw new CompanyApiConfigError('setDeliveryRevision は 0 以上の整数');
+  }
   return Object.freeze({
     tenantId,
     relayDomain: input.relayDomain,
@@ -190,6 +230,7 @@ function parseTenant(input: unknown): CompanyTenant {
     verifiedEntries: Object.freeze([]) as readonly never[],
     suspended: input.suspended === true,
     apiClients,
+    setDeliveryRevision,
     ...(input.webhookUrl === undefined
       ? {}
       : { webhookUrl: parseWebhookUrl(tenantId, input.webhookUrl) }),

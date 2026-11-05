@@ -19,6 +19,8 @@ type Combo =
   | 'mac/oidc_storage_id'
   | 'mac/email_verify_code'
   | 'mac/approval_challenge'
+  | 'mac/desk_id'
+  | 'mac/desk_lookup'
   | 'mac/relay_replay'
   | 'mac/relay_thread'
   | 'mac/message_id'
@@ -30,7 +32,9 @@ type Combo =
   | 'sign/tenant_jwt'
   | 'public_keys/tenant_jwt'
   | 'sign/set'
-  | 'public_keys/set';
+  | 'public_keys/set'
+  | 'sign/op_approval'
+  | 'public_keys/op_approval';
 
 const COMBOS: readonly Combo[] = [
   'encrypt/contact',
@@ -43,6 +47,8 @@ const COMBOS: readonly Combo[] = [
   'mac/oidc_storage_id',
   'mac/email_verify_code',
   'mac/approval_challenge',
+  'mac/desk_id',
+  'mac/desk_lookup',
   'mac/relay_replay',
   'mac/relay_thread',
   'mac/message_id',
@@ -55,6 +61,8 @@ const COMBOS: readonly Combo[] = [
   'public_keys/tenant_jwt',
   'sign/set',
   'public_keys/set',
+  'sign/op_approval',
+  'public_keys/op_approval',
 ];
 
 // plan 8章と spec 04 2章の表を、操作と対象の単位にしたもの。ここにないものは、すべて 403。
@@ -70,10 +78,14 @@ const ALLOWED: Readonly<Record<Caller, readonly Combo[]>> = {
     'derive_alias',
     'sign/id_token',
     'public_keys/id_token',
+    'sign/op_approval',
+    'public_keys/op_approval',
   ],
   'company-api': [
     'mac/alias_lookup',
     'mac/audit_chain',
+    'mac/desk_id',
+    'mac/desk_lookup',
     'derive_alias',
     'sign/tenant_jwt',
     'public_keys/tenant_jwt',
@@ -154,6 +166,10 @@ function bodyFor(combo: Combo): { op: string; body: unknown } {
       return { op: 'mac', body: { purpose: 'email_verify_code', message: b64('m') } };
     case 'mac/approval_challenge':
       return { op: 'mac', body: { purpose: 'approval_challenge', message: b64('m') } };
+    case 'mac/desk_id':
+      return { op: 'mac', body: { purpose: 'desk_id', message: b64('m') } };
+    case 'mac/desk_lookup':
+      return { op: 'mac', body: { purpose: 'desk_lookup', message: b64('m') } };
     case 'mac/relay_replay':
       return { op: 'mac', body: { purpose: 'relay_replay', message: b64('m') } };
     case 'mac/relay_thread':
@@ -178,6 +194,10 @@ function bodyFor(combo: Combo): { op: string; body: unknown } {
       return { op: 'sign', body: { keyId: 'set', message: b64('header.payload') } };
     case 'public_keys/set':
       return { op: 'public_keys', body: { keyId: 'set' } };
+    case 'sign/op_approval':
+      return { op: 'sign', body: { keyId: 'op_approval', message: b64('header.payload') } };
+    case 'public_keys/op_approval':
+      return { op: 'public_keys', body: { keyId: 'op_approval' } };
   }
 }
 
@@ -280,12 +300,13 @@ describe('漏えい：鍵サービスの能力の表（plan 11章 テスト8）'
     ['encrypt', { keyId: 'alias_derive', plaintext: b64('x'), context: {} }],
     ['sign', { keyId: 'set', message: b64('x') }],
     ['sign', { keyId: 'tenant_jwt', message: b64('x') }],
-    ['sign', { keyId: 'op_approval', message: b64('x') }],
+    ['mac', { purpose: 'desk_id', message: b64('m') }],
+    ['mac', { purpose: 'desk_lookup', message: b64('m') }],
     ['mac', { message: b64('m') }],
   ])('未知・未来の対象、ほかのサービスの鍵（%s %j）は 403', async (op, body) => {
     // 攻撃者が持っている情報：侵害した idp の資格情報（ATK-07。mac、encrypt、sign の権限を持つ）
-    // 試す経路：まだ作っていない用途や鍵（窓口コード、sub、別名の導出鍵、操作ごとの承認）と、company-api の鍵
-    //           （SET、テナントの JWT。ADR 0022）を対象にして呼ぶ
+    // 試す経路：まだ作っていない用途や鍵（窓口コード、sub、別名の導出鍵）と、company-api の鍵（SET、テナントの
+    //           JWT。ADR 0022）と MAC の用途（窓口の ID。ADR 0026）を対象にして呼ぶ
     // 期待する結果：すべて 403
     // plan 11章：テスト8
     const response = await call('idp', op, body);

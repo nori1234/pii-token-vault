@@ -2,6 +2,7 @@
 // ルートは onMain（本来のオリジン）か onApproval（承認用のオリジン）のどちらか一方にだけ登録する（ADR 0023）。
 
 import type { WarifuUserId } from '@pii-token-vault/warifu-core';
+import type { DeskClient } from '@pii-token-vault/warifu-core/desk/client';
 import type { IdpKeyClient } from '@pii-token-vault/warifu-core/keys/idp';
 import type { FastifyInstance, FastifyReply, FastifyRequest, RouteShorthandOptions } from 'fastify';
 import type Provider from 'oidc-provider';
@@ -26,7 +27,11 @@ export interface RouteContext {
   readonly onMain: RouteShorthandOptions;
   /** 承認用のオリジンだけのルート。 */
   readonly onApproval: RouteShorthandOptions;
+  /** 本来のオリジン。 */
+  readonly origin: string;
   readonly approvalOrigin: string;
+  /** OIDC の issuer（操作ごとの承認の JWT の iss）。 */
+  readonly issuer: string;
   readonly registry: Registry;
   readonly keys: IdpKeyClient;
   readonly repo: RepoDeps;
@@ -40,6 +45,8 @@ export interface RouteContext {
   readonly ceremonies: Ceremonies;
   readonly emailDeps: EmailFlowDeps;
   readonly provider: Provider;
+  /** company-api の窓口の内部 API（ADR 0026）。なければ、窓口の作成と取消を受け付けない。 */
+  readonly desk: DeskClient | undefined;
   readonly assets: Assets;
   readonly nowMs: () => number;
   /** HTML を返す。CSP の nonce を作って、onSend の CSP に渡す。 */
