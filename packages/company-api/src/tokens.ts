@@ -10,7 +10,8 @@
 //
 // アクセストークン（テナントの JWT）：
 // - 鍵サービスの tenant_jwt の鍵で ES256 の署名をした JWT（typ は at+jwt。RFC 9068 の形）。有効期間は5分。
-// - クレーム：iss と aud は company-api、sub と client_id はクライアント、tenant_id はテナント、scope は company_api、
+// - クレーム：iss と aud は company-api、sub と client_id はクライアント、tenant_id はテナント、scope は1つ
+//   （company_api か desk。要求の scope で選び、クライアントに許したものだけ。省けば company_api。ADR 0026 の O-65）、
 //   jti は乱数。リフレッシュトークンは出さない。
 // - 検証のたびに、テナントとクライアントが登録簿にあり、緊急停止していないことを確かめる。緊急停止の後に
 //   発行済みのトークンが効かなくなるのは、設定を直して配備し直した時点（ADR 0022）。
@@ -18,12 +19,19 @@
 import { randomBytesOf, toBase64Url } from '@pii-token-vault/warifu-core';
 import type { CompanyApiKeyClient } from '@pii-token-vault/warifu-core/keys/company-api';
 import { decodeJwt, decodeProtectedHeader } from 'jose';
-import type { ApiClient, CompanyApiConfig, CompanyTenant } from './config.ts';
+import {
+  type ApiClient,
+  type CompanyApiConfig,
+  type CompanyTenant,
+  TOKEN_SCOPES,
+  type TokenScope,
+} from './config.ts';
 import { PublicKeyCache, signJwt, verifyJwt } from './jwt.ts';
 
 export const ACCESS_TOKEN_TTL_SECONDS = 300;
 export const ASSERTION_MAX_AGE_SECONDS = 300;
-export const TOKEN_SCOPE = 'company_api';
+/** scope を省いたときに出す scope。 */
+export const DEFAULT_TOKEN_SCOPE: TokenScope = 'company_api';
 const CLOCK_TOLERANCE_SECONDS = 30;
 const GRANT_TYPE = 'client_credentials';
 const ASSERTION_TYPE = 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer';
@@ -47,11 +55,13 @@ export interface IssuedToken {
   readonly accessToken: string;
   readonly tenant: CompanyTenant;
   readonly clientId: string;
+  readonly scope: TokenScope;
 }
 
 export interface Caller {
   readonly tenant: CompanyTenant;
   readonly client: ApiClient;
+  readonly scope: TokenScope;
 }
 
 export class TokenService {
@@ -88,8 +98,11 @@ export class TokenService {
     }
     if (params.get('grant_type') !== GRANT_TYPE)
       return { ok: false, error: 'unsupported_grant_type' };
-    const scope = params.get('scope');
-    if (scope !== null && scope !== TOKEN_SCOPE) return { ok: false, error: 'invalid_scope' };
+    const requested = params.get('scope');
+    const scope = (requested ?? DEFAULT_TOKEN_SCOPE) as TokenScope;
+    if (!(TOKEN_SCOPES as readonly string[]).includes(scope)) {
+      return { ok: false, error: 'invalid_scope' };
+    }
     const assertion = params.get('client_assertion');
     if (params.get('client_assertion_type') !== ASSERTION_TYPE || assertion === null) {
       return { ok: false, error: 'invalid_client' };
@@ -97,6 +110,8 @@ export class TokenService {
     const verified = await this.#verifyAssertion(assertion, params.get('client_id'));
     if (verified === undefined) return { ok: false, error: 'invalid_client' };
     const { tenant, client } = verified;
+    // クライアントに許していない scope は断る（assertion を確かめた後なので、登録の有無は漏れない）。
+    if (!client.scopes.includes(scope)) return { ok: false, error: 'invalid_scope' };
     const iat = Math.floor(this.#now().getTime() / 1000);
     const accessToken = await signJwt(this.#keys, this.#cache, 'tenant_jwt', 'at+jwt', {
       iss: this.#config.issuer,
@@ -104,12 +119,12 @@ export class TokenService {
       sub: client.clientId,
       client_id: client.clientId,
       tenant_id: tenant.tenantId,
-      scope: TOKEN_SCOPE,
+      scope,
       iat,
       exp: iat + ACCESS_TOKEN_TTL_SECONDS,
       jti: toBase64Url(randomBytesOf(16)),
     });
-    return { ok: true, token: { accessToken, tenant, clientId: client.clientId } };
+    return { ok: true, token: { accessToken, tenant, clientId: client.clientId, scope } };
   }
 
   async #verifyAssertion(
@@ -188,7 +203,14 @@ export class TokenService {
     if (typeof kid !== 'string') return undefined;
     if (!keys.some((key) => key.kid === kid)) keys = await this.#cache.get('tenant_jwt', true);
     const payload = await verifyJwt(token, keys, options);
-    if (payload === undefined || payload.scope !== TOKEN_SCOPE) return undefined;
+    if (
+      payload === undefined ||
+      typeof payload.scope !== 'string' ||
+      !(TOKEN_SCOPES as readonly string[]).includes(payload.scope)
+    ) {
+      return undefined;
+    }
+    const scope = payload.scope as TokenScope;
     const entry =
       typeof payload.client_id === 'string'
         ? this.#config.clients.get(payload.client_id)
@@ -197,10 +219,11 @@ export class TokenService {
       entry === undefined ||
       entry.tenant.tenantId !== payload.tenant_id ||
       payload.sub !== entry.client.clientId ||
-      entry.tenant.suspended
+      entry.tenant.suspended ||
+      !entry.client.scopes.includes(scope)
     ) {
       return undefined;
     }
-    return entry;
+    return { ...entry, scope };
   }
 }

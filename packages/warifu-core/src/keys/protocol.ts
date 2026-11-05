@@ -35,6 +35,8 @@ export type MacPurpose =
   | 'oidc_storage_id'
   | 'email_verify_code'
   | 'approval_challenge'
+  | 'desk_id'
+  | 'desk_lookup'
   | 'relay_replay'
   | 'relay_thread'
   | 'message_id';
@@ -45,6 +47,8 @@ export const MAC_PURPOSES: readonly MacPurpose[] = Object.freeze([
   'oidc_storage_id',
   'email_verify_code',
   'approval_challenge',
+  'desk_id',
+  'desk_lookup',
   'relay_replay',
   'relay_thread',
   'message_id',
@@ -53,14 +57,15 @@ export const MAC_PURPOSES: readonly MacPurpose[] = Object.freeze([
 /**
  * 署名の鍵。id_token は ES256。dkim は relay の DKIM と ARC の署名の鍵（RSA 2048、rsa-sha256。不変条件9の
  * プロトコルの例外。ADR 0021）。tenant_jwt（企業向け API のアクセストークン）と set（企業に送る SET）は
- * company-api の ES256 の鍵（ADR 0022）。操作ごとの承認の鍵は M7 で足す（ADR 0014）。
+ * company-api の ES256 の鍵（ADR 0022）。op_approval は idp の操作ごとの承認の ES256 の鍵（ADR 0026）。
  */
-export type SigningKeyId = 'id_token' | 'dkim' | 'tenant_jwt' | 'set';
+export type SigningKeyId = 'id_token' | 'dkim' | 'tenant_jwt' | 'set' | 'op_approval';
 export const SIGNING_KEY_IDS: readonly SigningKeyId[] = Object.freeze([
   'id_token',
   'dkim',
   'tenant_jwt',
   'set',
+  'op_approval',
 ]);
 
 /** RSA 2048 の署名の長さ（バイト）。 */

@@ -7,8 +7,10 @@
 // - 不変条件5：sub はテナント単位の pairwise。sector_identifier_uri を使わないので、redirect_uris のホストは1つに限る
 //   （oidc-provider は、ホストが複数の pairwise のクライアントに sector_identifier_uri を求めるため）。
 // - DESIGN.md 原則2：画面に出す企業名は、この登録簿の値（displayName）だけ。企業が送る client_name などは使わない。
+// - 窓口の操作は、クライアントごとに許す（deskActions。既定は空で、窓口の申請を受け付けない。ADR 0026 の O-60）。
 
 import { parseTenantId, type TenantId } from '@pii-token-vault/warifu-core';
+import { DESK_ACTIONS, type DeskAction } from '@pii-token-vault/warifu-core/desk/protocol';
 
 export interface TenantEntry {
   readonly tenantId: TenantId;
@@ -37,6 +39,8 @@ export interface ClientEntry {
   readonly redirectUris: readonly string[];
   readonly jwks: { readonly keys: readonly PublicEcJwk[] };
   readonly aliasClaim: AliasClaim;
+  /** このクライアントに許す窓口の操作（DESIGN.md 3章の3つから）。空なら、窓口の申請を受け付けない。 */
+  readonly deskActions: readonly DeskAction[];
 }
 
 export interface Registry {
@@ -69,6 +73,7 @@ const CLIENT_KEYS: ReadonlySet<string> = new Set([
   'redirectUris',
   'jwks',
   'aliasClaim',
+  'deskActions',
 ]);
 const JWK_MEMBERS: ReadonlySet<string> = new Set(['kty', 'crv', 'x', 'y', 'kid', 'alg', 'use']);
 const CLIENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -205,12 +210,21 @@ function parseClient(input: unknown, tenants: ReadonlyMap<TenantId, TenantEntry>
   if (aliasClaim !== 'email' && aliasClaim !== 'contact_alias') {
     throw new RegistryError(`${clientId}：aliasClaim は email か contact_alias`);
   }
+  const deskActions = input.deskActions ?? [];
+  if (
+    !Array.isArray(deskActions) ||
+    !deskActions.every((action) => (DESK_ACTIONS as readonly unknown[]).includes(action)) ||
+    new Set(deskActions).size !== deskActions.length
+  ) {
+    throw new RegistryError(`${clientId}：deskActions は窓口の操作の一覧から（重複なし）`);
+  }
   return Object.freeze({
     clientId,
     tenantId,
     redirectUris: Object.freeze(urls.map((url) => url.href)),
     jwks: Object.freeze({ keys: Object.freeze(keys) }),
     aliasClaim,
+    deskActions: Object.freeze([...deskActions] as DeskAction[]),
   });
 }
 

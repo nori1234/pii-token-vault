@@ -66,7 +66,13 @@ describe('漏えい：企業に送る SET（RP-50、RP-51）', () => {
       const res = await api.request({ path: '/v1/events/verification', token, json: { state } });
       expect(res.status).toBe(202);
     }
-    expect(await api.api.deliverDue()).toEqual({ delivered: 2, retry: 0, dropped: 0 });
+    expect(await api.api.deliverDue()).toEqual({
+      delivered: 2,
+      retry: 0,
+      dropped: 0,
+      reissue: 0,
+      held: 0,
+    });
     const jwks = (await api.request({ method: 'GET', path: '/jwks' })).json() as { keys: object[] };
     const received = sender.requests.slice(-2);
     expect(received.map((r) => r.url).sort()).toEqual(['/set/a', '/set/b']);
@@ -114,12 +120,18 @@ describe('漏えい：企業に送る SET（RP-50、RP-51）', () => {
     for (let i = 0; i < 6; i += 1) {
       outcomes.push(await api.api.deliverDue());
       // 間を空ける前には、もう一度送らない。
-      expect(await api.api.deliverDue()).toEqual({ delivered: 0, retry: 0, dropped: 0 });
+      expect(await api.api.deliverDue()).toEqual({
+        delivered: 0,
+        retry: 0,
+        dropped: 0,
+        reissue: 0,
+        held: 0,
+      });
       clock += 7 * 3_600_000;
     }
     expect(outcomes).toEqual([
-      ...Array(5).fill({ delivered: 0, retry: 1, dropped: 0 }),
-      { delivered: 0, retry: 0, dropped: 1 },
+      ...Array(5).fill({ delivered: 0, retry: 1, dropped: 0, reissue: 0, held: 0 }),
+      { delivered: 0, retry: 0, dropped: 1, reissue: 0, held: 0 },
     ]);
     const bodies = sender.requests.slice(before).map((r) => r.body);
     expect(bodies).toHaveLength(6);
@@ -154,14 +166,20 @@ describe('漏えい：企業に送る SET（RP-50、RP-51）', () => {
                WHERE table_schema = 'company_api' AND table_name = 'set_outbox' ORDER BY column_name`,
         ),
       );
+      // 取消の SET（ADR 0026）は、正本の行への参照（change_ref）と、保留（と保留にした時の設定の版。O-72）と
+      // 送り直しの回数だけを足した。
       expect(rows.map((r) => r.column_name)).toEqual([
         'attempts',
+        'change_ref',
         'created_at',
         'deliver_after',
         'event_id',
         'event_type',
+        'held',
+        'held_revision',
         'issued_at',
         'jti',
+        'reissues',
         'state',
         'tenant_id',
       ]);
