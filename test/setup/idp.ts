@@ -18,6 +18,8 @@ import { inject } from 'vitest';
 import { createIdp, type Idp } from '../../packages/idp/src/app.ts';
 import type { ApprovalType } from '../../packages/idp/src/inbox.ts';
 import { type Mailer, MemoryOutbox } from '../../packages/idp/src/mailer.ts';
+import type { DeskConnection } from '../../packages/warifu-core/src/desk/client.ts';
+import type { DeskAction } from '../../packages/warifu-core/src/desk/protocol.ts';
 import { SoftAuthenticator } from './soft-authenticator.ts';
 import { workerDatabase } from './worker-db.ts';
 
@@ -36,6 +38,7 @@ export interface TestClient {
   readonly privateKey: PrivateKey;
   readonly kid: string;
   readonly aliasClaim: 'email' | 'contact_alias';
+  readonly deskActions: readonly DeskAction[];
 }
 
 export interface TestIdp {
@@ -57,6 +60,8 @@ export interface TestIdp {
 export interface ClientSpec {
   readonly tenant: number;
   readonly aliasClaim?: 'email' | 'contact_alias';
+  /** 窓口の操作（ADR 0026）。既定は空（窓口の申請を受け付けない）。 */
+  readonly deskActions?: readonly DeskAction[];
 }
 
 /** テナントを tenants 個、クライアントを clients の指定どおりに作って起動する。 */
@@ -68,10 +73,14 @@ export async function startTestIdp(
     readonly mailer?: Mailer;
     /** 承認待ちの型（M6 では製品の型がないので、テストが自分の型を渡す）。 */
     readonly approvalTypes?: readonly ApprovalType[];
+    /** company-api の窓口の内部 API（ADR 0026）。 */
+    readonly desk?: DeskConnection;
+    /** テナント ID を決めて作る（company-api と同じテナントにするとき）。 */
+    readonly tenantIds?: readonly string[];
   },
 ): Promise<TestIdp> {
   const tenants: TestTenant[] = Array.from({ length: spec.tenants }, (_, i) => ({
-    tenantId: randomUUID(),
+    tenantId: options?.tenantIds?.[i] ?? randomUUID(),
     displayName: `テスト企業${i + 1}`,
     relayDomain: `t${randomBytes(4).toString('hex')}.relay.warifu.test`,
   }));
@@ -92,6 +101,7 @@ export async function startTestIdp(
       privateKey,
       kid,
       aliasClaim: c.aliasClaim ?? 'email',
+      deskActions: c.deskActions ?? [],
     });
     publicClients.push({
       clientId,
@@ -101,6 +111,7 @@ export async function startTestIdp(
         keys: [{ kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, kid, alg: 'ES256', use: 'sig' }],
       },
       aliasClaim: c.aliasClaim ?? 'email',
+      ...(c.deskActions === undefined ? {} : { deskActions: c.deskActions }),
     });
   }
 
@@ -125,6 +136,7 @@ export async function startTestIdp(
     keysvc: { socketPath: provided.socketPath, credential: provided.credentials.idp },
     db: { host: String(config.host), port: Number(config.port), database: String(config.database) },
     mailer: options?.mailer ?? outbox,
+    ...(options?.desk === undefined ? {} : { desk: options.desk }),
     logWrite: (line) => {
       lines.push(line);
     },

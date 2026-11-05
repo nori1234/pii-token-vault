@@ -19,6 +19,7 @@ const ROUTES = [
   'GET /',
   'GET / (approval)',
   'GET /api/approvals (approval)',
+  'GET /api/desk-items (approval)',
   'GET /api/inbox',
   'GET /api/me',
   'GET /assets/app.css',
@@ -27,11 +28,20 @@ const ROUTES = [
   'GET /assets/app.js (approval)',
   'GET /assets/webauthn.js',
   'GET /assets/webauthn.js (approval)',
+  'GET /desk (approval)',
   'GET /interaction/:uid',
+  'GET /interaction/:uid/desk/finish',
+  'GET /op-approval/jwks',
   'POST /api/approvals/decide/options (approval)',
   'POST /api/approvals/decide/verify (approval)',
   'POST /api/approvals/login/options (approval)',
   'POST /api/approvals/login/verify (approval)',
+  'POST /api/desk-items/cancel/options (approval)',
+  'POST /api/desk-items/cancel/verify (approval)',
+  'POST /api/desk/approve/options (approval)',
+  'POST /api/desk/approve/verify (approval)',
+  'POST /api/desk/decline (approval)',
+  'POST /api/desk/view (approval)',
   'POST /api/email/confirm',
   'POST /api/email/start',
   'POST /api/inbox/read',
@@ -59,7 +69,8 @@ describe('漏えい：idp のルート一覧と、ブラウザ側の守り', () 
     // 試す経路：idp の Fastify に登録されたルートを、すべて列挙する
     // 期待する結果：一覧と完全に一致する。sub・別名から連絡先を返すルート、admin、users、lookup のようなルートはない。
     //               メールの変更は /api/email/*（PWA のセッションと step-up）だけ。受信箱は、自分の項目の一覧と既読だけ。
-    //               承認と拒否は、承認用のオリジンだけ（ADR 0023）
+    //               承認と拒否は、承認用のオリジンだけ（ADR 0023）。窓口の承認と、窓口の作成の取消も、承認用の
+    //               オリジンだけ。本来のオリジンには、窓口のインタラクションの完了と、操作ごとの承認の公開鍵だけ（ADR 0026）
     // plan 11章：テスト6（逆引きのルートがない。ルート一覧で固定）
     const routes = t.idp.routes().filter((route) => !route.startsWith('HEAD '));
     expect(routes).toEqual(ROUTES);
