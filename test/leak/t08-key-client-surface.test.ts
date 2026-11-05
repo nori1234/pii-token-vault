@@ -41,6 +41,10 @@ function typeOnly(idp: IdpKeyClient, companyApi: CompanyApiKeyClient, relay: Rel
   void companyApi.sign('id_token', new Uint8Array());
   // @ts-expect-error idp は SET に署名できない
   void idp.sign('set', new Uint8Array());
+  // @ts-expect-error company-api は操作ごとの承認に署名できない（ADR 0026）
+  void companyApi.sign('op_approval', new Uint8Array());
+  // @ts-expect-error 窓口の ID の MAC は company-api だけ（ADR 0026）
+  void idp.mac('desk_id', new Uint8Array());
 }
 
 const EXPECTED_METHODS = {
@@ -123,8 +127,20 @@ describe('漏えい：鍵のクライアントの表面（plan 11章 テスト8�
     expect(await companyApi.deriveAlias({ tenantId, userId, generation: 1 })).toBe(alias);
     expect((await idp.sign('id_token', message)).signature.byteLength).toBe(64);
     expect(await idp.publicKeys('id_token')).toHaveLength(1);
-    // company-api の ES256 の鍵は、用途ごとに別（ID トークンの鍵とも別。ADR 0022）。
-    const kids = new Set([(await idp.publicKeys('id_token'))[0]?.kid]);
+    const opApproval = await idp.sign('op_approval', message);
+    expect(opApproval.signature.byteLength).toBe(64);
+    expect((await idp.publicKeys('op_approval'))[0]?.kid).toBe(opApproval.kid);
+    // company-api だけの用途（窓口の ID。ADR 0026）。用途ごとに鍵が違う。
+    const deskMacs = (
+      await Promise.all(
+        (['desk_id', 'desk_lookup', 'alias_lookup'] as const).map((purpose) =>
+          companyApi.mac(purpose, message),
+        ),
+      )
+    ).map((mac) => Buffer.from(mac).toString('hex'));
+    expect(new Set(deskMacs).size).toBe(3);
+    // ES256 の鍵は、用途ごとに別（ID トークン、操作ごとの承認、テナントの JWT、SET。ADR 0022、ADR 0026）。
+    const kids = new Set([(await idp.publicKeys('id_token'))[0]?.kid, opApproval.kid]);
     for (const keyId of ['tenant_jwt', 'set'] as const) {
       const signed = await companyApi.sign(keyId, message);
       expect(signed.signature.byteLength).toBe(64);
@@ -132,7 +148,7 @@ describe('漏えい：鍵のクライアントの表面（plan 11章 テスト8�
       expect(key?.kid).toBe(signed.kid);
       kids.add(signed.kid);
     }
-    expect(kids.size).toBe(3);
+    expect(kids.size).toBe(4);
     const queueItemId = randomUUID();
     const queued = await relay.encryptQueueItem({ queueItemId, plaintext: message });
     expect(await relay.decryptQueueItem({ queueItemId, ciphertext: queued })).toEqual(message);

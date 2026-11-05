@@ -14,9 +14,11 @@ import {
   SENDER_LIMITS,
   SENDER_PATHS,
   SENDER_REJECT_REASONS,
+  SET_TIME_ERRORS,
   type SenderCaller,
   type SenderOp,
   type SenderRejectReason,
+  type SetTimeError,
 } from './protocol.ts';
 
 export type SenderClientErrorCode = 'invalid_request' | 'forbidden' | 'unavailable';
@@ -41,13 +43,23 @@ export type SendResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: SenderRejectReason };
 
+/** Webhook の結果。受け口が応答したときは、そのステータス（と、400 の SET の時刻の失敗）も返す（ADR 0026）。 */
+export type WebhookResult =
+  | { readonly ok: true; readonly status: number }
+  | {
+      readonly ok: false;
+      readonly reason: SenderRejectReason;
+      readonly status?: number;
+      readonly setError?: SetTimeError;
+    };
+
 export type DnsResult =
   | { readonly ok: true; readonly records: DnsRecords }
   | { readonly ok: false; readonly code: DnsErrorCode };
 
 export interface SenderWebhookClient {
   /** SET を Webhook に送る。宛先の検査は sender が行う。 */
-  postSet(input: { readonly url: string; readonly set: string }): Promise<SendResult>;
+  postSet(input: { readonly url: string; readonly set: string }): Promise<WebhookResult>;
 }
 
 export interface SenderMailClient {
@@ -107,14 +119,43 @@ function sendResultOf(value: Record<string, unknown>): SendResult {
   throw new SenderClientError('unavailable');
 }
 
+function isHttpStatus(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 100 && value <= 599;
+}
+
+function webhookResultOf(value: Record<string, unknown>): WebhookResult {
+  if (value.ok === true && isHttpStatus(value.status) && value.status < 300) {
+    return { ok: true, status: value.status };
+  }
+  const base = sendResultOf(value);
+  if (base.ok) throw new SenderClientError('unavailable');
+  if (value.status !== undefined && !isHttpStatus(value.status)) {
+    throw new SenderClientError('unavailable');
+  }
+  if (
+    value.setError !== undefined &&
+    !(
+      typeof value.setError === 'string' && SET_TIME_ERRORS.includes(value.setError as SetTimeError)
+    )
+  ) {
+    throw new SenderClientError('unavailable');
+  }
+  return {
+    ok: false,
+    reason: base.reason,
+    ...(value.status === undefined ? {} : { status: value.status as number }),
+    ...(value.setError === undefined ? {} : { setError: value.setError as SetTimeError }),
+  };
+}
+
 export function createSenderWebhookClient(connection: SenderConnection): SenderWebhookClient {
   const call = transport(connection, 'company-api');
   return Object.freeze({
-    async postSet(input: { readonly url: string; readonly set: string }): Promise<SendResult> {
+    async postSet(input: { readonly url: string; readonly set: string }): Promise<WebhookResult> {
       if (typeof input?.url !== 'string' || typeof input.set !== 'string') {
         throw new SenderClientError('invalid_request');
       }
-      return sendResultOf(await call('webhook', { url: input.url, set: input.set }));
+      return webhookResultOf(await call('webhook', { url: input.url, set: input.set }));
     },
   });
 }

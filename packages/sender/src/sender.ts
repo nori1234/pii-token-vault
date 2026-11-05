@@ -136,10 +136,15 @@ export async function startSender(options: SenderOptions): Promise<SenderHandle>
         const outcome = await postWebhook(webhookDeps, { url: body.url as string, set });
         if (outcome.ok) {
           log.info({ event: 'sender.webhook_delivered', status: outcome.status });
-          return { ok: true };
+          return { ok: true, status: outcome.status };
         }
         log.warn({ event: 'sender.webhook_rejected', reason: outcome.reason });
-        return { ok: false, reason: outcome.reason };
+        return {
+          ok: false,
+          reason: outcome.reason,
+          ...(outcome.status === undefined ? {} : { status: outcome.status }),
+          ...(outcome.setError === undefined ? {} : { setError: outcome.setError }),
+        };
       }
       case 'mail': {
         const body = objectWithKeys(raw, ['mailFrom', 'rcptTo', 'raw']);

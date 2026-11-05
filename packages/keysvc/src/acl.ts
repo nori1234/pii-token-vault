@@ -9,6 +9,8 @@
 // - sender、rp-kit、demo-rp の行はない（資格情報もない）。
 // - sub の導出（pairwise_sub）、idp の保存の id（oidc_storage_id）、確認コード（email_verify_code）の MAC は idp だけ（ADR 0018）。
 //   承認のチャレンジ（approval_challenge）の MAC も idp だけ（ADR 0023）。
+// - 操作ごとの承認の鍵（op_approval）で署名できるのは idp だけ。窓口の ID の MAC（desk_id、desk_lookup）は
+//   company-api だけ（ADR 0026）。
 //
 // 行を足すときは、warifu-core の keys/protocol.ts、各クライアントの型、t08-keysvc-acl と t08-key-client-surface の
 // 期待の表を同じ PR で直す。
@@ -35,9 +37,13 @@ export const ACL: ReadonlyArray<readonly [KeysvcCaller, KeysvcOp, AclTarget]> = 
   ['idp', 'derive_alias', 'alias_derive'],
   ['idp', 'sign', 'id_token'],
   ['idp', 'public_keys', 'id_token'],
+  ['idp', 'sign', 'op_approval'],
+  ['idp', 'public_keys', 'op_approval'],
 
   ['company-api', 'mac', 'alias_lookup'],
   ['company-api', 'mac', 'audit_chain'],
+  ['company-api', 'mac', 'desk_id'],
+  ['company-api', 'mac', 'desk_lookup'],
   ['company-api', 'derive_alias', 'alias_derive'],
   ['company-api', 'sign', 'tenant_jwt'],
   ['company-api', 'public_keys', 'tenant_jwt'],
