@@ -9,7 +9,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@fastify/middie": "9.3.5",
+    "@fastify/middie": "9.3.6",
     "@pii-token-vault/warifu-core": "0.0.0",
     "@simplewebauthn/browser": "14.0.0",
     "@simplewebauthn/server": "14.0.3",
