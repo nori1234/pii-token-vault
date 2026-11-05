@@ -10,7 +10,8 @@
 //   その数だけをログに残す。jti と iat は初めて送るときに決め、送り直しでも同じにする。
 //
 // 窓口の取消の SET（ADR 0026 の O-67）と、回復の SET（ADR 0027 の O-81）。どちらも、取消や回復はもう決まったこと
-// なので、諦めて消すことはしない（扱いは同じ）：
+// なので、諦めて消すことはしない（扱いは同じ。回復の SET は、送るときに sub の索引が見つからなくても消さず、下の
+// 「つながらない」と同じ間で送り直す）：
 // - 202 だけを配送できたことにして消す。業務の取消の完了は、企業の cancellation-results で決まる。
 // - 400 の set_too_old は、同じ取消を、5秒の後に新しい jti と iat で送り直す（同じ回の中では送り直さない）。
 //   続けて3回なら保留にする（受け口の時計の狂いとみなす）。
@@ -291,8 +292,16 @@ export async function deliverDue(
       const row = await claim(deps, tenant);
       if (row === undefined) break;
       const content = await contentOf(deps, tenant.tenantId, row);
+      if (content === undefined && row.event_type === 'account_recovered') {
+        // 回復の SET で sub の索引が見つからないときは、消さずに、送れなかったときと同じ間で送り直す（回復はもう
+        // 決まったこと。索引を戻せば、次の回で届く。オーナーの4回目のレビュー）。値はログに出さない。
+        deps.log.warn({ event: 'company_api.recovery_subject_missing', count: 1 });
+        const outcome = await settle(deps, tenant, row, undefined);
+        counts[outcome] += 1;
+        continue;
+      }
       if (content === undefined) {
-        // 正本の行が消えた後の取消の SET（終端から7日を過ぎた）、sub のなくなった回復の SET。送るものがないので消す。
+        // 正本の行が消えた後の取消の SET（終端から7日を過ぎた）。送るものがないので消す。
         await deps.db.withTenant(tenant.tenantId, (tx) =>
           tx.execute(sql`DELETE FROM company_api.set_outbox WHERE event_id = ${row.event_id}`),
         );

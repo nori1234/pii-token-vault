@@ -439,6 +439,69 @@ describe('漏えい：企業に渡せないときも、知らせは失われな�
     }
   });
 
+  it('送るときに sub の索引が見つからない回復の知らせは、company-api の送信待ちから消さずに送り直し、索引を戻した後に、その sub で届く', async () => {
+    // 攻撃者が持っている情報：回復コードと協力者の承認（運用の誤りなどで、企業の sub の索引が欠けている間に回復を
+    //                         成立させ、索引を直した後も、企業に回復を知られないことを期待する）
+    // 試す経路：sub の索引のない利用者の回復の知らせを、idp の資格情報で内部 API に渡し、配送の回を何度も回す。その後、
+    //           idp と同じ境界で索引を置き直し、配送の回を回す
+    // 期待する結果：索引のない間は SET を送らず、送信待ちに残る（消さない）。索引を戻すと、その sub と、成立した日の
+    //               recovered_at で回復の SET が届き、送信待ちから消える
+    // plan 11章：テスト3、テスト12（ADR 0027 の O-81。オーナーの4回目のレビュー）
+    const tenant = world.company.tenants[0];
+    if (tenant === undefined) throw new Error('準備に失敗した');
+    const userId = randomUUID();
+    const attemptId = randomUUID();
+    const day = Math.floor(clock / DAY) * 86_400;
+    const desk = createDeskClient({
+      socketPath: world.deskSocketPath,
+      credential: world.deskCredential,
+    });
+    await desk.accountRecovered({
+      userId: userId as never,
+      attemptId,
+      tenantIds: [tenant.tenantId],
+      recoveredDay: day,
+    });
+    const rowsOf = async () =>
+      (await recoveredRows(tenant.tenantId)).filter((row) => row.recovery_ref === attemptId);
+    expect(await rowsOf()).toHaveLength(1);
+
+    const sub = randomBytes(32).toString('base64url');
+    const setsFor = (from: number) =>
+      world.sender.requests
+        .slice(from)
+        .map((request) => decodeJwt(request.body))
+        .filter((claims) => (claims.sub_id as { id?: string } | undefined)?.id === sub);
+    world.sender.respondWith(202);
+    const before = world.sender.requests.length;
+    // 初めの遅延（0〜6時間）と、送り直しの間（1分、5分、30分、2時間、6時間。どれも最大で2割の揺らぎを足す）を
+    // 越えて、何度も回す。
+    for (const hours of [7, 1, 1, 3, 8, 8]) {
+      clock += hours * HOUR;
+      await world.company.api.deliverDue();
+      expect(await rowsOf()).toHaveLength(1);
+    }
+    expect(setsFor(before)).toEqual([]);
+
+    const idp = await serviceDb('idp');
+    try {
+      await idp.withTenant(tenant.tenantId, (tx) =>
+        tx.execute(
+          sql`INSERT INTO aliases.subject (tenant_id, user_id, sub)
+              VALUES (${tenant.tenantId}, ${userId}, ${sub})`,
+        ),
+      );
+    } finally {
+      await idp.close();
+    }
+    clock += 8 * HOUR;
+    await world.company.api.deliverDue();
+    const sets = setsFor(before);
+    expect(sets).toHaveLength(1);
+    expect(sets[0]?.events).toEqual({ [RECOVERED]: { recovered_at: day } });
+    expect(await rowsOf()).toEqual([]);
+  });
+
   it('company-api に届かない、または idp に窓口の内部 API がないとき、回復は成立し、知らせは idp の送信待ちに残る', async () => {
     // 攻撃者が持っている情報：回復コードと協力者の承認（company-api が止まっている間に回復し、企業の保留を避けたい）
     // 試す経路：company-api の内部 API に届かない idp と、内部 API を設定していない idp で、企業に接続した利用者の
