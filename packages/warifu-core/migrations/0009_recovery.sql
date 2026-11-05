@@ -220,3 +220,17 @@ GRANT SELECT (user_id, recovery_ref, recovered_day), INSERT (user_id, recovery_r
   ON company_api.set_outbox TO warifu_company_api;
 
 RESET ROLE;
+
+-- 既存の利用者の credential_added_at を、監査ログから戻す（オーナーの6回目のレビュー。PRN-87、ADR 0027 の O-76）。
+-- - 最初のパスキーの後の追加は、追加の機能と同じ M3 から、すべて idp.passkey.added に残っている（最初のパスキーは
+--   idp.account.created で、ここには入らない）。監査ログは消さないので、この列を足す前に足して消したパスキーも入る。
+-- - 監査ログの本文は FORCE の RLS で、所有者のロールからは0行に見える。そのため RESET ROLE の後（ブートストラップの
+--   ロール）で読む。マイグレーションは不変条件8の例外。読むのは利用者 ID と時刻だけで、ほかの場所には書かない。
+UPDATE idp.users AS u
+   SET credential_added_at = a.last_added
+  FROM (SELECT e.user_id, pg_catalog.max(e.occurred_at) AS last_added
+          FROM audit.events AS e
+         WHERE e.service = 'idp' AND e.event_type = 'idp.passkey.added' AND e.user_id IS NOT NULL
+         GROUP BY e.user_id) AS a
+ WHERE u.user_id = a.user_id
+   AND (u.credential_added_at IS NULL OR u.credential_added_at < a.last_added);
