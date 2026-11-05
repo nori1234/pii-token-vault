@@ -196,7 +196,9 @@ export function registerPwaRoutes(ctx: RouteContext): void {
       bind: current.session.ref,
     });
     if (!result.ok || result.userId !== current.session.userId) return reply.code(400).send(FAILED);
-    await addCredential(repo, result.userId, result.credential);
+    // 足した時刻は、協力者の資格を変える（PRN-87）。協力者の承認と直列にする（ADR 0027 の O-76）。
+    const { userId, credential } = result;
+    await ctx.userSerial.run(userId, () => addCredential(repo, userId, credential));
     return { ok: true };
   });
 

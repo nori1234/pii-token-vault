@@ -418,6 +418,17 @@ async function settleAttempts(tx: Tx, deps: RepoDeps, userId: WarifuUserId): Pro
   await tx.execute(sql`DELETE FROM idp.recovery_attempts WHERE purge_after <= ${now}`);
 }
 
+/**
+ * 進行中の回復の記録の行をロックする（なければ何もしない）。協力者を外す・入れ替える処理が、協力関係を消す前に
+ * 呼ぶ。協力者の承認（approveRecovery）と、同じ行で待ち合わせる（O-76）。
+ */
+async function lockActiveAttempt(tx: Tx): Promise<void> {
+  await tx.query(
+    sql`SELECT attempt_id FROM idp.recovery_attempts
+         WHERE state IN ('awaiting_helper', 'waiting') FOR UPDATE`,
+  );
+}
+
 async function activeAttempt(tx: Tx): Promise<AttemptRow | undefined> {
   const [row] = await tx.query<AttemptRow>(
     sql`SELECT attempt_id, helper_user_id, state, request_device, started_at, helper_deadline, ready_at
@@ -509,6 +520,7 @@ export async function setHelper(
   const previous = await deps.db.withWarifuUser(input.ownerUserId, async (tx) => {
     const now = deps.now();
     if ((await restrictedUntilIn(tx, now)) !== null) return 'restricted' as const;
+    await lockActiveAttempt(tx);
     const old = await helperOfOwner(tx, input.ownerUserId);
     if (old !== undefined) {
       await tx.execute(sql`DELETE FROM idp.helpers WHERE relationship_id = ${old.relationship_id}`);
@@ -551,6 +563,7 @@ export async function removeHelper(deps: RepoDeps, ownerUserId: WarifuUserId): P
   const removed = await deps.db.withWarifuUser(ownerUserId, async (tx) => {
     const now = deps.now();
     if ((await restrictedUntilIn(tx, now)) !== null) return undefined;
+    await lockActiveAttempt(tx);
     const old = await helperOfOwner(tx, ownerUserId);
     if (old === undefined) return undefined;
     await tx.execute(sql`DELETE FROM idp.helpers WHERE relationship_id = ${old.relationship_id}`);
@@ -790,7 +803,12 @@ export async function pendingRecoveryOf(
 
 // ---- 協力者の承認（O-76） ----
 
-/** 待機に入れる。承認した人が、始めた時点の協力者で、記録が協力者の承認待ちのときだけ。待機の終わりを返す。 */
+/**
+ * 待機に入れる。承認した人が、始めた時点の協力者で、いまも協力者で、記録が協力者の承認待ちのときだけ。待機の終わりを
+ * 返す。回復の記録の行をロックしてから協力関係を確かめる（協力者を外す・入れ替える処理も、同じ行をロックしてから
+ * 協力関係を消すので、外した後に承認が通らない。O-76）。協力者の資格（PRN-87）は、呼び出し側が、協力者の範囲で
+ * 確かめる（UserSerial で、資格を変える書き込みと直列にする）。
+ */
 export async function approveRecovery(
   deps: RepoDeps,
   input: {
@@ -803,6 +821,18 @@ export async function approveRecovery(
   return deps.db.withWarifuUser(input.userId, async (tx) => {
     const now = deps.now();
     await settleAttempts(tx, deps, input.userId);
+    const [attempt] = await tx.query(
+      sql`SELECT attempt_id FROM idp.recovery_attempts
+           WHERE attempt_id = ${input.attemptId} AND state = 'awaiting_helper'
+             AND helper_user_id = ${input.helperUserId} AND helper_deadline > ${now}
+             FOR UPDATE`,
+    );
+    if (attempt === undefined) return undefined;
+    const [relationship] = await tx.query(
+      sql`SELECT relationship_id FROM idp.helpers
+           WHERE owner_user_id = ${input.userId} AND helper_user_id = ${input.helperUserId}`,
+    );
+    if (relationship === undefined) return undefined;
     const readyAt = new Date(now.getTime() + input.waitSeconds * 1000);
     const updated = await tx.execute(
       sql`UPDATE idp.recovery_attempts

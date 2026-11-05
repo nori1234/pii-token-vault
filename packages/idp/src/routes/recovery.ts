@@ -477,13 +477,16 @@ export function registerRecoveryRoutes(ctx: RouteContext): void {
     // 企業への知らせは、成立と同じトランザクションで送信待ちに置く（成立しなかった回復は知らせない。失われない。
     // O-79、O-81）。宛先は、いま接続しているテナント。
     const tenantIds = (await listConnections(repo, userId)).map((c) => c.tenantId);
-    const done = await completeRecovery(repo, keys, {
-      userId,
-      attemptId: pending.attemptId,
-      credentialId,
-      at,
-      tenantIds,
-    });
+    // 回復した時刻は、この人が協力者のときの資格を変える（PRN-87）。協力者の承認と直列にする（O-76）。
+    const done = await ctx.userSerial.run(userId, () =>
+      completeRecovery(repo, keys, {
+        userId,
+        attemptId: pending.attemptId,
+        credentialId,
+        at,
+        tenantIds,
+      }),
+    );
     if (done === undefined) return reply.code(409).send(FAILED);
     // 後始末は、知らせより先に行う（どれもメモリの操作で、失敗しない）。持ち主のセッションを、OIDC のものも含めて
     // すべて消し（O-79）、新しい端末だけを承認用のオリジンでログインさせる。
@@ -592,11 +595,17 @@ export function registerRecoveryRoutes(ctx: RouteContext): void {
     const { key, binding } = target;
     // 結び付けは1回だけ（承認の成否によらず、ここで消す）。
     await store.delete(BINDING_KIND, key);
-    const readyAt = await approveRecovery(repo, {
-      userId: binding.userId,
-      attemptId: binding.attemptId,
-      helperUserId: userId,
-      waitSeconds: ctx.recoveryWaitSeconds,
+    // 資格の判定から回復の記録までを、協力者のパスキーの追加と回復の成立と直列にし、判定をここでやり直す（儀式の
+    // 間に足されたパスキーを見落とさない）。協力者を外したことは、approveRecovery が持ち主の範囲で確かめる（O-76）。
+    const readyAt = await ctx.userSerial.run(userId, async () => {
+      const relationship = await helperRelationship(repo, userId, binding.userId);
+      if (relationship?.eligible !== true) return undefined;
+      return approveRecovery(repo, {
+        userId: binding.userId,
+        attemptId: binding.attemptId,
+        helperUserId: userId,
+        waitSeconds: ctx.recoveryWaitSeconds,
+      });
     });
     if (readyAt === undefined) return reply.code(409).send(FAILED);
     request.log.info({ event: 'idp.recovery_helper_approved' });

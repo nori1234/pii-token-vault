@@ -14,6 +14,7 @@ import type { Registry } from '../registry.ts';
 import type { findCredential, RepoDeps } from '../repo.ts';
 import type { PwaSession, PwaSessions } from '../sessions.ts';
 import type { MacMemoryStore } from '../storage.ts';
+import type { UserSerial } from '../user-serial.ts';
 import type { Ceremonies } from '../webauthn.ts';
 
 export interface CurrentSession {
@@ -42,6 +43,11 @@ export interface RouteContext {
   readonly approvalSessions: PwaSessions;
   readonly approvalTypes: ApprovalTypes;
   readonly limiter: RateLimiter;
+  /**
+   * 利用者ごとの直列化（プロセスの中）。協力者の資格を変える書き込み（パスキーの追加、回復の成立）と、協力者の承認
+   * （資格の判定から記録まで）を通す（ADR 0027 の O-76）。
+   */
+  readonly userSerial: UserSerial;
   readonly ceremonies: Ceremonies;
   readonly emailDeps: EmailFlowDeps;
   readonly provider: Provider;

@@ -78,6 +78,7 @@ import {
 } from './sessions.ts';
 import { loadSigningKey } from './signing-key.ts';
 import { MacMemoryStore, StorageFullError } from './storage.ts';
+import { createUserSerial } from './user-serial.ts';
 import { Ceremonies } from './webauthn.ts';
 
 export interface IdpOptions {
@@ -194,6 +195,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
   const approvalTypes = new ApprovalTypes(options.approvalTypes ?? []);
   const inboxDeps = { ...repo, approvalTypes };
   const limiter = new RateLimiter(nowMs);
+  const userSerial = createUserSerial();
   const mailer = options.mailer ?? new MemoryOutbox();
   const ceremonies = new Ceremonies(store, {
     rpId: options.rpId,
@@ -365,6 +367,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
     approvalSessions,
     approvalTypes,
     limiter,
+    userSerial,
     ceremonies,
     emailDeps,
     provider,
