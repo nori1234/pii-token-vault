@@ -66,7 +66,7 @@ export function createKeyring(): Keyring {
   for (const purpose of MAC_PURPOSES) mac.set(purpose, randomId(HMAC_BYTES));
   // 別名を導く鍵は、どの MAC の用途の鍵とも別にする（CAP-05、ADR 0005）。
   const aliasDerive = randomId(HMAC_BYTES);
-  // ES256 の鍵は用途ごとに別に作る（ID トークン、テナントの JWT、SET。ADR 0014、ADR 0022）。
+  // ES256 の鍵は用途ごとに別に作る（ID トークン、テナントの JWT、SET、操作ごとの承認。ADR 0014、ADR 0022、ADR 0026）。
   const es256 = (): SigningKey => {
     const pair = generateEs256KeyPair();
     const kid = toBase64Url(randomId(16));
@@ -100,6 +100,7 @@ export function createKeyring(): Keyring {
     dkim,
     tenant_jwt: es256(),
     set: es256(),
+    op_approval: es256(),
   });
 
   const versions = (keyId: EncryptionKeyId): readonly EncryptionKey[] => {
