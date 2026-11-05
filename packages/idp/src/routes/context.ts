@@ -62,6 +62,12 @@ export interface RouteContext {
   setCookie(reply: FastifyReply, name: string, value: string): void;
   clearCookie(reply: FastifyReply, name: string): void;
   /**
+   * 利用者のセッションをすべて消す（PWA、承認用のオリジン、OIDC の SSO のセッション、その利用者でログインした進行中の
+   * インタラクション、発行済みの認可コードとアクセストークン）。パスキーの削除と、回復の成立で呼ぶ（ADR 0018、
+   * ADR 0027 の O-79）。
+   */
+  revokeUserSessions(userId: WarifuUserId): void;
+  /**
    * PWA のセッション（本来のオリジンのルートだけが呼ぶ）。なければ 401 を送って undefined を返す。
    * undefined のときは、呼び出し側は reply をそのまま返す。
    */

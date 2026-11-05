@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createLocalJWKSet, jwtVerify } from 'jose';
+import { createLocalJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from '../../packages/warifu-core/src/db/sql.ts';
 import { createDeskClient } from '../../packages/warifu-core/src/desk/client.ts';
@@ -25,6 +25,7 @@ import {
 } from '../setup/idp.ts';
 import {
   bindingCodeOf,
+  cancelRecovery,
   helperApprove,
   issueCode,
   makeHelper,
@@ -102,8 +103,13 @@ async function recoveredRows(tenantId: TenantId) {
   const db = await serviceDb('company-api');
   try {
     return await db.withTenant(tenantId, (tx) =>
-      tx.query<{ deliver_after: Date; recovered_day: string }>(
-        sql`SELECT deliver_after, recovered_day FROM company_api.set_outbox
+      tx.query<{
+        deliver_after: Date;
+        recovered_day: string;
+        recovery_ref: string;
+        recovery_confirmed: boolean;
+      }>(
+        sql`SELECT deliver_after, recovered_day, recovery_ref, recovery_confirmed FROM company_api.set_outbox
              WHERE event_type = 'account_recovered'`,
       ),
     );
@@ -228,6 +234,112 @@ describe('漏えい：回復を企業に知らせる（plan 11章 テスト3、�
     );
     expect(outcome.approve.status).toBe(200);
     expect(typeof outcome.approvalJwt).toBe('string');
+  });
+
+  it('取り消された回復は、企業への知らせを準備していても届かない。確定されない準備は30日で消える', async () => {
+    // 攻撃者が持っている情報：（競合）成立の直前に企業への知らせを準備した、攻撃者の回復（持ち主が同時に取り消す）
+    // 試す経路：待機を終えた回復で、企業への知らせを準備した後に、持ち主が登録済みの端末で取り消す。新しい端末で成立を
+    //           試みる。6時間の後に配送の回を回す。30日の後に、もう一度回す
+    // 期待する結果：成立は 401。準備の行は確定されず、回復の SET は企業に届かない。確定されない準備は30日で消える
+    // plan 11章：テスト3、テスト12（ADR 0027 の O-81。オーナーのレビュー）
+    const client = world.t.clients[0];
+    const tenant = world.company.tenants[0];
+    if (client === undefined || tenant === undefined) throw new Error('準備に失敗した');
+    const owner = await connectedOwner(world.t, [client]);
+    const device = await readyToComplete(world.t, owner.code, owner.helper.approval);
+    expect((await owner.approval.approvalLogin()).status).toBe(200);
+    const attemptId = (
+      (await owner.approval.get('/api/recovery/settings')).json.attempt as { id: string }
+    ).id;
+    // 成立の処理が準備を済ませた直後の状態（ここで取消が先に確定する）。
+    const desk = createDeskClient({
+      socketPath: world.deskSocketPath,
+      credential: world.deskCredential,
+    });
+    await desk.accountRecovered({
+      userId: userIdOf(owner.browser.authenticator),
+      attemptId,
+      tenantIds: [tenant.tenantId],
+      recoveredDay: Math.floor(clock / DAY) * 86_400,
+    });
+    expect((await cancelRecovery(owner.approval)).status).toBe(200);
+    expect((await resume(device)).status).toBe(401);
+    const prepared = (await recoveredRows(tenant.tenantId)).filter(
+      (row) => row.recovery_ref === attemptId,
+    );
+    expect(prepared.map((row) => row.recovery_confirmed)).toEqual([false]);
+
+    clock += 7 * HOUR;
+    world.sender.respondWith(202);
+    const before = world.sender.requests.length;
+    await world.company.api.deliverDue();
+    const recoveredSubs = world.sender.requests
+      .slice(before)
+      .map((request) => decodeJwt(request.body))
+      .filter((claims) => RECOVERED in ((claims.events as object | undefined) ?? {}))
+      .map((claims) => (claims.sub_id as { id: string }).id);
+    expect(recoveredSubs).not.toContain(owner.subs[0]);
+
+    clock += 31 * DAY;
+    await world.company.api.deliverDue();
+    expect(
+      (await recoveredRows(tenant.tenantId)).filter((row) => row.recovery_ref === attemptId),
+    ).toEqual([]);
+  });
+
+  it('企業への知らせの確定が届かなかった回復は、回復した端末で受信箱を読んだときに確定する', async () => {
+    // 攻撃者が持っている情報：（障害）回復の成立の直後に、company-api への確定が届かなかった状態
+    // 試す経路：成立した回復の準備の行を「確定前」に戻し、idp に「確定がまだ」と記録した状態にする（成立と確定の間で
+    //           idp が止まった状態の再現）。その後で、回復した端末で PWA の受信箱を読む
+    // 期待する結果：受信箱を読むと確定を送り直し、準備の行が確定され、idp の記録も済みになる
+    // plan 11章：テスト3、テスト12（ADR 0027 の O-79、O-81。オーナーのレビュー）
+    const client = world.t.clients[0];
+    const tenant = world.company.tenants[0];
+    if (client === undefined || tenant === undefined) throw new Error('準備に失敗した');
+    const owner = await connectedOwner(world.t, [client]);
+    const device = await readyToComplete(world.t, owner.code, owner.helper.approval);
+    expect((await resume(device)).json.state).toBe('completed');
+    const userId = userIdOf(owner.browser.authenticator);
+    const idp = await serviceDb('idp');
+    const company = await serviceDb('company-api');
+    try {
+      const pendingOf = () =>
+        idp.withWarifuUser(userId, (tx) =>
+          tx.query<{ attempt_id: string; company_notice_pending: boolean }>(
+            sql`SELECT attempt_id, company_notice_pending FROM idp.recovery_attempts
+                 WHERE state = 'completed'`,
+          ),
+        );
+      const [attempt] = await pendingOf();
+      if (attempt === undefined) throw new Error('成立した回復の記録がない');
+      expect(attempt.company_notice_pending).toBe(false);
+      await idp.withWarifuUser(userId, (tx) =>
+        tx.execute(
+          sql`UPDATE idp.recovery_attempts SET company_notice_pending = true
+               WHERE attempt_id = ${attempt.attempt_id}`,
+        ),
+      );
+      await company.withTenant(tenant.tenantId, (tx) =>
+        tx.execute(
+          sql`UPDATE company_api.set_outbox SET recovery_confirmed = false
+               WHERE recovery_ref = ${attempt.attempt_id}`,
+        ),
+      );
+      const confirmedOf = async () =>
+        (await recoveredRows(tenant.tenantId))
+          .filter((row) => row.recovery_ref === attempt.attempt_id)
+          .map((row) => row.recovery_confirmed);
+      expect(await confirmedOf()).toEqual([false]);
+
+      const pwa = new Browser(world.t.origin, device.authenticator);
+      expect((await pwaLogin(pwa)).status).toBe(200);
+      expect((await pwa.get('/api/inbox')).status).toBe(200);
+      expect(await confirmedOf()).toEqual([true]);
+      expect((await pendingOf()).map((row) => row.company_notice_pending)).toEqual([false]);
+    } finally {
+      await idp.close();
+      await company.close();
+    }
   });
 });
 

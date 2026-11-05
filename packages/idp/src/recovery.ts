@@ -6,6 +6,8 @@
 // - 協力関係は、内部 ID の組だけ（PRN-91）。表示名は協力者の端末の中だけ。
 // - 招待と、協力者の承認の結び付けは、プロセスのメモリ（MacMemoryStore）に置く（10分、1回だけ。O-74、O-76）。
 // - DB は、持ち主か協力者の、どちらか1人の範囲（withWarifuUser）でだけ読み書きする（不変条件8）。
+// - 協力者への知らせは、持ち主の変更と同じトランザクションで送信待ち（idp.helper_notice_outbox）に置き、確定の後に
+//   flushHelperNotices で協力者の受信箱へ移す。移せなくても、持ち主の変更は取り消さず、後で送り直す（O-79）。
 
 import {
   constantTimeEqual,
@@ -246,20 +248,61 @@ export async function loadBinding(
 
 // ---- 知らせ ----
 
-async function notifyHelper(
-  deps: RepoDeps,
-  helperUserId: WarifuUserId,
-  type: NoticeType,
-  relationshipId: string,
+/** 協力者への知らせを、持ち主の範囲の送信待ちに置く（持ち主の変更と同じトランザクションで呼ぶ）。 */
+async function queueHelperNotice(
+  tx: Tx,
+  input: {
+    readonly ownerUserId: WarifuUserId;
+    readonly helperUserId: string;
+    readonly relationshipId: string;
+    readonly type: NoticeType;
+    readonly now: Date;
+  },
 ): Promise<void> {
-  await deps.db.withWarifuUser(helperUserId, (tx) =>
-    insertNotice(tx, {
-      userId: helperUserId,
-      type,
-      content: { relationship: relationshipId },
-      now: deps.now(),
-    }),
+  await tx.execute(
+    sql`INSERT INTO idp.helper_notice_outbox
+          (notice_id, owner_user_id, helper_user_id, relationship_id, type, created_at)
+        VALUES (${randomUuid()}, ${input.ownerUserId}, ${input.helperUserId}, ${input.relationshipId},
+                ${input.type}, ${input.now})`,
   );
+}
+
+/**
+ * 持ち主の送信待ちにある協力者への知らせを、協力者の受信箱へ移す。協力者の受信箱には、送信待ちの ID を項目の ID に
+ * して置くので、途中で失敗して送り直しても、同じ知らせは1つだけになる。移した数を返す。失敗したら例外にする
+ * （呼び出し元は、持ち主の変更を取り消さず、後で送り直す）。
+ */
+export async function flushHelperNotices(
+  deps: RepoDeps,
+  ownerUserId: WarifuUserId,
+): Promise<number> {
+  const pending = await deps.db.withWarifuUser(ownerUserId, (tx) =>
+    tx.query<{
+      notice_id: string;
+      helper_user_id: string;
+      relationship_id: string;
+      type: NoticeType;
+    }>(
+      sql`SELECT notice_id, helper_user_id, relationship_id, type FROM idp.helper_notice_outbox
+           ORDER BY created_at, notice_id LIMIT 20`,
+    ),
+  );
+  for (const row of pending) {
+    const helperUserId = row.helper_user_id as WarifuUserId;
+    await deps.db.withWarifuUser(helperUserId, (tx) =>
+      insertNotice(tx, {
+        userId: helperUserId,
+        type: row.type,
+        content: { relationship: row.relationship_id },
+        now: deps.now(),
+        itemId: row.notice_id,
+      }),
+    );
+    await deps.db.withWarifuUser(ownerUserId, (tx) =>
+      tx.execute(sql`DELETE FROM idp.helper_notice_outbox WHERE notice_id = ${row.notice_id}`),
+    );
+  }
+  return pending.length;
 }
 
 interface HelperRow {
@@ -289,7 +332,7 @@ export async function issueRecoveryCode(
 ): Promise<{ readonly code: string; readonly reissued: boolean }> {
   const secret = randomBytesOf(SECRET_BYTES);
   const mac = await codeMacOf(keys, userId, secret);
-  const { reissued, helper } = await deps.db.withWarifuUser(userId, async (tx) => {
+  const reissued = await deps.db.withWarifuUser(userId, async (tx) => {
     const now = deps.now();
     const [existing] = await tx.query(
       sql`SELECT user_id FROM idp.recovery_codes WHERE user_id = ${userId} FOR UPDATE`,
@@ -312,17 +355,18 @@ export async function issueRecoveryCode(
       now,
     });
     const helper = await helperOfOwner(tx, userId);
+    if (reissued && helper !== undefined) {
+      await queueHelperNotice(tx, {
+        ownerUserId: userId,
+        helperUserId: helper.helper_user_id,
+        relationshipId: helper.relationship_id,
+        type: 'helper.code_reissued',
+        now,
+      });
+    }
     await appendAudit(tx, deps.keys, RECOVERY_CODE_ISSUED, { reissued }, { now: deps.now });
-    return { reissued, helper };
+    return reissued;
   });
-  if (reissued && helper !== undefined) {
-    await notifyHelper(
-      deps,
-      helper.helper_user_id as WarifuUserId,
-      'helper.code_reissued',
-      helper.relationship_id,
-    );
-  }
   return { code: formatRecoveryCode(userId, secret), reissued };
 }
 
@@ -470,6 +514,22 @@ export async function setHelper(
           VALUES (${input.relationshipId}, ${input.ownerUserId}, ${input.helperUserId}, ${now})`,
     );
     await insertNotice(tx, { userId: input.ownerUserId, type: 'helper.set', now });
+    await queueHelperNotice(tx, {
+      ownerUserId: input.ownerUserId,
+      helperUserId: input.helperUserId,
+      relationshipId: input.relationshipId,
+      type: 'helper.added',
+      now,
+    });
+    if (old !== undefined && old.helper_user_id !== input.helperUserId) {
+      await queueHelperNotice(tx, {
+        ownerUserId: input.ownerUserId,
+        helperUserId: old.helper_user_id,
+        relationshipId: old.relationship_id,
+        type: 'helper.ended',
+        now,
+      });
+    }
     await appendAudit(
       tx,
       deps.keys,
@@ -477,19 +537,9 @@ export async function setHelper(
       { replaced: old !== undefined },
       { now: deps.now },
     );
-    return old ?? null;
+    return 'set' as const;
   });
-  if (previous === 'restricted') return false;
-  await notifyHelper(deps, input.helperUserId, 'helper.added', input.relationshipId);
-  if (previous !== null && previous.helper_user_id !== input.helperUserId) {
-    await notifyHelper(
-      deps,
-      previous.helper_user_id as WarifuUserId,
-      'helper.ended',
-      previous.relationship_id,
-    );
-  }
-  return true;
+  return previous === 'set';
 }
 
 /** 協力者を外す。外せたら true（制限の中、協力者がいないときは false）。 */
@@ -501,17 +551,17 @@ export async function removeHelper(deps: RepoDeps, ownerUserId: WarifuUserId): P
     if (old === undefined) return undefined;
     await tx.execute(sql`DELETE FROM idp.helpers WHERE relationship_id = ${old.relationship_id}`);
     await insertNotice(tx, { userId: ownerUserId, type: 'helper.removed', now });
+    await queueHelperNotice(tx, {
+      ownerUserId,
+      helperUserId: old.helper_user_id,
+      relationshipId: old.relationship_id,
+      type: 'helper.ended',
+      now,
+    });
     await appendAudit(tx, deps.keys, RECOVERY_HELPER_REMOVED, {}, { now: deps.now });
-    return old;
+    return true;
   });
-  if (removed === undefined) return false;
-  await notifyHelper(
-    deps,
-    removed.helper_user_id as WarifuUserId,
-    'helper.ended',
-    removed.relationship_id,
-  );
-  return true;
+  return removed === true;
 }
 
 /**
@@ -674,6 +724,13 @@ export async function startRecovery(
         content: { device: input.device },
         now,
       });
+      await queueHelperNotice(tx, {
+        ownerUserId: input.userId,
+        helperUserId: helper.helper_user_id,
+        relationshipId: helper.relationship_id,
+        type: 'helper.recovery_started',
+        now,
+      });
       await appendAudit(tx, deps.keys, RECOVERY_STARTED, {}, { now: deps.now });
       return {
         attemptId,
@@ -684,14 +741,6 @@ export async function startRecovery(
   } catch {
     // 同時に始めた回復（一意の索引）、同じパスキーの二重の登録など。
     return undefined;
-  }
-  if (started !== undefined) {
-    await notifyHelper(
-      deps,
-      started.helperUserId,
-      'helper.recovery_started',
-      started.relationshipId,
-    );
   }
   return started;
 }
@@ -790,19 +839,19 @@ export async function cancelRecovery(
     );
     await insertNotice(tx, { userId: input.userId, type: 'recovery.cancelled', now });
     const helper = await helperOfOwner(tx, input.userId);
+    if (helper !== undefined) {
+      await queueHelperNotice(tx, {
+        ownerUserId: input.userId,
+        helperUserId: helper.helper_user_id,
+        relationshipId: helper.relationship_id,
+        type: 'helper.recovery_cancelled',
+        now,
+      });
+    }
     await appendAudit(tx, deps.keys, RECOVERY_CANCELLED, {}, { now: deps.now });
-    return { helper };
+    return true;
   });
-  if (cancelled === undefined) return false;
-  if (cancelled.helper !== undefined) {
-    await notifyHelper(
-      deps,
-      cancelled.helper.helper_user_id as WarifuUserId,
-      'helper.recovery_cancelled',
-      cancelled.helper.relationship_id,
-    );
-  }
-  return true;
+  return cancelled === true;
 }
 
 /** 進行中の回復の記録（持ち主の範囲）。 */
@@ -821,7 +870,9 @@ export async function activeRecovery(
 
 /**
  * 回復を成立させる。待機を終えた記録と、その回復待ちのパスキーのときだけ。ほかの有効なパスキーを一時停止し、
- * recovered_at を置き、回復コードを作り直す（新しいコードの平文は返り値だけ）。
+ * recovered_at を置き、回復コードを作り直す（新しいコードの平文は返り値だけ）。協力者への知らせは送信待ちに置く
+ * だけで、ここでは送らない。企業への知らせは、準備（呼び出し側が成立の前に行う）を、成立の後に確定する必要が
+ * あることを記録する（companyNoticePending。確定は confirmCompanyNotices で、届くまで送り直す。O-79、O-81）。
  */
 export async function completeRecovery(
   deps: RepoDeps,
@@ -832,6 +883,8 @@ export async function completeRecovery(
     readonly credentialId: Uint8Array;
     /** 成立の時刻（企業への知らせの recovered_at と同じ日にするため、呼び出し側が決める）。 */
     readonly at: Date;
+    /** 企業への知らせを準備した（接続している企業がある）か。 */
+    readonly companyNoticePending: boolean;
   },
 ): Promise<{ readonly code: string; readonly recoveredAt: Date } | undefined> {
   const secret = randomBytesOf(SECRET_BYTES);
@@ -841,7 +894,8 @@ export async function completeRecovery(
     const updated = await tx.execute(
       sql`UPDATE idp.recovery_attempts
              SET state = 'completed', ended_at = ${now},
-                 purge_after = ${new Date(now.getTime() + RECOVERY_TIMES.keepAfterEndDays * DAY_MS)}
+                 purge_after = ${new Date(now.getTime() + RECOVERY_TIMES.keepAfterEndDays * DAY_MS)},
+                 company_notice_pending = ${input.companyNoticePending}
            WHERE attempt_id = ${input.attemptId} AND state = 'waiting' AND ready_at <= ${now}`,
     );
     if (updated !== 1) return undefined;
@@ -861,22 +915,51 @@ export async function completeRecovery(
     await insertNotice(tx, { userId: input.userId, type: 'recovery.completed', now });
     await insertNotice(tx, { userId: input.userId, type: 'recovery.code_reissued', now });
     const helper = await helperOfOwner(tx, input.userId);
+    if (helper !== undefined) {
+      for (const type of ['helper.recovery_completed', 'helper.code_reissued'] as const) {
+        await queueHelperNotice(tx, {
+          ownerUserId: input.userId,
+          helperUserId: helper.helper_user_id,
+          relationshipId: helper.relationship_id,
+          type,
+          now,
+        });
+      }
+    }
     await appendAudit(tx, deps.keys, RECOVERY_COMPLETED, {}, { now: deps.now });
     await appendAudit(tx, deps.keys, RECOVERY_CODE_ISSUED, { reissued: true }, { now: deps.now });
-    return { helper, recoveredAt: now };
+    return { recoveredAt: now };
   });
   if (done === undefined) return undefined;
-  if (done.helper !== undefined) {
-    const helperUserId = done.helper.helper_user_id as WarifuUserId;
-    await notifyHelper(
-      deps,
-      helperUserId,
-      'helper.recovery_completed',
-      done.helper.relationship_id,
-    );
-    await notifyHelper(deps, helperUserId, 'helper.code_reissued', done.helper.relationship_id);
-  }
   return { code: formatRecoveryCode(input.userId, secret), recoveredAt: done.recoveredAt };
+}
+
+/** 成立した回復のうち、企業への知らせの確定がまだのもの（持ち主の範囲）。回復の記録の ID を返す。 */
+export async function pendingCompanyNotices(
+  deps: RepoDeps,
+  userId: WarifuUserId,
+): Promise<string[]> {
+  const rows = await deps.db.withWarifuUser(userId, (tx) =>
+    tx.query<{ attempt_id: string }>(
+      sql`SELECT attempt_id FROM idp.recovery_attempts
+           WHERE state = 'completed' AND company_notice_pending ORDER BY ended_at, attempt_id`,
+    ),
+  );
+  return rows.map((row) => row.attempt_id);
+}
+
+/** 企業への知らせを確定できたことを記録する。 */
+export async function markCompanyNoticeConfirmed(
+  deps: RepoDeps,
+  userId: WarifuUserId,
+  attemptId: string,
+): Promise<void> {
+  await deps.db.withWarifuUser(userId, (tx) =>
+    tx.execute(
+      sql`UPDATE idp.recovery_attempts SET company_notice_pending = false
+           WHERE attempt_id = ${attemptId} AND state = 'completed'`,
+    ),
+  );
 }
 
 /** recovered_at を、企業に渡す日の値（UTC の0時の秒）にする（O-81。企業をまたいだ突き合わせを弱める）。 */

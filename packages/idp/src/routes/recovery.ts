@@ -36,6 +36,7 @@ import {
   completeRecovery,
   createBinding,
   createInvite,
+  flushHelperNotices,
   helperRelationship,
   INVITE_KIND,
   isRecoveryRestricted,
@@ -43,7 +44,9 @@ import {
   listHelping,
   loadBinding,
   loadInvite,
+  markCompanyNoticeConfirmed,
   parseRecoveryCode,
+  pendingCompanyNotices,
   pendingRecoveryOf,
   type RecoveryAttemptView,
   type RecoveryBinding,
@@ -75,6 +78,41 @@ function attemptJson(attempt: RecoveryAttemptView) {
     helperDeadline: attempt.helperDeadline.toISOString(),
     readyAt: attempt.readyAt === null ? null : attempt.readyAt.toISOString(),
   };
+}
+
+/**
+ * 確定した変更の後の知らせを送る（ADR 0027 の O-79）。例外を投げない（送れなければ、次に呼ばれたときに送り直す）。
+ * - 協力者への知らせ：持ち主の送信待ちを、協力者の受信箱へ移す。
+ * - 企業への知らせ：成立した回復の、準備した SET を確定する（成立した回復だけを、企業へ配送できるようにする）。
+ * 回復の各操作の後と、持ち主の受信箱と回復の設定を読むたびに呼ぶ。
+ */
+export async function recoveryFollowUp(ctx: RouteContext, userId: WarifuUserId): Promise<void> {
+  try {
+    await flushHelperNotices(ctx.repo, userId);
+  } catch (error) {
+    ctx.app.log.warn({
+      event: 'idp.recovery_helper_notice_deferred',
+      errorName: error instanceof Error ? error.name : 'Error',
+    });
+  }
+  try {
+    const pending = await pendingCompanyNotices(ctx.repo, userId);
+    if (pending.length === 0) return;
+    if (ctx.desk === undefined) {
+      ctx.app.log.warn({ event: 'idp.recovery_company_notice_deferred' });
+      return;
+    }
+    const tenantIds = (await listConnections(ctx.repo, userId)).map((c) => c.tenantId);
+    for (const attemptId of pending) {
+      await ctx.desk.accountRecoveredConfirm({ userId, attemptId, tenantIds });
+      await markCompanyNoticeConfirmed(ctx.repo, userId, attemptId);
+    }
+  } catch (error) {
+    ctx.app.log.warn({
+      event: 'idp.recovery_company_notice_deferred',
+      errorName: error instanceof Error ? error.name : 'Error',
+    });
+  }
 }
 
 /** PWA の受信箱に出す、進行中の回復の要約（inbox.ts から呼ぶ）。取消は承認用のオリジンで行う。 */
@@ -115,6 +153,7 @@ export function registerRecoveryRoutes(ctx: RouteContext): void {
     if (current === undefined) return reply;
     const { userId } = current.session;
     if (!limiter.take('inboxByUser', userId)) return reply.code(429).send(RATE_LIMITED);
+    await recoveryFollowUp(ctx, userId);
     const settings = await recoverySettings(repo, userId);
     return {
       code:
@@ -191,6 +230,7 @@ export function registerRecoveryRoutes(ctx: RouteContext): void {
     await ctx.recordUse(result);
     const issued = await issueRecoveryCode(repo, keys, userId);
     request.log.info({ event: 'idp.recovery_code_issued' });
+    await recoveryFollowUp(ctx, userId);
     return { code: issued.code, reissued: issued.reissued };
   });
 
@@ -299,6 +339,7 @@ export function registerRecoveryRoutes(ctx: RouteContext): void {
     await store.delete(INVITE_KIND, key);
     if (!set) return reply.code(409).send(RESTRICTED);
     request.log.info({ event: 'idp.recovery_helper_set' });
+    await recoveryFollowUp(ctx, userId);
     return { ok: true };
   });
 
@@ -347,6 +388,7 @@ export function registerRecoveryRoutes(ctx: RouteContext): void {
     if (!result.ok) return reply.code(401).send(FAILED);
     await ctx.recordUse(result);
     if (!(await removeHelper(repo, userId))) return reply.code(409).send(RESTRICTED);
+    await recoveryFollowUp(ctx, userId);
     return { ok: true };
   });
 
@@ -434,6 +476,7 @@ export function registerRecoveryRoutes(ctx: RouteContext): void {
     });
     if (started === undefined) return reply.code(400).send(FAILED);
     request.log.info({ event: 'idp.recovery_started' });
+    await recoveryFollowUp(ctx, result.userId);
     return {
       state: 'awaiting_helper',
       binding: await newBinding(
@@ -476,7 +519,8 @@ export function registerRecoveryRoutes(ctx: RouteContext): void {
     if (pending.readyAt === null || pending.readyAt > at) {
       return { state: 'waiting', readyAt: pending.readyAt?.toISOString() ?? null };
     }
-    // 企業への知らせを、成立の前に送信待ちに入れる（届かなければ成立させない。O-79）。
+    // 企業への知らせを、成立の前に準備する（届かなければ成立させない。O-79）。準備した SET は、まだ配送できない。
+    // 成立した後に確定して、初めて配送できる（取消との競合で成立しなかった回復は、企業に届かない。O-81）。
     const tenantIds = (await listConnections(repo, userId)).map((c) => c.tenantId);
     if (tenantIds.length > 0) {
       if (ctx.desk === undefined) return reply.code(503).send({ error: 'unavailable' });
@@ -497,17 +541,20 @@ export function registerRecoveryRoutes(ctx: RouteContext): void {
       attemptId: pending.attemptId,
       credentialId,
       at,
+      companyNoticePending: tenantIds.length > 0,
     });
     if (done === undefined) return reply.code(409).send(FAILED);
-    // 持ち主のセッションをすべて消し（O-79）、新しい端末だけを承認用のオリジンでログインさせる。
-    ctx.sessions.revokeUser(userId);
-    ctx.approvalSessions.revokeUser(userId);
+    // 後始末は、知らせより先に行う（どれもメモリの操作で、失敗しない）。持ち主のセッションを、OIDC のものも含めて
+    // すべて消し（O-79）、新しい端末だけを承認用のオリジンでログインさせる。
+    ctx.revokeUserSessions(userId);
     store.deleteWhere(
       BINDING_KIND,
       (value) => (value as RecoveryBinding | undefined)?.attemptId === pending.attemptId,
     );
     ctx.setCookie(reply, APPROVAL_SESSION_COOKIE, await ctx.approvalSessions.create(userId));
     request.log.info({ event: 'idp.recovery_completed' });
+    // 協力者と企業への知らせ。送れなくても、成立と後始末は取り消さない（次の受信箱の読み込みなどで送り直す）。
+    await recoveryFollowUp(ctx, userId);
     return { state: 'completed', recoveryCode: done.code };
   });
 
@@ -685,6 +732,7 @@ export function registerRecoveryRoutes(ctx: RouteContext): void {
       (value) => (value as RecoveryBinding | undefined)?.attemptId === attempt.attemptId,
     );
     request.log.info({ event: 'idp.recovery_cancelled' });
+    await recoveryFollowUp(ctx, userId);
     return { ok: true };
   });
 }

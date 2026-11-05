@@ -45,6 +45,7 @@ async function dumpRows(userIds: readonly WarifuUserId[], tenantId: TenantId): P
           sql`SELECT row_to_json(t)::text AS line FROM idp.credentials AS t`,
           sql`SELECT row_to_json(t)::text AS line FROM idp.recovery_codes AS t`,
           sql`SELECT row_to_json(t)::text AS line FROM idp.helpers AS t`,
+          sql`SELECT row_to_json(t)::text AS line FROM idp.helper_notice_outbox AS t`,
           sql`SELECT row_to_json(t)::text AS line FROM idp.recovery_attempts AS t`,
           sql`SELECT row_to_json(t)::text AS line FROM idp.inbox AS t`,
           sql`SELECT row_to_json(t)::text AS line FROM audit.events AS t`,

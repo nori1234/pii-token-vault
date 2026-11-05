@@ -303,6 +303,8 @@ export async function insertNotice(
     readonly type: NoticeType;
     readonly content?: InboxContent;
     readonly now: Date;
+    /** 項目の ID。渡すと、同じ ID の知らせを二重に置かない（送り直しの知らせ。ADR 0027 の O-79）。 */
+    readonly itemId?: string;
   },
 ): Promise<void> {
   const content = input.content ?? {};
@@ -310,8 +312,10 @@ export async function insertNotice(
   await purgeInbox(tx, input.now);
   await tx.execute(
     sql`INSERT INTO idp.inbox (item_id, user_id, kind, type, tenant_id, content, state, created_at, purge_after)
-        VALUES (${randomUuid()}, ${input.userId}, 'notice', ${input.type}, ${null}, ${JSON.stringify(content)}::jsonb,
-                'unread', ${input.now}, ${new Date(input.now.getTime() + NOTICE_KEEP_DAYS * DAY_MS)})`,
+        VALUES (${input.itemId ?? randomUuid()}, ${input.userId}, 'notice', ${input.type}, ${null},
+                ${JSON.stringify(content)}::jsonb, 'unread', ${input.now},
+                ${new Date(input.now.getTime() + NOTICE_KEEP_DAYS * DAY_MS)})
+        ON CONFLICT (item_id) DO NOTHING`,
   );
 }
 

@@ -3,9 +3,13 @@
 // （plan 11章の「ハーネスが時間を進める」。DB の時刻を書き換えずに、idp の時刻だけを進める）。
 // 企業への知らせ（recovered_at と回復の SET）は t03-recovery-companies で確かめる。
 
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { FAILED, RESTRICTED } from '../../packages/idp/src/http.ts';
 import { type ApprovalType, NOTICE_TYPES } from '../../packages/idp/src/inbox.ts';
+import { flushHelperNotices } from '../../packages/idp/src/recovery.ts';
+import type { RepoDeps } from '../../packages/idp/src/repo.ts';
+import { sql } from '../../packages/warifu-core/src/db/sql.ts';
 import type { TenantId, WarifuUserId } from '../../packages/warifu-core/src/ids.ts';
 import {
   newApprover,
@@ -13,8 +17,15 @@ import {
   TEST_DEVICE_TYPE,
   TEST_REQUEST_DEVICE,
 } from '../setup/approvals.ts';
+import { serviceDb } from '../setup/db.ts';
 import { pwaLogin } from '../setup/desk.ts';
-import { Browser, startTestIdp, type TestIdp } from '../setup/idp.ts';
+import {
+  actOnInteraction,
+  Browser,
+  startAuthorization,
+  startTestIdp,
+  type TestIdp,
+} from '../setup/idp.ts';
 import {
   bindingCodeOf,
   bound,
@@ -388,5 +399,116 @@ describe('漏えい：回復（plan 11章 テスト3）', () => {
       (await device.decide(await requestApproval(userId, HIGH_RISK_TYPE), 'approved')).status,
     ).toBe(200);
     expect((await pwa.post('/api/passkeys/delete', { id: oldPasskey })).status).toBe(200);
+  });
+
+  it('回復が成立すると、前の端末の OIDC のセッション（SSO）も消え、企業へのログインにパスキーが要る', async () => {
+    // 攻撃者が持っている情報：回復の前に、持ち主の端末で企業へのログインを済ませたブラウザ（OIDC の SSO のセッション）
+    // 試す経路：回復が成立した後に、そのブラウザで企業の認可の要求を始める
+    // 期待する結果：インタラクションで、パスキーのログインを求められる（SSO のセッションで同意の画面へ進まない）。
+    //               回復の前は、同じブラウザで同意の画面へ進む（SSO のセッションが生きていた）
+    // plan 11章：テスト3（ADR 0027 の O-79。オーナーのレビュー）
+    const short = await startTestIdp(
+      { tenants: 1, clients: [{ tenant: 0 }] },
+      () => new Date(clock),
+      {
+        recoveryWaitSeconds: 60,
+      },
+    );
+    try {
+      const client = short.clients[0];
+      if (client === undefined) throw new Error('準備に失敗した');
+      // 企業へのログインでアカウントを作り、接続は断る（OIDC のセッションだけが残る。接続がないので企業への知らせは要らない）。
+      const old = new Browser(short.origin);
+      const first = await startAuthorization(old, client);
+      const registered = await actOnInteraction(old, first.followed.path, 'register');
+      const consentPath = registered.followed?.path ?? '';
+      expect(registered.followed?.last.text).toContain('data-prompt="consent"');
+      await actOnInteraction(old, consentPath, 'decline');
+      const before = await startAuthorization(old, client);
+      expect(before.followed.last.text).toContain('data-prompt="consent"');
+
+      const approval = new Browser(short.approvalOrigin, old.authenticator);
+      expect((await approval.approvalLogin()).status).toBe(200);
+      const helper = await newApprover(short);
+      const code = await issueCode(approval);
+      await makeHelper(approval, helper.approval);
+      const device = await startOnNewDevice(short, code);
+      expect((await helperApprove(helper.approval, bindingCodeOf(device.register))).status).toBe(
+        200,
+      );
+      clock += 61_000;
+      expect((await resume(device.browser)).json.state).toBe('completed');
+
+      const after = await startAuthorization(old, client);
+      expect(after.followed.external).toBeUndefined();
+      expect(after.followed.path).toMatch(/^\/interaction\//);
+      expect(after.followed.last.text).toContain('data-prompt="login"');
+      expect(after.followed.last.text).not.toContain('data-prompt="consent"');
+    } finally {
+      await short.stop();
+    }
+  });
+
+  it('協力者への知らせが送れなくても持ち主の変更は残り、後で1回だけ届く', async () => {
+    // 攻撃者が持っている情報：（障害）協力者の受信箱への書き込みが一時的に失敗する状態
+    // 試す経路：持ち主の送信待ちに協力者への知らせがあるときに、協力者の範囲の書き込みを失敗させて送る。次に、協力者の
+    //           受信箱には書けたが、持ち主の送信待ちを消せなかった状態にする。その後で、持ち主の受信箱を読む
+    // 期待する結果：失敗しても送信待ちは残る。送り直すと、協力者の受信箱に、同じ知らせが1つだけ届き、送信待ちは空になる
+    // plan 11章：テスト3（ADR 0027 の O-79。オーナーのレビュー）
+    const { owner, helper, relationshipId } = await ownerWithHelper();
+    const helperId = helper.userId;
+    const db = await serviceDb('idp');
+    try {
+      const noticeId = randomUUID();
+      await db.withWarifuUser(owner.userId, (tx) =>
+        tx.execute(
+          sql`INSERT INTO idp.helper_notice_outbox
+                (notice_id, owner_user_id, helper_user_id, relationship_id, type, created_at)
+              VALUES (${noticeId}, ${owner.userId}, ${helperId}, ${relationshipId},
+                      'helper.code_reissued', ${new Date(clock)})`,
+        ),
+      );
+      const pending = () =>
+        db.withWarifuUser(owner.userId, (tx) =>
+          tx.query(sql`SELECT notice_id FROM idp.helper_notice_outbox`),
+        );
+      const reissuedCount = async () =>
+        (await titles(helper.pwa)).filter((t) => t === title('helper.code_reissued')).length;
+      const deps = (failOn: 'helper' | 'owner-delete' | undefined): RepoDeps => {
+        let ownerCalls = 0;
+        return {
+          db: {
+            ...db,
+            withWarifuUser: ((userId: WarifuUserId, fn: never) => {
+              if (failOn === 'helper' && userId === helperId) {
+                return Promise.reject(new Error('書き込みの失敗（テスト）'));
+              }
+              if (failOn === 'owner-delete' && userId === owner.userId) {
+                ownerCalls += 1;
+                if (ownerCalls >= 2) return Promise.reject(new Error('削除の失敗（テスト）'));
+              }
+              return db.withWarifuUser(userId, fn);
+            }) as RepoDeps['db']['withWarifuUser'],
+          } as RepoDeps['db'],
+          keys: undefined as never,
+          now: () => new Date(clock),
+        };
+      };
+      const before = await reissuedCount();
+      await expect(flushHelperNotices(deps('helper'), owner.userId)).rejects.toThrow();
+      expect(await pending()).toHaveLength(1);
+      expect(await reissuedCount()).toBe(before);
+
+      await expect(flushHelperNotices(deps('owner-delete'), owner.userId)).rejects.toThrow();
+      expect(await pending()).toHaveLength(1);
+      expect(await reissuedCount()).toBe(before + 1);
+
+      // 持ち主の受信箱を読むと、送信待ちを送り直す（同じ知らせは二重に届かない）。
+      expect((await owner.pwa.get('/api/inbox')).status).toBe(200);
+      expect(await pending()).toHaveLength(0);
+      expect(await reissuedCount()).toBe(before + 1);
+    } finally {
+      await db.close();
+    }
   });
 });

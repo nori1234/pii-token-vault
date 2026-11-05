@@ -77,6 +77,8 @@ export async function startTestIdp(
     readonly desk?: DeskConnection;
     /** テナント ID を決めて作る（company-api と同じテナントにするとき）。 */
     readonly tenantIds?: readonly string[];
+    /** 回復の待機（秒）。http のオリジンなので、短くできる（ADR 0027 の O-77）。 */
+    readonly recoveryWaitSeconds?: number;
   },
 ): Promise<TestIdp> {
   const tenants: TestTenant[] = Array.from({ length: spec.tenants }, (_, i) => ({
@@ -137,6 +139,9 @@ export async function startTestIdp(
     db: { host: String(config.host), port: Number(config.port), database: String(config.database) },
     mailer: options?.mailer ?? outbox,
     ...(options?.desk === undefined ? {} : { desk: options.desk }),
+    ...(options?.recoveryWaitSeconds === undefined
+      ? {}
+      : { recovery: { waitSeconds: options.recoveryWaitSeconds } }),
     logWrite: (line) => {
       lines.push(line);
     },

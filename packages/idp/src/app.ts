@@ -347,6 +347,24 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
     clearCookie(reply, name) {
       reply.header('set-cookie', `${name}=; ${cookieAttributes(['Max-Age=0'])}`);
     },
+    revokeUserSessions(userId) {
+      sessions.revokeUser(userId);
+      approvalSessions.revokeUser(userId);
+      const ofUser = (value: unknown) => isRecord(value) && value.accountId === userId;
+      for (const kind of ['Session', 'AuthorizationCode', 'AccessToken'] as const) {
+        store.deleteWhere(kind, ofUser);
+      }
+      // ログインを終えたが、まだ企業に戻っていないインタラクション（その結果で企業に戻らせない）。
+      store.deleteWhere(
+        'Interaction',
+        (value) =>
+          isRecord(value) &&
+          ((isRecord(value.session) && value.session.accountId === userId) ||
+            (isRecord(value.result) &&
+              isRecord(value.result.login) &&
+              value.result.login.accountId === userId)),
+      );
+    },
     requireSession: (request, reply) =>
       requireSessionIn(sessions, PWA_SESSION_COOKIE, request, reply),
     async requireFreshSession(request, reply) {

@@ -80,6 +80,7 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
         'event_id',
         'event_type',
         'recovered_day',
+        'recovery_confirmed',
         'recovery_ref',
         'state',
         'tenant_id',
@@ -97,6 +98,7 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
         'issued_at',
         'jti',
         'recovered_day',
+        'recovery_confirmed',
         'recovery_ref',
         'reissues',
         'state',
@@ -110,6 +112,7 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
         'held_revision',
         'issued_at',
         'jti',
+        'recovery_confirmed',
         'reissues',
       ],
     },
@@ -243,6 +246,27 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
       SELECT: ['created_at', 'helper_user_id', 'owner_user_id', 'relationship_id'],
     },
   },
+  // 協力者への知らせの送信待ち（持ち主の範囲。作った後に変えない。送ったら消す。ADR 0027 の O-79）。
+  'idp.helper_notice_outbox': {
+    warifu_idp: {
+      INSERT: [
+        'created_at',
+        'helper_user_id',
+        'notice_id',
+        'owner_user_id',
+        'relationship_id',
+        'type',
+      ],
+      SELECT: [
+        'created_at',
+        'helper_user_id',
+        'notice_id',
+        'owner_user_id',
+        'relationship_id',
+        'type',
+      ],
+    },
+  },
   'idp.recovery_attempts': {
     warifu_idp: {
       INSERT: [
@@ -257,6 +281,7 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
       SELECT: [
         'approved_at',
         'attempt_id',
+        'company_notice_pending',
         'ended_at',
         'helper_deadline',
         'helper_user_id',
@@ -267,7 +292,14 @@ const COLUMN_GRANTS: Record<string, Record<string, Record<string, string[]>>> = 
         'state',
         'user_id',
       ],
-      UPDATE: ['approved_at', 'ended_at', 'purge_after', 'ready_at', 'state'],
+      UPDATE: [
+        'approved_at',
+        'company_notice_pending',
+        'ended_at',
+        'purge_after',
+        'ready_at',
+        'state',
+      ],
     },
   },
   'idp.recovery_codes': {
@@ -365,6 +397,9 @@ const POLICIES = [
   `idp.desk_items|idp_insert|INSERT|{warifu_idp}||${OWN}`,
   `idp.desk_items|idp_select|SELECT|{warifu_idp}|${OWN}|`,
   `idp.desk_items|idp_update|UPDATE|{warifu_idp}|${OWN}|${OWN}`,
+  `idp.helper_notice_outbox|idp_delete|DELETE|{warifu_idp}|(owner_user_id = warifu.current_user_id())|`,
+  `idp.helper_notice_outbox|idp_insert|INSERT|{warifu_idp}||(owner_user_id = warifu.current_user_id())`,
+  `idp.helper_notice_outbox|idp_select|SELECT|{warifu_idp}|(owner_user_id = warifu.current_user_id())|`,
   `idp.helpers|idp_delete|DELETE|{warifu_idp}|(owner_user_id = warifu.current_user_id())|`,
   `idp.helpers|idp_insert|INSERT|{warifu_idp}||(owner_user_id = warifu.current_user_id())`,
   `idp.helpers|idp_select|SELECT|{warifu_idp}|((owner_user_id = warifu.current_user_id()) OR (helper_user_id = warifu.current_user_id()))|`,
@@ -396,6 +431,7 @@ const TABLE_GRANTS = [
   'contacts.email_previous|warifu_idp|DELETE',
   'idp.credentials|warifu_idp|DELETE',
   'idp.desk_items|warifu_idp|DELETE',
+  'idp.helper_notice_outbox|warifu_idp|DELETE',
   'idp.helpers|warifu_idp|DELETE',
   'idp.inbox|warifu_idp|DELETE',
   'idp.recovery_attempts|warifu_idp|DELETE',
@@ -446,6 +482,7 @@ describe('漏えい：RLS とロールの固定（plan 10章 M2）', () => {
         'idp.connections',
         'idp.credentials',
         'idp.desk_items',
+        'idp.helper_notice_outbox',
         'idp.helpers',
         'idp.inbox',
         'idp.recovery_attempts',

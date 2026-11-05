@@ -5,7 +5,7 @@ import { bodyOf, FAILED, RATE_LIMITED } from '../http.ts';
 import { type InboxItem, isItemId, listInbox, markNoticeRead, NOTICE_TYPES } from '../inbox.ts';
 import type { RouteContext } from './context.ts';
 import { deskItemEntries } from './desk.ts';
-import { recoverySummary } from './recovery.ts';
+import { recoveryFollowUp, recoverySummary } from './recovery.ts';
 
 export function registerInboxRoutes(ctx: RouteContext): void {
   const { app, onMain, repo, registry, approvalTypes, limiter } = ctx;
@@ -46,6 +46,8 @@ export function registerInboxRoutes(ctx: RouteContext): void {
     if (!limiter.take('inboxByUser', current.session.userId)) {
       return reply.code(429).send(RATE_LIMITED);
     }
+    // 回復の後の知らせ（協力者と企業）で、送れていないものを送り直す（ADR 0027 の O-79）。
+    await recoveryFollowUp(ctx, current.session.userId);
     const items = await listInbox(repo, current.session.userId);
     const entries = items.map(inboxEntryOf).filter((entry) => entry !== undefined);
     return {

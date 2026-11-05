@@ -38,7 +38,7 @@ import type {
 import type { CompanyApiConfig, CompanyTenant } from './config.ts';
 import { cancellationEventOf, initialDelayMs } from './desk.ts';
 import type { PublicKeyCache } from './jwt.ts';
-import { recoveredEventOf } from './recovery.ts';
+import { purgeUnconfirmedRecovered, recoveredEventOf } from './recovery.ts';
 import { type SetContent, signSet } from './set.ts';
 
 /** 送り直しまでの間（回数ごと）。検証の SET は、最後の回で送れなければ諦める。 */
@@ -113,6 +113,7 @@ async function claim(deps: OutboxDeps, tenant: CompanyTenant): Promise<Claimed |
            WHERE event_id = (
                    SELECT event_id FROM company_api.set_outbox
                     WHERE deliver_after <= ${now} AND NOT held
+                      AND (recovery_confirmed IS NULL OR recovery_confirmed)
                     ORDER BY deliver_after, event_id
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED)
@@ -287,6 +288,12 @@ export async function deliverDue(
       resumeHeld(tx, deps.now(), tenant.setDeliveryRevision),
     );
     if (resumed > 0) deps.log.info({ event: 'company_api.set_resumed', count: resumed });
+    // 確定されないまま残った回復の SET（成立しなかった回復の準備）を消す（ADR 0027 の O-81）。
+    const purged = await deps.db.withTenant(tenant.tenantId, (tx) =>
+      purgeUnconfirmedRecovered(tx, deps.now()),
+    );
+    if (purged > 0)
+      deps.log.info({ event: 'company_api.recovery_unconfirmed_purged', count: purged });
     for (let i = 0; i < BATCH; i += 1) {
       const row = await claim(deps, tenant);
       if (row === undefined) break;

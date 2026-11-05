@@ -3,7 +3,7 @@
 import { fromBase64Url, newWarifuUserId, toBase64Url } from '@pii-token-vault/warifu-core';
 import { currentAlias } from '../alias.ts';
 import { confirmEmailVerification, startEmailVerification } from '../email.ts';
-import { bodyOf, cookieOf, FAILED, isRecord, RATE_LIMITED, RESTRICTED } from '../http.ts';
+import { bodyOf, cookieOf, FAILED, RATE_LIMITED, RESTRICTED } from '../http.ts';
 import { isRecoveryRestricted, recoveryRestrictedUntil } from '../recovery.ts';
 import {
   addCredential,
@@ -218,12 +218,7 @@ export function registerPwaRoutes(ctx: RouteContext): void {
     const deleted = await deleteCredential(repo, current.session.userId, credentialId);
     if (!deleted) return reply.code(400).send(FAILED);
     // パスキーを消したら、その利用者のセッション（PWA、承認用のオリジン、OIDC）をすべて消す（ADR 0018、ADR 0023）。
-    sessions.revokeUser(current.session.userId);
-    ctx.approvalSessions.revokeUser(current.session.userId);
-    ctx.store.deleteWhere(
-      'Session',
-      (value) => isRecord(value) && value.accountId === current.session.userId,
-    );
+    ctx.revokeUserSessions(current.session.userId);
     ctx.clearCookie(reply, PWA_SESSION_COOKIE);
     return { ok: true, reloginRequired: true };
   });
