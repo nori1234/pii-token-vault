@@ -20,10 +20,10 @@ updates:
       minor-and-patch:
         update-types: [minor, patch]
     ignore:
-      - dependency-name: '@playwright/test'
+      - dependency-name: "@playwright/test"
       # 実行環境は Node 22 なので、型の major だけを上げない（CLAUDE.md「環境の注意」）。
-      - dependency-name: '@types/node'
-        update-types: ['version-update:semver-major']
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
