@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
-    "jose": "6.2.14",
+    "jose": "6.2.15",
     "oidc-provider": "9.13.3"
   },
   "devDependencies": {
