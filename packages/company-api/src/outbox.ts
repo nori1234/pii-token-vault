@@ -9,7 +9,9 @@
 // - 2xx で消す。送れなければ、間を空けて送り直す（1分、5分、30分、2時間、6時間）。6回送れなければ諦めて消し、
 //   その数だけをログに残す。jti と iat は初めて送るときに決め、送り直しでも同じにする。
 //
-// 窓口の取消の SET（ADR 0026 の O-67）と、回復の SET（ADR 0027 の O-81）。どちらも、取消や回復はもう決まったこと
+// 窓口の取消の SET（ADR 0026 の O-67）と、回復の SET（ADR 0027 の O-81）と、初回紐付けの待機の知らせと取消の SET
+// （ADR 0028 の O-91・O-103。待機の知らせは、202 が返った時刻を待機の起点にする。申請が終われば、届いていない
+// 待機の知らせは送信待ちから消す）。どちらも、取消や回復はもう決まったこと
 // なので、諦めて消すことはしない（扱いは同じ。回復の SET は、送るときに sub の索引が見つからなくても消さず、下の
 // 「つながらない」と同じ間で送り直す）：
 // - 202 だけを配送できたことにして消す。業務の取消の完了は、企業の cancellation-results で決まる。
@@ -38,6 +40,7 @@ import type {
 } from '@pii-token-vault/warifu-core/sender/client';
 import type { CompanyApiConfig, CompanyTenant } from './config.ts';
 import { cancellationEventOf, initialDelayMs } from './desk.ts';
+import { initialLinkEventOf, startWaiting } from './initial-link.ts';
 import type { PublicKeyCache } from './jwt.ts';
 import { recoveredEventOf } from './recovery.ts';
 import { type SetContent, signSet } from './set.ts';
@@ -87,9 +90,15 @@ export async function enqueueEvent(
 
 interface Claimed {
   readonly event_id: string;
-  readonly event_type: 'verification' | 'desk_cancellation' | 'account_recovered';
+  readonly event_type:
+    | 'verification'
+    | 'desk_cancellation'
+    | 'account_recovered'
+    | 'initial_link_waiting'
+    | 'initial_link_cancellation';
   readonly state: string | null;
   readonly change_ref: string | null;
+  readonly link_ref: string | null;
   readonly user_id: string | null;
   readonly recovered_day: string | null;
   readonly jti: string;
@@ -117,8 +126,8 @@ async function claim(deps: OutboxDeps, tenant: CompanyTenant): Promise<Claimed |
                     ORDER BY deliver_after, event_id
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED)
-       RETURNING event_id, event_type, state, change_ref, user_id, recovered_day, jti, issued_at, attempts,
-                 reissues`,
+       RETURNING event_id, event_type, state, change_ref, link_ref, user_id, recovered_day, jti, issued_at,
+                 attempts, reissues`,
     );
     return row;
   });
@@ -209,6 +218,10 @@ async function settle(
     switch (outcome) {
       case 'delivered':
         await tx.execute(sql`DELETE FROM company_api.set_outbox WHERE event_id = ${row.event_id}`);
+        // 待機の知らせの SET に 202 が返った時刻を、待機の起点にする（ADR 0028 の O-103）。
+        if (row.event_type === 'initial_link_waiting' && row.link_ref !== null) {
+          await startWaiting(tx, deps, row.link_ref);
+        }
         return 'delivered';
       case 'reissue': {
         if (row.reissues + 1 >= MAX_REISSUES) {
@@ -265,6 +278,27 @@ async function contentOf(
       type: 'account_recovered',
       sub: subject.sub,
       recoveredDay: Number(row.recovered_day),
+      jti: row.jti,
+      issuedAt: row.issued_at,
+    };
+  }
+  if (row.event_type === 'initial_link_waiting' || row.event_type === 'initial_link_cancellation') {
+    if (row.link_ref === null) return undefined;
+    const ids = await initialLinkEventOf(deps, tenantId, row.link_ref, row.event_type);
+    if (ids === undefined) return undefined;
+    if (row.event_type === 'initial_link_waiting') {
+      return {
+        type: 'initial_link_waiting',
+        initialLinkId: ids.initialLinkId,
+        jti: row.jti,
+        issuedAt: row.issued_at,
+      };
+    }
+    if (ids.cancellationId === undefined) return undefined;
+    return {
+      type: 'initial_link_cancellation',
+      initialLinkId: ids.initialLinkId,
+      cancellationId: ids.cancellationId,
       jti: row.jti,
       issuedAt: row.issued_at,
     };

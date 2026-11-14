@@ -19,9 +19,10 @@ describe('漏えい：企業向け API のルート一覧（plan 11章 テスト
     // 攻撃者が持っている情報：企業向け API の正規の資格情報（侵害されたテナント ATK-03）
     // 試す経路：company-api に登録されたルートの一覧を、期待の一覧と比べる
     // 期待する結果：トークン、別名の入れ替え、検証の SET の依頼、SET の検証の鍵と、窓口の4つ（作成の知らせ、未作成の
-    //               報告、取消の結果、取消の受付の状態。ADR 0026）だけ。sub・別名から本物の連絡先や属性を返すもの、
-    //               参加の状態・連絡先・認証器・協力者・回復の設定を変えるもの、窓口の承認を作るもの（承認は利用者が
-    //               idp で行う）、管理用のものはない
+    //               報告、取消の結果、取消の受付の状態。ADR 0026）と、初回紐付けの4つ（仮申請、証跡、企業の側の取消、
+    //               結果の報告。ADR 0028 の O-89）だけ。sub・別名から本物の連絡先や属性を返すもの、
+    //               参加の状態・連絡先・認証器・協力者・回復の設定を変えるもの、窓口の承認や紐付けの承認を作るもの
+    //               （承認は利用者が idp で行う）、企業の旧経路の報告を受けるもの（ADR 0028 の O-105）、管理用のものはない
     // plan 11章：テスト6
     expect(api.api.routes()).toEqual([
       'GET /jwks',
@@ -33,6 +34,10 @@ describe('漏えい：企業向け API のルート一覧（plan 11章 テスト
       'POST /v1/desk/change-notices',
       'POST /v1/desk/execution-results',
       'POST /v1/events/verification',
+      'POST /v1/initial-link/cancel-requests',
+      'POST /v1/initial-link/prepare',
+      'POST /v1/initial-link/proofs',
+      'POST /v1/initial-link/results',
     ]);
   });
 

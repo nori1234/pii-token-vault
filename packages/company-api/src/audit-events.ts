@@ -39,3 +39,48 @@ export const PARTICIPATION_CHANGED = defineAuditEvent('company_api.participation
   participation: { enum: ['full', 'migrating'] },
   deadline_day: 'int',
 });
+
+// 初回紐付けの正本（ADR 0028 の O-102）。申請ID、移行専用ID、会員参照、証跡、承認の JWT は入れない。テナントの範囲で残す。
+
+/** 企業から仮申請を受けた。 */
+export const INITIAL_LINK_PREPARED = defineAuditEvent('company_api.initial_link.prepared', {});
+
+/** 企業の証跡を受理した。 */
+export const INITIAL_LINK_PROOF_ACCEPTED = defineAuditEvent(
+  'company_api.initial_link.proof_accepted',
+  {
+    stage: { enum: ['initial', 'final'] },
+  },
+);
+
+/** 本人の承認を記録し、待機の知らせの SET を送信待ちに入れた（idp の内部 API から）。 */
+export const INITIAL_LINK_NOTICE_QUEUED = defineAuditEvent(
+  'company_api.initial_link.notice_queued',
+  {},
+);
+
+/** 待機の知らせの SET が届き（202）、待機の時間が進み始めた。 */
+export const INITIAL_LINK_WAITING = defineAuditEvent('company_api.initial_link.waiting', {});
+
+/** 紐付けの承認を出した（idp の内部 API から）。 */
+export const INITIAL_LINK_APPROVED = defineAuditEvent('company_api.initial_link.approved', {});
+
+/** 企業から、紐付けたと報告を受けた。 */
+export const INITIAL_LINK_LINKED = defineAuditEvent('company_api.initial_link.linked', {});
+
+/** 取消を受理した。 */
+export const INITIAL_LINK_CANCEL_ACCEPTED = defineAuditEvent(
+  'company_api.initial_link.cancel_accepted',
+  {
+    source: { enum: ['user', 'company'] },
+  },
+);
+
+/** 取消で申請が終わった。 */
+export const INITIAL_LINK_CANCELLED = defineAuditEvent('company_api.initial_link.cancelled', {});
+
+/** 期限を過ぎて、または参加の状態か移行プロファイルの版が変わって、申請が終わった。 */
+export const INITIAL_LINK_EXPIRED = defineAuditEvent('company_api.initial_link.expired', {});
+
+/** 企業から、紐付けなかったと報告を受けた。 */
+export const INITIAL_LINK_NOT_LINKED = defineAuditEvent('company_api.initial_link.not_linked', {});
