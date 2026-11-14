@@ -43,6 +43,7 @@ import {
 import { type DeskInternalApi, startDeskInternalApi } from './internal-api.ts';
 import { PublicKeyCache } from './jwt.ts';
 import { deliverDue, enqueueEvent, STATE_PATTERN } from './outbox.ts';
+import { recordParticipationRevisions } from './participation.ts';
 import { type CompanyApiLimitName, companyApiLimiter } from './rate-limit.ts';
 import { ACCESS_TOKEN_TTL_SECONDS, type Caller, TokenService } from './tokens.ts';
 
@@ -119,6 +120,8 @@ export async function createCompanyApi(options: CompanyApiOptions): Promise<Comp
     options.sender === undefined ? undefined : createSenderWebhookClient(options.sender);
   const outboxDeps = { config, db, keys, cache, sender, log, now };
   const deskDeps: DeskDeps = { db, keys, now };
+  // 参加の状態の版が、監査ログに最後に残した版と違えば残す（ADR 0028 の O-95）。
+  await recordParticipationRevisions({ config, db, keys, now });
 
   const app = fastify({
     loggerInstance: log as unknown as FastifyBaseLogger,

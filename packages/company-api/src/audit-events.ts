@@ -30,3 +30,12 @@ export const DESK_CLOSED = defineAuditEvent('company_api.desk.closed', {});
 
 /** 利用者の回復の成立を、このテナントへの送信待ちに入れた（idp の内部 API から。ADR 0027 の O-81）。 */
 export const RECOVERY_NOTIFIED = defineAuditEvent('company_api.recovery.notified', {});
+
+// 参加の状態（ADR 0028 の O-95）。期限は、1970-01-01 からの日数（期限がなければ 0）。
+
+/** テナントの参加の状態の版が、監査ログに最後に残した版と違った（起動のときに残す）。 */
+export const PARTICIPATION_CHANGED = defineAuditEvent('company_api.participation.changed', {
+  revision: 'int',
+  participation: { enum: ['full', 'migrating'] },
+  deadline_day: 'int',
+});
