@@ -66,6 +66,25 @@ export const DESK_CANCEL_REQUESTED = defineAuditEvent('idp.desk.cancel_requested
   tenant_id: 'uuid',
 });
 
+// 既存会員の初回紐付け（ADR 0028 の O-102）。移行専用ID、JWT は入れない。
+
+/** 初回紐付けを、利用者がパスキー（UV）で承認した（利用者の範囲。段階は最初か最終か）。 */
+export const INITIAL_LINK_APPROVED = defineAuditEvent('idp.initial_link.approved', {
+  tenant_id: 'uuid',
+  stage: { enum: ['initial', 'final'] },
+});
+
+/** 初回紐付けを承認しなかった（テナントの範囲。利用者はまだ分からない）。 */
+export const INITIAL_LINK_DECLINED = defineAuditEvent('idp.initial_link.declined', {
+  tenant_id: 'uuid',
+  reason: { enum: ['denied', 'unrecognized', 'cancel'] },
+});
+
+/** 初回紐付けの取消を頼んだ（利用者の範囲）。 */
+export const INITIAL_LINK_CANCEL_REQUESTED = defineAuditEvent('idp.initial_link.cancel_requested', {
+  tenant_id: 'uuid',
+});
+
 // 回復（ADR 0027 の O-85）。どれも持ち主の範囲で残す。回復コード、結び付け、表示名は入れない。
 
 /** 回復コードを作った（reissued は作り直し）。 */

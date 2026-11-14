@@ -88,6 +88,8 @@ export type ApprovalCeremonyDecision = 'approved' | 'denied';
 export type BoundPurpose =
   | 'desk_approve'
   | 'desk_cancel'
+  | 'initial_link_approve'
+  | 'initial_link_cancel'
   | 'recovery_code_issue'
   | 'helper_confirm'
   | 'helper_remove'

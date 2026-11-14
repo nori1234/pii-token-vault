@@ -57,8 +57,11 @@ export async function startDeskWorld(spec: {
   readonly clients: readonly {
     readonly tenant: number;
     readonly deskActions?: readonly DeskAction[];
+    readonly initialLink?: boolean;
   }[];
   readonly now?: () => Date;
+  /** company-api のテナントに、初回紐付けの移行プロファイルと scope initial_link を付ける（ADR 0028）。 */
+  readonly initialLink?: boolean;
 }): Promise<DeskWorld> {
   const dir = await mkdtemp(join(tmpdir(), 'warifu-desk-'));
   const secret = randomBytes(32);
@@ -71,7 +74,13 @@ export async function startDeskWorld(spec: {
     tenants: tenantIds.map((tenantId, i) => ({
       tenantId: parseTenantId(tenantId),
       webhookUrl: `https://${WEBHOOK_HOST}/set/${i}`,
-      scopes: ['company_api', 'desk'] as const,
+      scopes:
+        spec.initialLink === true
+          ? (['company_api', 'desk', 'initial_link'] as const)
+          : (['company_api', 'desk'] as const),
+      ...(spec.initialLink === true
+        ? { initialLink: { profileVersion: 3, approvedOn: '2026-11-01' } }
+        : {}),
     })),
     sender: { socketPath: sender.sender.socketPath, credential: sender.credentials['company-api'] },
     deskInternal: { socketPath: join(dir, 'company-api.sock'), credentials: { idp: secret } },
@@ -83,6 +92,7 @@ export async function startDeskWorld(spec: {
       clients: spec.clients.map((c) => ({
         tenant: c.tenant,
         deskActions: c.deskActions ?? ALL_DESK_ACTIONS,
+        ...(c.initialLink === undefined ? {} : { initialLink: c.initialLink }),
       })),
     },
     spec.now,

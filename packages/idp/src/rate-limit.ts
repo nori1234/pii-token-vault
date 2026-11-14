@@ -31,6 +31,10 @@ export const RATE_LIMITS = Object.freeze({
   deskByClient: { limit: 60, windowSeconds: 60 },
   /** 窓口の作成の取消の選択肢（利用者ごと）。 */
   deskCancelByUser: { limit: 10, windowSeconds: 60 },
+  /** 初回紐付けの引き継ぎを作る（クライアントごと。ADR 0028 の O-101）。 */
+  initialLinkByClient: { limit: 60, windowSeconds: 60 },
+  /** 初回紐付けの項目の取消の選択肢（利用者ごと。窓口の取消と同じ）。 */
+  initialLinkCancelByUser: { limit: 10, windowSeconds: 60 },
   /** 回復の開始（IP ごと。ADR 0027 の O-84）。 */
   recoveryStartByIp: { limit: 10, windowSeconds: 3600 },
   /** 回復の開始（回復コードの利用者 ID ごと）。 */

@@ -101,6 +101,23 @@ export const DESK_PATHS: Readonly<Record<DeskOp, string>> = Object.freeze({
 /** 移行専用ID の形（HMAC-SHA-256 の base64url。ADR 0028 の O-87）。 */
 export const INITIAL_LINK_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
+/** 初回紐付けの RAR の型（ADR 0028 の O-86）。企業は PAR で1件だけ送る。 */
+export const INITIAL_LINK_DETAIL_TYPE = 'warifu_initial_link';
+/** 最初の承認と、待機の後の最終の承認。 */
+export type InitialLinkAction = 'initial_link.approve' | 'initial_link.finalize';
+export const INITIAL_LINK_ACTIONS: readonly InitialLinkAction[] = Object.freeze([
+  'initial_link.approve',
+  'initial_link.finalize',
+]);
+/** 紐付けの承認の JWT の typ（ID トークンや窓口の承認と取り違えないため。O-86 の手順7）。 */
+export const INITIAL_LINK_APPROVAL_TYP = 'warifu-initial-link-approval+jwt';
+/** 引き継ぎと、紐付けの承認の JWT の有効期間（秒。仮置き）。 */
+export const INITIAL_LINK_IDP_TIMES = Object.freeze({
+  requestTtlSeconds: 300,
+  approvalTtlSeconds: 300,
+  keepAfterTerminalDays: 7,
+} as const);
+
 /** 初回紐付けの正本の状態（ADR 0028 の O-90）。受信箱の項目は、正本から読んで出す。 */
 export type InitialLinkState =
   | 'prepared'
