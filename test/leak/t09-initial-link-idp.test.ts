@@ -2,6 +2,7 @@
 // 待機の SET → 最終の承認 → 紐付けの承認の JWT まで、端から端まで通す（plan 11章 テスト9、ADR 0028 の O-86〜O-91・O-103）。
 // 企業のサーバーの役（仮申請、証跡、PAR、トークン、JWT の検証、結果の報告）は、テストの中で行う（rp-kit の手前）。
 
+import { readFileSync } from 'node:fs';
 import { createLocalJWKSet, decodeProtectedHeader, type JSONWebKeySet, jwtVerify } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from '../../packages/warifu-core/src/db/sql.ts';
@@ -372,5 +373,22 @@ describe('テスト9：初回紐付け（idp。ADR 0028）', () => {
       id: item?.id,
     });
     expect([started.status, started.json]).toEqual([400, { error: 'failed' }]);
+  });
+
+  it('警告文 I は、DESIGN.md 3章の1文と同じで、ログインと初回紐付けの承認の画面の両方で使う', () => {
+    // 攻撃者が持っている情報：なし（固定の文言が、文書と画面で食い違わないことを確かめる）
+    // 試す経路：DESIGN.md 3章の警告文 I の文と、public/app.js の文を比べる
+    // 期待する結果：同じ文が1か所にだけあり、企業へのログインと初回紐付けの承認の画面で出す
+    // plan 11章：番号なし（DESIGN.md 原則5、ADR 0028 の O-105）
+    const design = readFileSync(new URL('../../DESIGN.md', import.meta.url), 'utf8');
+    const section = design.slice(design.indexOf('**I（割符と企業の受け持ち）**'));
+    const sentence = /「(割符は、[^」]+)」/.exec(section)?.[1];
+    expect(sentence).toBeDefined();
+    const appJs = readFileSync(
+      new URL('../../packages/idp/public/app.js', import.meta.url),
+      'utf8',
+    );
+    expect(appJs.split(String(sentence)).length - 1).toBe(1);
+    expect(appJs.match(/responsibilityNote\(\)/g)?.length).toBe(3);
   });
 });
