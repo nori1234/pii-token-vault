@@ -7,8 +7,11 @@ import {
   type Es256PublicJwk,
   LIMITS,
   MAX_ALIAS_GENERATION,
+  MAX_MAC_KEY_VERSIONS,
   type MacPurpose,
   type SigningKeyId,
+  VERSIONED_MAC_PURPOSES,
+  type VersionedMacPurpose,
 } from './protocol.ts';
 import {
   arrayFrom,
@@ -32,6 +35,67 @@ export async function macWith(
     message: encodeBytes(message, LIMITS.macMessageBytes),
   });
   return bytesFrom(response, 'mac', MAC_BYTES);
+}
+
+/** 版を持つ用途の MAC と、作った版（ADR 0028 の O-87）。 */
+export interface VersionedMac {
+  readonly version: number;
+  readonly mac: Uint8Array;
+}
+
+function versionFrom(value: unknown): number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isSafeInteger(value) ||
+    value < 1 ||
+    value > 0xffff_ffff
+  ) {
+    throw new KeysvcError('internal');
+  }
+  return value;
+}
+
+export async function macVersionedWith(
+  call: KeysvcCall,
+  purpose: VersionedMacPurpose,
+  message: Uint8Array,
+  version?: number,
+): Promise<VersionedMac> {
+  const body: Record<string, unknown> = {
+    purpose: assertOneOf(purpose, VERSIONED_MAC_PURPOSES),
+    message: encodeBytes(message, LIMITS.macMessageBytes),
+  };
+  if (version !== undefined) {
+    if (!Number.isSafeInteger(version) || version < 1) throw new KeysvcError('invalid_request');
+    body.version = version;
+  }
+  const response = await call('mac', body);
+  const got = versionFrom((response as Record<string, unknown>).version);
+  if (version !== undefined && got !== version) throw new KeysvcError('internal');
+  return Object.freeze({ version: got, mac: bytesFrom(response, 'mac', MAC_BYTES) });
+}
+
+export async function macAllVersionsWith(
+  call: KeysvcCall,
+  purpose: VersionedMacPurpose,
+  message: Uint8Array,
+): Promise<readonly VersionedMac[]> {
+  const response = await call('mac', {
+    purpose: assertOneOf(purpose, VERSIONED_MAC_PURPOSES),
+    message: encodeBytes(message, LIMITS.macMessageBytes),
+    allVersions: true,
+  });
+  const list = arrayFrom(response, 'macs');
+  if (list.length < 1 || list.length > MAX_MAC_KEY_VERSIONS) throw new KeysvcError('internal');
+  let previous = 0;
+  const out: VersionedMac[] = [];
+  for (const item of list) {
+    const version = versionFrom((item as Record<string, unknown> | null)?.version);
+    if (version <= previous) throw new KeysvcError('internal');
+    previous = version;
+    out.push(Object.freeze({ version, mac: bytesFrom(item, 'mac', MAC_BYTES) }));
+  }
+  return Object.freeze(out);
 }
 
 export async function deriveAliasWith(

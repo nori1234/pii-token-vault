@@ -38,6 +38,8 @@ export type MacPurpose =
   | 'recovery_code'
   | 'desk_id'
   | 'desk_lookup'
+  | 'initial_link_public_id'
+  | 'initial_link_lookup'
   | 'relay_replay'
   | 'relay_thread'
   | 'message_id';
@@ -51,23 +53,47 @@ export const MAC_PURPOSES: readonly MacPurpose[] = Object.freeze([
   'recovery_code',
   'desk_id',
   'desk_lookup',
+  'initial_link_public_id',
+  'initial_link_lookup',
   'relay_replay',
   'relay_thread',
   'message_id',
 ]);
 
 /**
+ * 版を持つ MAC の用途（ADR 0028 の O-87）。鍵を入れ替えても、前の版で導いた値を導き直し、照合できるようにする。
+ * mac の要求は、この用途に限って version か allVersions を受け付け、使った版を応答で返す。
+ * ほかの用途は版を持たず、これまでどおり { mac } だけを返す。
+ */
+export type VersionedMacPurpose = 'initial_link_public_id' | 'initial_link_lookup';
+export const VERSIONED_MAC_PURPOSES: readonly VersionedMacPurpose[] = Object.freeze([
+  'initial_link_public_id',
+  'initial_link_lookup',
+]);
+
+/** 版を持つ MAC の鍵の、持つ版の数の上限（仮置き。ADR 0028 の O-87）。P0 では古い版を消さない。 */
+export const MAX_MAC_KEY_VERSIONS = 3;
+
+/**
  * 署名の鍵。id_token は ES256。dkim は relay の DKIM と ARC の署名の鍵（RSA 2048、rsa-sha256。不変条件9の
  * プロトコルの例外。ADR 0021）。tenant_jwt（企業向け API のアクセストークン）と set（企業に送る SET）は
  * company-api の ES256 の鍵（ADR 0022）。op_approval は idp の操作ごとの承認の ES256 の鍵（ADR 0026）。
+ * initial_link は idp の初回紐付けの承認の ES256 の鍵（ADR 0028 の O-86）。op_approval とは分ける。
  */
-export type SigningKeyId = 'id_token' | 'dkim' | 'tenant_jwt' | 'set' | 'op_approval';
+export type SigningKeyId =
+  | 'id_token'
+  | 'dkim'
+  | 'tenant_jwt'
+  | 'set'
+  | 'op_approval'
+  | 'initial_link';
 export const SIGNING_KEY_IDS: readonly SigningKeyId[] = Object.freeze([
   'id_token',
   'dkim',
   'tenant_jwt',
   'set',
   'op_approval',
+  'initial_link',
 ]);
 
 /** RSA 2048 の署名の長さ（バイト）。 */

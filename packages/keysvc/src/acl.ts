@@ -12,6 +12,8 @@
 //   （ADR 0027）。
 // - 操作ごとの承認の鍵（op_approval）で署名できるのは idp だけ。窓口の ID の MAC（desk_id、desk_lookup）は
 //   company-api だけ（ADR 0026）。
+// - 初回紐付けの承認の鍵（initial_link）で署名できるのは idp だけ。移行専用 ID の導出と照合の MAC
+//   （initial_link_public_id、initial_link_lookup。版を持つ）は company-api だけ（ADR 0028 の O-86・O-87）。
 //
 // 行を足すときは、warifu-core の keys/protocol.ts、各クライアントの型、t08-keysvc-acl と t08-key-client-surface の
 // 期待の表を同じ PR で直す。
@@ -41,11 +43,15 @@ export const ACL: ReadonlyArray<readonly [KeysvcCaller, KeysvcOp, AclTarget]> = 
   ['idp', 'public_keys', 'id_token'],
   ['idp', 'sign', 'op_approval'],
   ['idp', 'public_keys', 'op_approval'],
+  ['idp', 'sign', 'initial_link'],
+  ['idp', 'public_keys', 'initial_link'],
 
   ['company-api', 'mac', 'alias_lookup'],
   ['company-api', 'mac', 'audit_chain'],
   ['company-api', 'mac', 'desk_id'],
   ['company-api', 'mac', 'desk_lookup'],
+  ['company-api', 'mac', 'initial_link_public_id'],
+  ['company-api', 'mac', 'initial_link_lookup'],
   ['company-api', 'derive_alias', 'alias_derive'],
   ['company-api', 'sign', 'tenant_jwt'],
   ['company-api', 'public_keys', 'tenant_jwt'],

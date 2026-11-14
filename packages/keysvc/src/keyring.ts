@@ -9,8 +9,11 @@ import {
   type EncryptionKeyId,
   type Es256PublicJwk,
   MAC_PURPOSES,
+  MAX_MAC_KEY_VERSIONS,
   type MacPurpose,
   type SigningKeyId,
+  VERSIONED_MAC_PURPOSES,
+  type VersionedMacPurpose,
 } from '@pii-token-vault/warifu-core/keys/protocol';
 import {
   type Es256KeyPair,
@@ -32,6 +35,15 @@ export interface EncryptionKey {
   readonly key: Uint8Array;
 }
 
+export interface VersionedMacKey {
+  readonly version: number;
+  readonly key: Uint8Array;
+}
+
+export function isVersionedMacPurpose(purpose: unknown): purpose is VersionedMacPurpose {
+  return VERSIONED_MAC_PURPOSES.some((known) => known === purpose);
+}
+
 export type SigningKey =
   | {
       readonly alg: 'ES256';
@@ -51,7 +63,19 @@ export interface Keyring {
   primary(keyId: EncryptionKeyId): EncryptionKey;
   /** 復号は、暗号文の頭の版で鍵を選ぶ。なければ undefined。 */
   byVersion(keyId: EncryptionKeyId, version: number): EncryptionKey | undefined;
+  /** 版を持たない用途の鍵。版を持つ用途には使わない（throw する）。 */
   macKey(purpose: MacPurpose): Uint8Array;
+  /** 版を持つ用途の、いまの版（最新）。 */
+  latestMacKey(purpose: VersionedMacPurpose): VersionedMacKey;
+  /** 版を持つ用途の、指定した版。なければ undefined。 */
+  macKeyByVersion(purpose: VersionedMacPurpose, version: number): VersionedMacKey | undefined;
+  /** 版を持つ用途の、持っているすべての版（古い順）。 */
+  macKeyVersions(purpose: VersionedMacPurpose): readonly VersionedMacKey[];
+  /**
+   * 版を持つ用途に、新しい版を足す（入れ替え。ADR 0028 の O-87）。古い版は消さない。
+   * 上限（MAX_MAC_KEY_VERSIONS）に達していれば足さずに false を返す。鍵を返す操作ではない。
+   */
+  rotateVersionedMacKeys(): boolean;
   aliasDeriveKey(): Uint8Array;
   signingKey(keyId: SigningKeyId): SigningKey;
   publicKeys(keyId: SigningKeyId): readonly (Es256PublicJwk | DkimPublicKey)[];
@@ -63,7 +87,14 @@ export function createKeyring(): Keyring {
     encryption.set(keyId, [{ version: 1, key: newSymmetricKey() }]);
   }
   const mac = new Map<MacPurpose, Uint8Array>();
-  for (const purpose of MAC_PURPOSES) mac.set(purpose, randomId(HMAC_BYTES));
+  const versionedMac = new Map<VersionedMacPurpose, VersionedMacKey[]>();
+  for (const purpose of MAC_PURPOSES) {
+    if (isVersionedMacPurpose(purpose)) {
+      versionedMac.set(purpose, [{ version: 1, key: randomId(HMAC_BYTES) }]);
+    } else {
+      mac.set(purpose, randomId(HMAC_BYTES));
+    }
+  }
   // 別名を導く鍵は、どの MAC の用途の鍵とも別にする（CAP-05、ADR 0005）。
   const aliasDerive = randomId(HMAC_BYTES);
   // ES256 の鍵は用途ごとに別に作る（ID トークン、テナントの JWT、SET、操作ごとの承認。ADR 0014、ADR 0022、ADR 0026）。
@@ -101,7 +132,14 @@ export function createKeyring(): Keyring {
     tenant_jwt: es256(),
     set: es256(),
     op_approval: es256(),
+    initial_link: es256(),
   });
+
+  const macVersions = (purpose: VersionedMacPurpose): VersionedMacKey[] => {
+    const list = versionedMac.get(purpose);
+    if (list === undefined || list.length === 0) throw new Error('鍵がない');
+    return list;
+  };
 
   const versions = (keyId: EncryptionKeyId): readonly EncryptionKey[] => {
     const list = encryption.get(keyId);
@@ -121,6 +159,27 @@ export function createKeyring(): Keyring {
       const key = mac.get(purpose);
       if (key === undefined) throw new Error('鍵がない');
       return key;
+    },
+    latestMacKey(purpose: VersionedMacPurpose) {
+      const list = macVersions(purpose);
+      return list[list.length - 1] as VersionedMacKey;
+    },
+    macKeyByVersion(purpose: VersionedMacPurpose, version: number) {
+      return macVersions(purpose).find((k) => k.version === version);
+    },
+    macKeyVersions(purpose: VersionedMacPurpose) {
+      return Object.freeze([...macVersions(purpose)]);
+    },
+    rotateVersionedMacKeys() {
+      // 用途ごとに版の数は同じにそろえる（上限の判定を1つにする）。
+      const first = macVersions(VERSIONED_MAC_PURPOSES[0] as VersionedMacPurpose);
+      if (first.length >= MAX_MAC_KEY_VERSIONS) return false;
+      for (const purpose of VERSIONED_MAC_PURPOSES) {
+        const list = macVersions(purpose);
+        const last = list[list.length - 1] as VersionedMacKey;
+        list.push({ version: last.version + 1, key: randomId(HMAC_BYTES) });
+      }
+      return true;
     },
     aliasDeriveKey() {
       return aliasDerive;

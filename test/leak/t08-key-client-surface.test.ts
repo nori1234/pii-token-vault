@@ -45,11 +45,17 @@ function typeOnly(idp: IdpKeyClient, companyApi: CompanyApiKeyClient, relay: Rel
   void companyApi.sign('op_approval', new Uint8Array());
   // @ts-expect-error 窓口の ID の MAC は company-api だけ（ADR 0026）
   void idp.mac('desk_id', new Uint8Array());
+  // @ts-expect-error company-api は初回紐付けの承認に署名できない（ADR 0028）
+  void companyApi.sign('initial_link', new Uint8Array());
+  // @ts-expect-error 移行専用 ID の MAC は company-api だけで、版を持つ（ADR 0028 の O-87）
+  void idp.macVersioned('initial_link_lookup', new Uint8Array());
+  // @ts-expect-error 版を持つ用途は、版を持たない mac では呼べない（ADR 0028 の O-87）
+  void companyApi.mac('initial_link_public_id', new Uint8Array());
 }
 
 const EXPECTED_METHODS = {
   idp: ['deriveAlias', 'encryptContact', 'mac', 'publicKeys', 'sign'],
-  'company-api': ['deriveAlias', 'mac', 'publicKeys', 'sign'],
+  'company-api': ['deriveAlias', 'mac', 'macAllVersions', 'macVersioned', 'publicKeys', 'sign'],
   relay: [
     'decryptContact',
     'decryptQueueItem',
@@ -140,6 +146,22 @@ describe('漏えい：鍵のクライアントの表面（plan 11章 テスト8�
       )
     ).map((mac) => Buffer.from(mac).toString('hex'));
     expect(new Set(deskMacs).size).toBe(3);
+    // 版を持つ用途（ADR 0028 の O-87）。最新の版で作り、版を指定しても同じ値になる。すべての版の一覧にも入る。
+    for (const purpose of ['initial_link_public_id', 'initial_link_lookup'] as const) {
+      const latest = await companyApi.macVersioned(purpose, message);
+      expect(latest.version).toBeGreaterThanOrEqual(1);
+      expect(latest.mac.byteLength).toBe(32);
+      expect((await companyApi.macVersioned(purpose, message, latest.version)).mac).toEqual(
+        latest.mac,
+      );
+      const all = await companyApi.macAllVersions(purpose, message);
+      expect(all.at(-1)).toEqual(latest);
+      expect(deskMacs).not.toContain(Buffer.from(latest.mac).toString('hex'));
+    }
+    const initialLink = await idp.sign('initial_link', message);
+    expect(initialLink.signature.byteLength).toBe(64);
+    expect((await idp.publicKeys('initial_link'))[0]?.kid).toBe(initialLink.kid);
+    expect(initialLink.kid).not.toBe(opApproval.kid);
     // ES256 の鍵は、用途ごとに別（ID トークン、操作ごとの承認、テナントの JWT、SET。ADR 0022、ADR 0026）。
     const kids = new Set([(await idp.publicKeys('id_token'))[0]?.kid, opApproval.kid]);
     for (const keyId of ['tenant_jwt', 'set'] as const) {

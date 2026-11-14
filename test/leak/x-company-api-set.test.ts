@@ -168,7 +168,7 @@ describe('漏えい：企業に送る SET（RP-50、RP-51）', () => {
       );
       // 取消の SET（ADR 0026）は、正本の行への参照（change_ref）と、保留（と保留にした時の設定の版。O-72）と
       // 送り直しの回数だけを足した。回復の SET（ADR 0027）は、利用者 ID、回復の記録の ID、回復した日だけ（sub は
-      // 置かず、送るときに引く）。
+      // 置かず、送るときに引く）。初回紐付けの待機と取消の SET（ADR 0028）は、正本の行への参照（link_ref）だけ。
       expect(rows.map((r) => r.column_name)).toEqual([
         'attempts',
         'change_ref',
@@ -180,6 +180,7 @@ describe('漏えい：企業に送る SET（RP-50、RP-51）', () => {
         'held_revision',
         'issued_at',
         'jti',
+        'link_ref',
         'recovered_day',
         'recovery_ref',
         'reissues',
