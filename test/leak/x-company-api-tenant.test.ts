@@ -243,7 +243,8 @@ describe('漏えい：企業向け API のテナントの境界（plan 11章 テ
     //                         （ATK-02、ATK-07）
     // 試す経路：境界を設定しない生の接続で、sub の索引、別名の世代、SET の送信待ちを読む。
     //           company_api のスキーマで、参加の状態の列を探す
-    // 期待する結果：どれも0行。参加の状態、移行中の期限、確かめた入り口の列は、どの表にもない（ADR 0010）
+    // 期待する結果：どれも0行。参加の状態、移行中の期限、確かめた入り口の列は、どの表にもない（ADR 0010）。
+    //               初回紐付けの写しの2列だけがあり、company-api のロールは書き換えられない（ADR 0028）
     // plan 11章：テスト6
     const { a } = tenants();
     await connectUser([a]);
@@ -256,9 +257,30 @@ describe('漏えい：企業向け API のテナントの境界（plan 11章 テ
       const { rows } = await client.query(
         `SELECT table_schema, table_name, column_name FROM information_schema.columns
           WHERE table_schema IN ('company_api', 'aliases')
-            AND column_name ~ '(participation|migrat|verified|deadline|suspend)'`,
+            AND column_name ~ '(participation|migrat|verified|deadline|suspend)'
+          ORDER BY 1, 2, 3`,
       );
-      expect(rows).toEqual([]);
+      // 初回紐付けの申請と続く記録は、作ったときの参加の状態の版と、紐付けたときの参加の状態を写しとして置く
+      // （ADR 0028 の O-90・O-92）。参加の状態そのものではなく、company-api のロールは書き換えられない。
+      expect(rows).toEqual([
+        {
+          table_schema: 'company_api',
+          table_name: 'initial_link_records',
+          column_name: 'participation',
+        },
+        {
+          table_schema: 'company_api',
+          table_name: 'initial_links',
+          column_name: 'participation_revision',
+        },
+      ]);
+      const updatable = await client.query(
+        `SELECT has_column_privilege('warifu_company_api', 'company_api.initial_links', 'participation_revision',
+                                     'UPDATE') AS a,
+                has_column_privilege('warifu_company_api', 'company_api.initial_link_records', 'participation',
+                                     'UPDATE') AS b`,
+      );
+      expect(updatable.rows).toEqual([{ a: false, b: false }]);
     } finally {
       await client.end();
     }

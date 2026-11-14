@@ -5,6 +5,7 @@
 // - 設定が違えば、keysvc.config_invalid と理由の語だけを出し、終了コード 2 で終わる。ソケットは作らない。
 // - 待ち受けを始めたら keysvc.ready の1行を標準出力に書く。
 // - 標準入力の EOF、SIGTERM、SIGINT で止まる。起動した側が終わるとパイプが閉じるので、孤児にならない。
+// - SIGUSR2 で、版を持つ MAC の鍵に新しい版を足す（入れ替え。ADR 0028 の O-87）。鍵の値は出さない。
 
 import { createLogger } from '@pii-token-vault/warifu-core/log';
 import { CONFIG_MAX_BYTES, KeysvcConfigError, parseKeysvcConfig } from './config.ts';
@@ -71,3 +72,7 @@ process.stdin.on('end', () => {
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, stop);
 }
+
+process.on('SIGUSR2', () => {
+  server?.rotateVersionedMacKeys();
+});

@@ -22,6 +22,8 @@ type Combo =
   | 'mac/recovery_code'
   | 'mac/desk_id'
   | 'mac/desk_lookup'
+  | 'mac/initial_link_public_id'
+  | 'mac/initial_link_lookup'
   | 'mac/relay_replay'
   | 'mac/relay_thread'
   | 'mac/message_id'
@@ -35,7 +37,9 @@ type Combo =
   | 'sign/set'
   | 'public_keys/set'
   | 'sign/op_approval'
-  | 'public_keys/op_approval';
+  | 'public_keys/op_approval'
+  | 'sign/initial_link'
+  | 'public_keys/initial_link';
 
 const COMBOS: readonly Combo[] = [
   'encrypt/contact',
@@ -51,6 +55,8 @@ const COMBOS: readonly Combo[] = [
   'mac/recovery_code',
   'mac/desk_id',
   'mac/desk_lookup',
+  'mac/initial_link_public_id',
+  'mac/initial_link_lookup',
   'mac/relay_replay',
   'mac/relay_thread',
   'mac/message_id',
@@ -65,6 +71,8 @@ const COMBOS: readonly Combo[] = [
   'public_keys/set',
   'sign/op_approval',
   'public_keys/op_approval',
+  'sign/initial_link',
+  'public_keys/initial_link',
 ];
 
 // plan 8章と spec 04 2章の表を、操作と対象の単位にしたもの。ここにないものは、すべて 403。
@@ -83,12 +91,16 @@ const ALLOWED: Readonly<Record<Caller, readonly Combo[]>> = {
     'public_keys/id_token',
     'sign/op_approval',
     'public_keys/op_approval',
+    'sign/initial_link',
+    'public_keys/initial_link',
   ],
   'company-api': [
     'mac/alias_lookup',
     'mac/audit_chain',
     'mac/desk_id',
     'mac/desk_lookup',
+    'mac/initial_link_public_id',
+    'mac/initial_link_lookup',
     'derive_alias',
     'sign/tenant_jwt',
     'public_keys/tenant_jwt',
@@ -175,6 +187,10 @@ function bodyFor(combo: Combo): { op: string; body: unknown } {
       return { op: 'mac', body: { purpose: 'desk_id', message: b64('m') } };
     case 'mac/desk_lookup':
       return { op: 'mac', body: { purpose: 'desk_lookup', message: b64('m') } };
+    case 'mac/initial_link_public_id':
+      return { op: 'mac', body: { purpose: 'initial_link_public_id', message: b64('m') } };
+    case 'mac/initial_link_lookup':
+      return { op: 'mac', body: { purpose: 'initial_link_lookup', message: b64('m') } };
     case 'mac/relay_replay':
       return { op: 'mac', body: { purpose: 'relay_replay', message: b64('m') } };
     case 'mac/relay_thread':
@@ -203,6 +219,10 @@ function bodyFor(combo: Combo): { op: string; body: unknown } {
       return { op: 'sign', body: { keyId: 'op_approval', message: b64('header.payload') } };
     case 'public_keys/op_approval':
       return { op: 'public_keys', body: { keyId: 'op_approval' } };
+    case 'sign/initial_link':
+      return { op: 'sign', body: { keyId: 'initial_link', message: b64('header.payload') } };
+    case 'public_keys/initial_link':
+      return { op: 'public_keys', body: { keyId: 'initial_link' } };
   }
 }
 

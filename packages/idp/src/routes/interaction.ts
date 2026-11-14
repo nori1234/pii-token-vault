@@ -1,19 +1,20 @@
 // OIDC のインタラクション（本来のオリジン）：ログイン、アカウントの作成、接続の同意、中止。
-// 窓口の申請（authorization_details の warifu_desk）のインタラクションは、承認用のオリジンに引き継ぐ（routes/desk.ts。
-// ADR 0026 の O-61）。そのインタラクションでは、ここのログイン、アカウントの作成、同意を受け付けない（通常のログインに
+// 窓口の申請（authorization_details の warifu_desk）と初回紐付けの申請（warifu_initial_link）のインタラクションは、
+// 承認用のオリジンに引き継ぐ（routes/desk.ts、routes/initial-link.ts。ADR 0026 の O-61、ADR 0028 の O-86）。そのインタラクションでは、ここのログイン、アカウントの作成、同意を受け付けない（通常のログインに
 // 縮退させない。D-20）。
 
 import { newWarifuUserId, type TenantId, type WarifuUserId } from '@pii-token-vault/warifu-core';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ensureFirstAlias } from '../alias.ts';
-import { deskDetailFromParam } from '../desk.ts';
 import { bodyOf, FAILED, RATE_LIMITED } from '../http.ts';
 import { renderPage } from '../pages.ts';
 import { ACR_PASSKEY, clientEntryOf } from '../provider.ts';
+import { requestedDetailFromParam } from '../rar.ts';
 import { createAccount, recordConnection, recordSubject } from '../repo.ts';
 import { deriveSub } from '../subject.ts';
 import type { RouteContext } from './context.ts';
 import { startDeskHandoff } from './desk.ts';
+import { startInitialLinkHandoff } from './initial-link.ts';
 
 const UID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -70,20 +71,22 @@ export function registerInteractionRoutes(ctx: RouteContext): void {
     const found = await detailsOf(request, reply);
     if (found === undefined) return reply.code(400).send(FAILED);
     if (found.desk) {
-      const detail = deskDetailFromParam(
+      const requested = requestedDetailFromParam(
         found.details.params.authorization_details,
-        found.entry.deskActions,
+        found.entry,
       );
-      if (detail === undefined) {
+      if (requested === undefined) {
         const { redirectTo } = await deny(request, reply);
         return reply.redirect(redirectTo, 303);
       }
-      return startDeskHandoff(ctx, request, reply, {
+      const input = {
         uid: found.uid,
         tenantId: found.tenant.tenantId as TenantId,
         clientId: found.entry.clientId,
-        detail,
-      });
+      };
+      return requested.kind === 'desk'
+        ? startDeskHandoff(ctx, request, reply, { ...input, detail: requested.detail })
+        : startInitialLinkHandoff(ctx, request, reply, { ...input, detail: requested.detail });
     }
     const prompt = found.details.prompt.name === 'consent' ? 'consent' : 'login';
     return ctx.sendHtml(request, reply, (nonce) =>

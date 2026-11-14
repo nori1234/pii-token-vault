@@ -8,6 +8,8 @@
 //   （oidc-provider は、ホストが複数の pairwise のクライアントに sector_identifier_uri を求めるため）。
 // - DESIGN.md 原則2：画面に出す企業名は、この登録簿の値（displayName）だけ。企業が送る client_name などは使わない。
 // - 窓口の操作は、クライアントごとに許す（deskActions。既定は空で、窓口の申請を受け付けない。ADR 0026 の O-60）。
+// - 初回紐付けの申請（RAR の warifu_initial_link）も、クライアントごとに許す（initialLink。既定は false。ADR 0028 の
+//   O-89）。company-api の登録簿に移行プロファイルのないテナントでは、内部 API が断る（二重の守り）。
 
 import { parseTenantId, type TenantId } from '@pii-token-vault/warifu-core';
 import { DESK_ACTIONS, type DeskAction } from '@pii-token-vault/warifu-core/desk/protocol';
@@ -41,6 +43,8 @@ export interface ClientEntry {
   readonly aliasClaim: AliasClaim;
   /** このクライアントに許す窓口の操作（DESIGN.md 3章の3つから）。空なら、窓口の申請を受け付けない。 */
   readonly deskActions: readonly DeskAction[];
+  /** 初回紐付けの申請を受け付けるか（ADR 0028 の O-89）。 */
+  readonly initialLink: boolean;
 }
 
 export interface Registry {
@@ -74,6 +78,7 @@ const CLIENT_KEYS: ReadonlySet<string> = new Set([
   'jwks',
   'aliasClaim',
   'deskActions',
+  'initialLink',
 ]);
 const JWK_MEMBERS: ReadonlySet<string> = new Set(['kty', 'crv', 'x', 'y', 'kid', 'alg', 'use']);
 const CLIENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -218,6 +223,10 @@ function parseClient(input: unknown, tenants: ReadonlyMap<TenantId, TenantEntry>
   ) {
     throw new RegistryError(`${clientId}：deskActions は窓口の操作の一覧から（重複なし）`);
   }
+  const initialLink = input.initialLink ?? false;
+  if (typeof initialLink !== 'boolean') {
+    throw new RegistryError(`${clientId}：initialLink は true か false`);
+  }
   return Object.freeze({
     clientId,
     tenantId,
@@ -225,6 +234,7 @@ function parseClient(input: unknown, tenants: ReadonlyMap<TenantId, TenantEntry>
     jwks: Object.freeze({ keys: Object.freeze(keys) }),
     aliasClaim,
     deskActions: Object.freeze([...deskActions] as DeskAction[]),
+    initialLink,
   });
 }
 

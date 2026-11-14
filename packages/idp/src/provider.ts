@@ -12,12 +12,20 @@
 
 import type { TenantId, WarifuUserId } from '@pii-token-vault/warifu-core';
 import { isUuid } from '@pii-token-vault/warifu-core';
-import { DESK_DETAIL_TYPE } from '@pii-token-vault/warifu-core/desk/protocol';
+import {
+  DESK_DETAIL_TYPE,
+  INITIAL_LINK_DETAIL_TYPE,
+} from '@pii-token-vault/warifu-core/desk/protocol';
 import type { IdpKeyClient } from '@pii-token-vault/warifu-core/keys/idp';
 import type { Account, Configuration, KoaContextWithOIDC } from 'oidc-provider';
 import Provider, { errors } from 'oidc-provider';
 import { currentAlias } from './alias.ts';
-import { deskDetailFromParam, parseDeskDetail, sameDeskDetail } from './desk.ts';
+import {
+  detailTypesOf,
+  isApprovedGrantDetail,
+  parseRequestedDetail,
+  requestedDetailFromParam,
+} from './rar.ts';
 import type { RateLimiter } from './rate-limit.ts';
 import { recoveredDay } from './recovery.ts';
 import { type ClientEntry, OUTBOUND_CLIENT_METADATA, type Registry } from './registry.ts';
@@ -118,8 +126,9 @@ export function buildProvider(deps: ProviderDeps): Provider {
       require_auth_time: true,
       tenant_id: client.tenantId,
       warifu_alias_claim: client.aliasClaim,
-      // 窓口の操作を許したクライアントだけが、RAR の型 warifu_desk を送れる（ADR 0026 の O-60）。
-      authorization_details_types: client.deskActions.length > 0 ? [DESK_DETAIL_TYPE] : [],
+      // 窓口の操作を許したクライアントだけが、RAR の型 warifu_desk を送れる（ADR 0026 の O-60）。初回紐付けを許した
+      // クライアントだけが、warifu_initial_link を送れる（ADR 0028 の O-89）。
+      authorization_details_types: detailTypesOf(client),
     })),
     // 既定は RS256 と client_secret_basic（lib/consts/client_attributes.js）。書き忘れても ES256 と private_key_jwt にする。
     clientDefaults: {
@@ -314,51 +323,52 @@ export function buildProvider(deps: ProviderDeps): Provider {
       ciba: { enabled: false },
       jwtResponseModes: { enabled: false },
       webMessageResponseMode: { enabled: false },
-      // RAR（RFC 9396）は、窓口の型 warifu_desk だけ（ADR 0026 の O-60）。
+      // RAR（RFC 9396）は、窓口の型 warifu_desk と、初回紐付けの型 warifu_initial_link だけ（ADR 0026 の O-60、
+      // ADR 0028 の O-86）。
       richAuthorizationRequests: {
         enabled: true,
-        types: {
-          [DESK_DETAIL_TYPE]: {
-            validate: async (
-              ctx: KoaContextWithOIDC,
-              detail: unknown,
-              client: { clientId: string },
-            ) => {
-              const entry = registry.clients.get(client.clientId);
-              // 1件だけ（ライブラリは型ごとに1件ずつ検査する）。型に合わない項目、許していない操作も断る。
-              if (
-                entry === undefined ||
-                deskDetailFromParam(ctx.oidc.params?.authorization_details, entry.deskActions) ===
-                  undefined ||
-                parseDeskDetail(detail, entry.deskActions) === undefined
-              ) {
-                throw new errors.InvalidAuthorizationDetails(
-                  'authorization details are not accepted',
-                );
-              }
+        types: Object.fromEntries(
+          [DESK_DETAIL_TYPE, INITIAL_LINK_DETAIL_TYPE].map((type) => [
+            type,
+            {
+              validate: async (
+                ctx: KoaContextWithOIDC,
+                detail: unknown,
+                client: { clientId: string },
+              ) => {
+                const entry = registry.clients.get(client.clientId);
+                // 1件だけ（ライブラリは型ごとに1件ずつ検査する）。型に合わない項目、許していない操作と型も断る。
+                if (
+                  entry === undefined ||
+                  requestedDetailFromParam(ctx.oidc.params?.authorization_details, entry) ===
+                    undefined ||
+                  parseRequestedDetail(detail, entry) === undefined
+                ) {
+                  throw new errors.InvalidAuthorizationDetails(
+                    'authorization details are not accepted',
+                  );
+                }
+              },
             },
-          },
-        },
-        // 認可コードに入れるのは、窓口の承認で作った Grant の内容（操作ごとの承認の JWT を含む）だけ。要求の
-        // authorization_details と、Grant の内容（approval を除く）が食い違えば、コードを出さない。要求に
-        // authorization_details があるのに Grant に承認がなければ（通常のログインに縮退した）、コードを出さない（D-20）。
+          ]),
+        ),
+        // 認可コードに入れるのは、承認用のオリジンで作った Grant の内容（承認の JWT か、初回紐付けの最初の承認の状態）だけ。
+        // 要求の authorization_details と、Grant の内容が食い違えば、コードを出さない。要求に authorization_details が
+        // あるのに Grant に承認がなければ（通常のログインに縮退した）、コードを出さない（D-20）。
         authorizationDetailsForGrantSource: (ctx: KoaContextWithOIDC) => {
           const requested = ctx.oidc.params?.authorization_details;
           const granted = ctx.oidc.grant?.rar;
           if (requested === undefined) return undefined;
           const entry = registry.clients.get(String(ctx.oidc.client?.clientId));
           const detail =
-            entry === undefined ? undefined : deskDetailFromParam(requested, entry.deskActions);
+            entry === undefined ? undefined : requestedDetailFromParam(requested, entry);
           const [first, ...rest] = Array.isArray(granted) ? granted : [];
-          if (detail === undefined || first === undefined || rest.length > 0) {
-            throw new errors.AccessDenied('the request was not approved');
-          }
-          const { approval, ...withoutApproval } = first as Record<string, unknown>;
-          const approved = parseDeskDetail(withoutApproval, entry?.deskActions ?? []);
           if (
-            typeof approval !== 'string' ||
-            approved === undefined ||
-            !sameDeskDetail(approved, detail)
+            entry === undefined ||
+            detail === undefined ||
+            first === undefined ||
+            rest.length > 0 ||
+            !isApprovedGrantDetail(first, detail, entry)
           ) {
             throw new errors.AccessDenied('the request was not approved');
           }

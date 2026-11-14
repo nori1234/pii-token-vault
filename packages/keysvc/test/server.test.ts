@@ -164,6 +164,65 @@ describe('鍵サービスのサーバー', () => {
     expect(await derive(2)).not.toBe(first);
   });
 
+  it('版を持つ MAC：最新の版で作り、版を返す。入れ替えても前の版で同じ値を作れる（ADR 0028 の O-87）', async () => {
+    const auth = creds['company-api'];
+    const message = b64('tenant|link');
+    const first = await call('mac', { purpose: 'initial_link_public_id', message }, { auth });
+    expect(first.status).toBe(200);
+    const v1 = JSON.parse(first.body) as { mac: string; version: number };
+    expect(Object.keys(v1).sort()).toEqual(['mac', 'version']);
+    expect(v1.version).toBe(1);
+
+    expect(server.rotateVersionedMacKeys()).toBe(true);
+    const latest = JSON.parse(
+      (await call('mac', { purpose: 'initial_link_public_id', message }, { auth })).body,
+    ) as { mac: string; version: number };
+    expect(latest.version).toBe(2);
+    expect(latest.mac).not.toBe(v1.mac);
+    const again = JSON.parse(
+      (await call('mac', { purpose: 'initial_link_public_id', message, version: 1 }, { auth }))
+        .body,
+    ) as { mac: string; version: number };
+    expect(again).toEqual(v1);
+    const all = JSON.parse(
+      (
+        await call(
+          'mac',
+          { purpose: 'initial_link_public_id', message, allVersions: true },
+          { auth },
+        )
+      ).body,
+    ) as { macs: { version: number; mac: string }[] };
+    expect(all.macs).toEqual([v1, latest]);
+
+    // 持っていない版、版の形の違い、版を持たない用途への版の指定は 400。
+    for (const body of [
+      { purpose: 'initial_link_public_id', message, version: 9 },
+      { purpose: 'initial_link_public_id', message, version: 0 },
+      { purpose: 'initial_link_public_id', message, version: '1' },
+      { purpose: 'initial_link_public_id', message, allVersions: false },
+      { purpose: 'initial_link_public_id', message, version: 1, allVersions: true },
+      { purpose: 'desk_id', message, version: 1 },
+      { purpose: 'desk_id', message, allVersions: true },
+    ]) {
+      expect((await call('mac', body, { auth })).status).toBe(400);
+    }
+    // 版を持たない用途の応答は、これまでどおり mac だけ。
+    expect(
+      Object.keys(JSON.parse((await call('mac', { purpose: 'desk_id', message }, { auth })).body)),
+    ).toEqual(['mac']);
+
+    // 上限（3つ）までしか足さず、古い版は消さない。
+    expect(server.rotateVersionedMacKeys()).toBe(true);
+    expect(server.rotateVersionedMacKeys()).toBe(false);
+    const capped = JSON.parse(
+      (await call('mac', { purpose: 'initial_link_lookup', message, allVersions: true }, { auth }))
+        .body,
+    ) as { macs: { version: number }[] };
+    expect(capped.macs.map((m) => m.version)).toEqual([1, 2, 3]);
+    expect(logs.join('\n')).not.toContain(message);
+  });
+
   it('応答とログに入力の値を入れない', async () => {
     const marker = b64(randomBytes(12));
     await call(

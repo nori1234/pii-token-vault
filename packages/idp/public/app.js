@@ -36,6 +36,34 @@
     H: '協力者には、あなたが直接会って頼んだ、よく知っている人だけを選んでください。招待のコードや QR を、電話やメッセージで教えてはいけません。',
   });
 
+  // 警告文 I（DESIGN.md 3章。ADR 0028 の O-105）。企業へのログインと初回紐付けの承認の画面に、どの企業でも同じ文を出す。
+  // FixedWarning の見た目にはせず、本文と同じ見た目の固定の注記にする。
+  const RESPONSIBILITY_NOTE =
+    '割符は、割符を使った認証と操作の承認、割符のアカウントの管理と回復、それらに関わる知らせを受け持ちます。この企業独自のログイン方法や業務上の手続きは、この企業が管理しています。';
+
+  /**
+   * 初回紐付けの項目の状態（ADR 0028 の O-90・O-103）。元の会員の側への知らせは「企業に依頼しました」の範囲にとどめ、
+   * 「知らせました」「確認しました」とは出さない。
+   */
+  const INITIAL_LINK_STATE_TEXT = Object.freeze({
+    approving: '承認の処理中です',
+    awaiting_notice: '承認済み。企業に、元の会員への知らせを依頼しました（待機の開始待ち）',
+    waiting: '待機中です。最終の確認まで、紐付けは確定しません',
+    ready: '待機が終わりました。企業の画面から最終の確認をするまで、紐付けは確定しません',
+    finalizing: '最終の確認を受け付けました（企業の確定待ち）',
+    linked: '紐付けが完了しました',
+    cancel_requested: '取消を受け付けました（企業の確認待ち）',
+    cancelled: '取り消しました',
+    expired: '期限が切れたため、紐付けませんでした',
+    not_linked: '紐付けませんでした',
+    unknown: '状態を確かめられませんでした。しばらくしてから、もう一度お試しください。',
+  });
+
+  /** 警告文 I の注記（本文と同じ見た目）。 */
+  function responsibilityNote() {
+    return el('p', { className: 'responsibility-note' }, RESPONSIBILITY_NOTE);
+  }
+
   /** 窓口の作成の項目の状態（ADR 0026 の O-68）。未着や期限切れだけで「作成されませんでした」とは出さない。 */
   const DESK_STATE_TEXT = Object.freeze({
     approving: '承認の処理中です',
@@ -466,11 +494,29 @@
     ];
   }
 
+  /** 初回紐付けの項目の1行（企業名、固定の操作、状態、待機が終わる日時）。 */
+  function initialLinkItemLines(item) {
+    return [
+      el('strong', {}, item.company),
+      el('span', {}, item.operation),
+      el('span', {}, INITIAL_LINK_STATE_TEXT[item.state] ?? INITIAL_LINK_STATE_TEXT.unknown),
+      item.state === 'waiting' && item.waitUntil
+        ? el('span', {}, `待機が終わる日時：${expiryText(item.waitUntil)}`)
+        : null,
+    ];
+  }
+
   /** 受信箱（DESIGN.md 2章）：承認待ちと知らせの一覧と、承認待ちの期限。文言はサーバーの型が決めたものだけ。 */
   function inboxList(inbox) {
     const desk = inbox.desk ?? [];
+    const initialLink = inbox.initialLink ?? [];
     const recovery = inbox.recovery ?? null;
-    if (inbox.items.length === 0 && desk.length === 0 && recovery === null) {
+    if (
+      inbox.items.length === 0 &&
+      desk.length === 0 &&
+      initialLink.length === 0 &&
+      recovery === null
+    ) {
       return el('p', {}, 'お知らせはありません。');
     }
     const approvalUrl = approvalOriginUrl();
@@ -497,6 +543,19 @@
           {},
           ...deskItemLines(item),
           item.state === 'created' ? fixedWarning(item.warning, { company: item.company }) : null,
+          item.cancellable && approvalUrl
+            ? el('a', { href: approvalUrl }, '取り消す（確認待ちの画面を開く）')
+            : null,
+        ),
+      );
+    }
+    // 初回紐付けの項目（DESIGN.md 2章「初回紐付けの待機中」）。取り消すのは、承認用のオリジンの画面だけ。
+    for (const item of initialLink) {
+      list.append(
+        el(
+          'li',
+          {},
+          ...initialLinkItemLines(item),
           item.cancellable && approvalUrl
             ? el('a', { href: approvalUrl }, '取り消す（確認待ちの画面を開く）')
             : null,
@@ -610,6 +669,7 @@
     const base = `/interaction/${encodeURIComponent(uid)}`;
     show(
       el('p', {}, 'この企業に、割符のパスキーでログインします。'),
+      responsibilityNote(),
       note ? status(note) : null,
       el(
         'div',
@@ -812,11 +872,59 @@
     );
   }
 
+  /** 初回紐付けの取消（承認用のオリジン。パスキーで確かめる。ADR 0028 の O-90）。 */
+  const cancelInitialLink = (item, unrecognized) => async () => {
+    const result = await ceremony(
+      'authenticate',
+      '/api/initial-link-items/cancel/options',
+      '/api/initial-link-items/cancel/verify',
+      { id: item.id },
+    );
+    if (result.status === 200) {
+      return renderApprovals(
+        unrecognized
+          ? `取消を受け付けました。心当たりがない場合は、${item.company}の公式窓口に、自分から連絡して、不正の疑いを申告してください。`
+          : '取消を受け付けました。',
+      );
+    }
+    if (result.status === 401 && result.data.error === 'login_required') {
+      return renderApprovalLogin('もう一度、パスキーで確かめてください。');
+    }
+    renderApprovals(
+      result.status === 409
+        ? 'すでに紐付けの確定に進んだか、受付が終わっていたため、取り消せませんでした。'
+        : failureText(result),
+    );
+  };
+
+  /** 初回紐付けの項目（DESIGN.md 2章「初回紐付けの待機中」）。 */
+  function initialLinkItemCard(item) {
+    return el(
+      'article',
+      { className: 'approval-card' },
+      ...initialLinkItemLines(item),
+      item.cancellable
+        ? el(
+            'div',
+            { className: 'actions equal' },
+            el('button', { type: 'button', onclick: cancelInitialLink(item, false) }, '取り消す'),
+            el(
+              'button',
+              { type: 'button', onclick: cancelInitialLink(item, true) },
+              '心当たりがない',
+            ),
+          )
+        : null,
+    );
+  }
+
   async function renderApprovals(note) {
     const result = await call('GET', '/api/approvals');
     if (result.status === 401) return renderApprovalLogin(note);
     const deskResult = await call('GET', '/api/desk-items');
     const deskItems = deskResult.status === 200 ? deskResult.data.items : [];
+    const initialLinkResult = await call('GET', '/api/initial-link-items');
+    const initialLinkItems = initialLinkResult.status === 200 ? initialLinkResult.data.items : [];
     const refresh = el(
       'button',
       { type: 'button', onclick: () => renderApprovals() },
@@ -839,6 +947,14 @@
             { 'aria-labelledby': 'desk-items-heading' },
             el('h2', { id: 'desk-items-heading' }, '窓口での手続き'),
             ...deskItems.map(deskItemCard),
+          ),
+      initialLinkItems.length === 0
+        ? null
+        : el(
+            'section',
+            { 'aria-labelledby': 'initial-link-items-heading' },
+            el('h2', { id: 'initial-link-items-heading' }, '旧会員の紐付け'),
+            ...initialLinkItems.map(initialLinkItemCard),
           ),
       refresh,
     );
@@ -971,6 +1087,106 @@
     );
     // 初期フォーカスは見出し（企業名）に置き、どのボタンにも置かない（DESIGN.md 原則4）。
     document.getElementById('desk-company')?.focus();
+  }
+
+  // ---- 承認用のオリジン：初回紐付けの承認（DESIGN.md 2章「初回紐付けの承認」「初回紐付けの最終確認」、ADR 0028） ----
+
+  const INITIAL_LINK_DECLINE_TEXT = Object.freeze({
+    denied: '承認しませんでした。企業の画面に戻ります。',
+    unrecognized:
+      'この申請を取りやめました。心当たりがない場合は、〈企業名〉の公式窓口に、自分から連絡して、不正の疑いを申告してください。',
+    cancel:
+      '承認しませんでした。申請を取り消すには、確認待ちの画面の「旧会員の紐付け」から、パスキーで取り消してください。',
+  });
+
+  async function renderInitialLink() {
+    const uid = window.location.hash.slice(1);
+    const loaded = /^[A-Za-z0-9_-]{1,64}$/.test(uid)
+      ? await call('POST', '/api/initial-link/view', { uid })
+      : { status: 400, data: {} };
+    if (loaded.status !== 200) {
+      return renderDeskEnded(
+        'この確認は、期限が切れたか、すでに終わっています。企業の画面から、もう一度お試しください。',
+      );
+    }
+    const card = loaded.data;
+    const final = card.stage === 'final';
+    const note = el('div');
+    const decline = (reason) => async () => {
+      const result = await call('POST', '/api/initial-link/decline', { uid, reason });
+      const text = INITIAL_LINK_DECLINE_TEXT[reason].replace('〈企業名〉', () => card.company);
+      if (result.status === 200 && typeof result.data.redirectTo === 'string') {
+        const target = result.data.redirectTo;
+        return show(
+          status(text),
+          el(
+            'button',
+            { type: 'button', onclick: () => window.location.assign(target) },
+            '企業の画面に戻る',
+          ),
+        );
+      }
+      renderDeskEnded(text);
+    };
+    const approve = async () => {
+      const result = await ceremony(
+        'authenticate',
+        '/api/initial-link/approve/options',
+        '/api/initial-link/approve/verify',
+        { uid },
+        { uid },
+      );
+      if (go(result)) return;
+      note.replaceChildren(
+        status(
+          result.status === 429
+            ? failureText(result)
+            : result.status === 409 && result.data.error === 'restricted'
+              ? '回復の後の7日間は、旧会員の紐付けを承認できません。'
+              : result.status === 409 && result.data.error === 'not_ready'
+                ? '待機がまだ終わっていないか、企業の側の確認が済んでいません。'
+                : result.status === 409
+                  ? 'この申請は承認できませんでした。企業の画面から、もう一度お試しください。'
+                  : 'パスキーでの確認ができませんでした。企業の画面でログインしているアカウントの割符で、もう一度お試しください。',
+        ),
+      );
+    };
+    show(
+      el(
+        'article',
+        { className: 'approval-card', 'aria-labelledby': 'initial-link-company' },
+        el(
+          'h2',
+          { id: 'initial-link-company', className: 'company', tabindex: '-1' },
+          card.company,
+        ),
+        el(
+          'p',
+          { className: 'operation' },
+          final ? `${card.operation}（最終の確認）` : card.operation,
+        ),
+        el('p', {}, card.purpose),
+        el('p', {}, card.permanent),
+        el('p', {}, card.explanation),
+        card.notice ? el('p', {}, card.notice) : null,
+        el('p', {}, `要求の時刻：${DATE.format(new Date(card.createdAt))}`),
+        el('p', {}, `要求の端末：${card.device}`),
+        el('p', {}, `期限：${expiryText(card.expiresAt)}`),
+        responsibilityNote(),
+        note,
+        el(
+          'div',
+          { className: 'actions equal' },
+          el('button', { type: 'button', onclick: approve }, '承認する'),
+          el('button', { type: 'button', onclick: decline('denied') }, '承認しない'),
+          final
+            ? el('button', { type: 'button', onclick: decline('cancel') }, '取り消す')
+            : el('button', { type: 'button', onclick: decline('unrecognized') }, '心当たりがない'),
+        ),
+      ),
+    );
+    // 初期フォーカスは見出し（企業名）に置き、どのボタンにも置かない（DESIGN.md 原則4）。
+    document.getElementById('initial-link-company')?.focus();
   }
 
   // ---- 承認用のオリジン：回復と協力者（DESIGN.md 2章、ADR 0027 の O-82） ----
@@ -1756,6 +1972,8 @@
     void renderApprovals();
   } else if (root.dataset.page === 'desk') {
     void renderDesk();
+  } else if (root.dataset.page === 'initial-link') {
+    void renderInitialLink();
   } else if (root.dataset.page === 'recover') {
     renderRecover();
   } else if (root.dataset.page === 'recovery') {

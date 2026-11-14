@@ -14,6 +14,9 @@
 // - 窓口の操作別承認（routes/desk.ts。ADR 0026）：本来のオリジンの GET /interaction/:uid/desk/finish と
 //   GET /op-approval/jwks、承認用のオリジンの GET /desk と /api/desk/*（承認、承認しない）と /api/desk-items/*
 //   （窓口の作成の項目と取消）
+// - 既存会員の初回紐付け（routes/initial-link.ts。ADR 0028）：本来のオリジンの GET /interaction/:uid/initial-link/finish
+//   と GET /initial-link/jwks、承認用のオリジンの GET /initial-link と /api/initial-link/*（承認、承認しない）と
+//   /api/initial-link-items/*（初回紐付けの項目と取消）
 // 逆引き（sub・別名から本物の連絡先や属性を返す）ルートと、管理用のルートは作らない（不変条件2）。
 //
 // 守り：
@@ -66,6 +69,7 @@ import { registerApprovalRoutes } from './routes/approvals.ts';
 import type { CurrentSession, RouteContext } from './routes/context.ts';
 import { registerDeskRoutes } from './routes/desk.ts';
 import { registerInboxRoutes } from './routes/inbox.ts';
+import { registerInitialLinkRoutes } from './routes/initial-link.ts';
 import { registerInteractionRoutes } from './routes/interaction.ts';
 import { registerPwaRoutes } from './routes/pwa.ts';
 import { registerRecoveryRoutes } from './routes/recovery.ts';
@@ -435,6 +439,7 @@ export async function createIdp(options: IdpOptions): Promise<Idp> {
   registerApprovalRoutes(ctx);
   registerInteractionRoutes(ctx);
   registerDeskRoutes(ctx);
+  registerInitialLinkRoutes(ctx);
   registerRecoveryRoutes(ctx);
 
   let approvalServer: Server | undefined;

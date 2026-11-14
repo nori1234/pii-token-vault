@@ -62,6 +62,8 @@ export interface ClientSpec {
   readonly aliasClaim?: 'email' | 'contact_alias';
   /** 窓口の操作（ADR 0026）。既定は空（窓口の申請を受け付けない）。 */
   readonly deskActions?: readonly DeskAction[];
+  /** 初回紐付けの申請を受け付けるか（ADR 0028）。既定は false。 */
+  readonly initialLink?: boolean;
 }
 
 /** テナントを tenants 個、クライアントを clients の指定どおりに作って起動する。 */
@@ -114,6 +116,7 @@ export async function startTestIdp(
       },
       aliasClaim: c.aliasClaim ?? 'email',
       ...(c.deskActions === undefined ? {} : { deskActions: c.deskActions }),
+      ...(c.initialLink === undefined ? {} : { initialLink: c.initialLink }),
     });
   }
 

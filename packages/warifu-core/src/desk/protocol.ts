@@ -75,13 +75,68 @@ export const DESK_TIMES = Object.freeze({
 /** 内部 API のソケットのファイル名。 */
 export const DESK_SOCKET_NAME = 'company-api.sock';
 /** recovered は、回復の成立を企業へ知らせる送信待ちに入れる（ADR 0027 の O-81）。 */
-export type DeskOp = 'approve' | 'status' | 'cancel' | 'recovered';
+export type DeskOp =
+  | 'approve'
+  | 'status'
+  | 'cancel'
+  | 'recovered'
+  | 'initial_link_check'
+  | 'initial_link_approve'
+  | 'initial_link_finalize'
+  | 'initial_link_status'
+  | 'initial_link_cancel';
 export const DESK_PATHS: Readonly<Record<DeskOp, string>> = Object.freeze({
   approve: '/v1/desk_approve',
   status: '/v1/desk_status',
   cancel: '/v1/desk_cancel',
   recovered: '/v1/account_recovered',
+  // 初回紐付け（ADR 0028 の O-86・O-90・O-103）。idp から company-api へだけ。逆向きはない。
+  initial_link_check: '/v1/initial_link_check',
+  initial_link_approve: '/v1/initial_link_approve',
+  initial_link_finalize: '/v1/initial_link_finalize',
+  initial_link_status: '/v1/initial_link_status',
+  initial_link_cancel: '/v1/initial_link_cancel',
 });
+
+/** 移行専用ID の形（HMAC-SHA-256 の base64url。ADR 0028 の O-87）。 */
+export const INITIAL_LINK_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+/** 初回紐付けの RAR の型（ADR 0028 の O-86）。企業は PAR で1件だけ送る。 */
+export const INITIAL_LINK_DETAIL_TYPE = 'warifu_initial_link';
+/** 最初の承認と、待機の後の最終の承認。 */
+export type InitialLinkAction = 'initial_link.approve' | 'initial_link.finalize';
+export const INITIAL_LINK_ACTIONS: readonly InitialLinkAction[] = Object.freeze([
+  'initial_link.approve',
+  'initial_link.finalize',
+]);
+/** 紐付けの承認の JWT の typ（ID トークンや窓口の承認と取り違えないため。O-86 の手順7）。 */
+export const INITIAL_LINK_APPROVAL_TYP = 'warifu-initial-link-approval+jwt';
+/** 引き継ぎと、紐付けの承認の JWT の有効期間（秒。仮置き）。 */
+export const INITIAL_LINK_IDP_TIMES = Object.freeze({
+  requestTtlSeconds: 300,
+  approvalTtlSeconds: 300,
+  keepAfterTerminalDays: 7,
+} as const);
+
+/** 初回紐付けの正本の状態（ADR 0028 の O-90）。受信箱の項目は、正本から読んで出す。 */
+export type InitialLinkState =
+  | 'prepared'
+  | 'pending_notice'
+  | 'pending_link'
+  | 'awaiting_final'
+  | 'approved'
+  | 'linked'
+  | 'cancel_requested'
+  | 'cancelled'
+  | 'expired'
+  | 'not_linked';
+
+export interface InitialLinkStatusItem {
+  readonly itemRef: string;
+  readonly state: InitialLinkState | 'unknown';
+  /** 待機が満ちる時刻（pending_link のとき。ISO 8601）。 */
+  readonly waitUntil: string | null;
+}
 /** 内部 API を呼べるのは idp だけ。 */
 export type DeskCaller = 'idp';
 
@@ -139,5 +194,6 @@ export const DESK_ERROR_BODY = Object.freeze({
   not_found: '{"error":"not_found"}',
   conflict: '{"error":"conflict"}',
   closed: '{"error":"closed"}',
+  not_ready: '{"error":"not_ready"}',
   unavailable: '{"error":"unavailable"}',
 } as const);
