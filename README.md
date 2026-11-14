@@ -72,6 +72,7 @@
 | ファイル | 内容 |
 |---|---|
 | [docs/plan.md](docs/plan.md) | 実装計画（原則、設計、法規制、マイルストーン、受け入れ基準） |
+| [docs/architecture.md](docs/architecture.md) | 割符の構成（サービスと、利用者・企業・rp-kit とのつながり）の見取り図 |
 | [DESIGN.md](DESIGN.md) | 画面と文言の規則、デザイントークン |
 | [CLAUDE.md](CLAUDE.md) | 開発者と AI エージェントが守る不変条件、環境の注意 |
 | [docs/adr/](docs/adr/) | 設計判断の記録 |
