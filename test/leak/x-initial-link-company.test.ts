@@ -4,13 +4,10 @@
 // 待機の知らせの SET に 202 が返ったことは、送信待ちが呼ぶ startWaiting を直接呼んで模す。
 
 import { type KeyObject, randomBytes, randomUUID } from 'node:crypto';
-import { SignJWT } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   acceptUserCancel,
-  INITIAL_LINK_PROOF_TYP,
   type InitialLinkDeps,
-  proofAudience,
   recordApproval,
   recordFinalApproval,
   startWaiting,
@@ -19,13 +16,14 @@ import {
 import { sql } from '../../packages/warifu-core/src/db/sql.ts';
 import { parseWarifuUserId, type TenantId } from '../../packages/warifu-core/src/ids.ts';
 import { createCompanyApiKeyClient } from '../../packages/warifu-core/src/keys/company-api.ts';
-import {
-  ISSUER,
-  startTestCompanyApi,
-  type TestCompanyApi,
-  type TestTenant,
-} from '../setup/company-api.ts';
+import { startTestCompanyApi, type TestCompanyApi, type TestTenant } from '../setup/company-api.ts';
 import { serviceDb } from '../setup/db.ts';
+import {
+  initialLinkProof,
+  newMemberRef,
+  newRequestId,
+  TEST_INITIAL_LINK,
+} from '../setup/initial-link.ts';
 import { keysvcConnection } from '../setup/keys.ts';
 
 const HOUR = 3600 * 1000;
@@ -33,7 +31,7 @@ let clock = Date.now();
 const now = () => new Date(clock);
 let api: TestCompanyApi;
 let deps: InitialLinkDeps;
-const INITIAL_LINK = { profileVersion: 3, approvedOn: '2026-11-01' };
+const INITIAL_LINK = TEST_INITIAL_LINK;
 
 beforeAll(async () => {
   api = await startTestCompanyApi({
@@ -75,34 +73,13 @@ function registered(index: number) {
 }
 
 const b64 = (bytes: Buffer) => bytes.toString('base64url');
-const newRequestId = () => b64(randomBytes(18));
-const newMemberRef = () => b64(randomBytes(18));
 
-async function proof(
+function proof(
   t: TestTenant,
   claims: Record<string, unknown>,
   options: { readonly typ?: string; readonly key?: KeyObject; readonly lifetime?: number } = {},
 ): Promise<string> {
-  const iat = Math.floor(clock / 1000);
-  return new SignJWT({
-    jti: b64(randomBytes(16)),
-    stage: 'initial',
-    eligibility: 'eligible',
-    credential_kind: 'passkey',
-    profile_version: INITIAL_LINK.profileVersion,
-    auth_epoch: 7,
-    ...claims,
-  })
-    .setProtectedHeader({
-      alg: 'ES256',
-      kid: t.client.kid,
-      typ: options.typ ?? INITIAL_LINK_PROOF_TYP,
-    })
-    .setIssuer(t.client.clientId)
-    .setAudience(proofAudience(ISSUER))
-    .setIssuedAt(iat)
-    .setExpirationTime(iat + (options.lifetime ?? 120))
-    .sign(options.key ?? t.client.privateKey);
+  return initialLinkProof(t, claims, { ...options, nowMs: clock });
 }
 
 async function call(index: number, path: string, json: unknown) {

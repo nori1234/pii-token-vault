@@ -17,6 +17,7 @@ import {
   type WarifuUserId,
 } from '../../packages/warifu-core/src/ids.ts';
 import { createIdpKeyClient } from '../../packages/warifu-core/src/keys/idp.ts';
+import type { KeysvcConnection } from '../../packages/warifu-core/src/keys/protocol.ts';
 import type { SenderConnection } from '../../packages/warifu-core/src/sender/client.ts';
 import { serviceDb } from './db.ts';
 import { keysvcConnection } from './keys.ts';
@@ -125,6 +126,8 @@ export async function clientAssertion(
 export async function startTestCompanyApi(options: {
   readonly tenants: readonly TenantSpec[];
   readonly sender?: SenderConnection;
+  /** 既定は globalSetup の鍵サービス。鍵を入れ替えるテストは、自分で起動した鍵サービスを渡す。 */
+  readonly keysvc?: KeysvcConnection;
   readonly now?: () => Date;
   /** idp からの窓口の内部 API（ADR 0026）。 */
   readonly deskInternal?: {
@@ -172,7 +175,7 @@ export async function startTestCompanyApi(options: {
           : { setDeliveryRevision: options.tenants[i]?.setDeliveryRevision }),
       })),
     },
-    keysvc: keysvcConnection('company-api'),
+    keysvc: options.keysvc ?? keysvcConnection('company-api'),
     db: { host: String(db.host), port: Number(db.port), database: String(db.database) },
     ...(options.sender === undefined ? {} : { sender: options.sender }),
     ...(options.now === undefined ? {} : { now: options.now }),
