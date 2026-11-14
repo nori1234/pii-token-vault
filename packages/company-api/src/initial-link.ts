@@ -782,14 +782,22 @@ export async function recordApproval(
 export async function recordFinalApproval(
   deps: InitialLinkDeps,
   tenant: CompanyTenant,
-  input: { readonly userId: WarifuUserId; readonly itemRef: string },
+  input: {
+    readonly userId: WarifuUserId;
+    readonly itemRef: string;
+    /** 企業が PAR で送った移行専用ID。項目の行と同じ申請のものでなければ not_found（取り違えを断る）。 */
+    readonly initialLinkId: string;
+  },
 ): Promise<InternalResult<{ readonly initialLinkId: string }>> {
-  if (!usable(tenant)) return { ok: false, reason: 'not_found' };
+  if (!usable(tenant) || !INITIAL_LINK_ID_PATTERN.test(input.initialLinkId)) {
+    return { ok: false, reason: 'not_found' };
+  }
+  const linkMacs = await lookupAll(deps.keys, tenant.tenantId, 'link', input.initialLinkId);
   const found = await deps.db.withTenant(tenant.tenantId, async (tx) => {
     const now = deps.now();
     await purge(tx, now);
-    const row = await lockByItemRef(tx, input.itemRef);
-    if (row === undefined || row.user_id !== input.userId) {
+    const row = await lockByLinkMacs(tx, linkMacs);
+    if (row === undefined || row.user_id !== input.userId || row.item_ref !== input.itemRef) {
       return { ok: false, reason: 'not_found' } as const;
     }
     const state = await advance(tx, deps, tenant, row);

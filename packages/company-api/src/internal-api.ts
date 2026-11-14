@@ -168,12 +168,20 @@ export async function startDeskInternalApi(
       }
       case 'initial_link_finalize':
       case 'initial_link_cancel': {
-        const body = objectWithKeys(value, ['tenantId', 'userId', 'itemRef']);
+        const body = objectWithKeys(
+          value,
+          op === 'initial_link_finalize'
+            ? ['tenantId', 'userId', 'itemRef', 'initialLinkId']
+            : ['tenantId', 'userId', 'itemRef'],
+        );
         if (
           body === undefined ||
           !isUuid(body.tenantId) ||
           !isUuid(body.userId) ||
-          !isUuid(body.itemRef)
+          !isUuid(body.itemRef) ||
+          (op === 'initial_link_finalize' &&
+            (typeof body.initialLinkId !== 'string' ||
+              !INITIAL_LINK_ID_PATTERN.test(body.initialLinkId)))
         ) {
           return undefined;
         }
@@ -181,7 +189,10 @@ export async function startDeskInternalApi(
         if (tenant === undefined) return [404, DESK_ERROR_BODY.not_found];
         const input = { userId: body.userId as WarifuUserId, itemRef: body.itemRef };
         if (op === 'initial_link_finalize') {
-          const result = await recordInitialLinkFinal(deps, tenant, input);
+          const result = await recordInitialLinkFinal(deps, tenant, {
+            ...input,
+            initialLinkId: body.initialLinkId as string,
+          });
           if (!result.ok) return initialLinkFailure(result);
           log.info({ event: 'company_api.initial_link_final_recorded' });
           return [200, JSON.stringify({ initialLinkId: result.initialLinkId })];

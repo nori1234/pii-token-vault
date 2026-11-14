@@ -213,12 +213,24 @@ describe('初回紐付けの正本（ADR 0028）', () => {
     // plan 11章：テスト9（紐付けの攻撃）、ADR 0028 の O-103
     const w = await waiting(0);
     const t = registered(0);
-    expect(await recordFinalApproval(deps, t, { userId: w.userId, itemRef: w.itemRef })).toEqual({
+    expect(
+      await recordFinalApproval(deps, t, {
+        userId: w.userId,
+        itemRef: w.itemRef,
+        initialLinkId: w.id,
+      }),
+    ).toEqual({
       ok: false,
       reason: 'not_ready',
     });
     clock += 24 * HOUR + 1000;
-    expect(await recordFinalApproval(deps, t, { userId: w.userId, itemRef: w.itemRef })).toEqual({
+    expect(
+      await recordFinalApproval(deps, t, {
+        userId: w.userId,
+        itemRef: w.itemRef,
+        initialLinkId: w.id,
+      }),
+    ).toEqual({
       ok: false,
       reason: 'not_ready',
     });
@@ -235,9 +247,25 @@ describe('初回紐付けの正本（ADR 0028）', () => {
       await recordFinalApproval(deps, t, {
         userId: parseWarifuUserId(randomUUID()),
         itemRef: w.itemRef,
+        initialLinkId: w.id,
       }),
     ).toEqual({ ok: false, reason: 'not_found' });
-    expect(await recordFinalApproval(deps, t, { userId: w.userId, itemRef: w.itemRef })).toEqual({
+    // 企業が PAR で別の申請の移行専用ID を送っても、この項目の最終の承認にはならない（取り違え）。
+    const unrelated = await prepared(0);
+    expect(
+      await recordFinalApproval(deps, t, {
+        userId: w.userId,
+        itemRef: w.itemRef,
+        initialLinkId: unrelated.id,
+      }),
+    ).toEqual({ ok: false, reason: 'not_found' });
+    expect(
+      await recordFinalApproval(deps, t, {
+        userId: w.userId,
+        itemRef: w.itemRef,
+        initialLinkId: w.id,
+      }),
+    ).toEqual({
       ok: true,
       initialLinkId: w.id,
     });
@@ -327,7 +355,9 @@ describe('初回紐付けの正本（ADR 0028）', () => {
     const itemRef = randomUUID();
     await recordApproval(deps, registered(0), { userId, itemRef, initialLinkId: p.id });
     clock += 24 * HOUR + 1000;
-    expect(await recordFinalApproval(deps, registered(0), { userId, itemRef })).toEqual({
+    expect(
+      await recordFinalApproval(deps, registered(0), { userId, itemRef, initialLinkId: p.id }),
+    ).toEqual({
       ok: false,
       reason: 'conflict',
     });
