@@ -72,6 +72,8 @@ export const INITIAL_LINK_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 /** 会員参照（128ビット以上の乱数を base64url にしたもの。O-88）。 */
 export const MEMBER_REF_PATTERN = /^[A-Za-z0-9_-]{22,128}$/;
 const JTI_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
+/** 証跡の JWS の長さの上限（文字。クレームは許可リストだけなので、ふつうは 1,000 字に届かない）。 */
+export const PROOF_MAX_LENGTH = 3000;
 const PROOF_CLAIMS: readonly string[] = Object.freeze([
   'iss',
   'aud',
@@ -387,7 +389,8 @@ async function verifyProof(
   issuer: string,
   jws: unknown,
 ): Promise<ProofClaims | undefined> {
-  if (typeof jws !== 'string') return undefined;
+  // 鍵サービスの MAC の上限（4096 バイト）より十分に小さく抑える。大きい証跡は、確かめる前に 400 にする。
+  if (typeof jws !== 'string' || jws.length > PROOF_MAX_LENGTH) return undefined;
   const audience = proofAudience(issuer);
   const payload = await verifyJwt(jws, client.jwks.keys, {
     issuer: client.clientId,

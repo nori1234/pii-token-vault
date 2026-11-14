@@ -214,6 +214,9 @@ describe('初回紐付けの正本（ADR 0028）', () => {
       const res = await call(0, 'proofs', { proof: jws });
       expect([res.status, res.text]).toEqual([400, '{"error":"invalid_request"}']);
     }
+    // 大きすぎる証跡は、確かめる前に 400（鍵サービスの上限に届かせない）。
+    const huge = await call(0, 'proofs', { proof: `${'A'.repeat(4000)}.${'B'.repeat(10)}.C` });
+    expect([huge.status, huge.text]).toEqual([400, '{"error":"invalid_request"}']);
     const wrongMember = await call(0, 'proofs', {
       proof: await proof(tenant(0), { ...base, member_ref: newMemberRef() }),
     });
