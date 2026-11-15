@@ -51,6 +51,9 @@
 | sign（tenant_jwt、set）、public_keys（tenant_jwt、set）：テナントの JWT と SET の署名（ES256） | — | ○ | — | M5（ADR 0022） |
 | sign（op_approval）、public_keys（op_approval）：操作ごとの承認の署名（ES256。ID トークンの鍵とは別） | ○ | — | — | M7（ADR 0026） |
 | mac（desk_id：窓口の変更ID と取消要求ID の導出、desk_lookup：申請ID と変更ID の照合用の索引） | — | ○ | — | M7（ADR 0026） |
+| sign（initial_link）、public_keys（initial_link）：初回紐付けの承認の署名（ES256。窓口の鍵とは別） | ○ | — | — | M9（ADR 0028 の O-86） |
+| mac（initial_link_public_id：移行専用ID の導出、initial_link_lookup：申請ID・移行専用ID・会員参照・証跡の照合用の索引）。この2つは版を持つ（3つまで。入れ替えても、開いている申請の ID は変わらない） | — | ○ | — | M9（ADR 0028 の O-87） |
+| sign（operation_approval）、public_keys（operation_approval）：高リスクの操作の承認の署名（ES256。窓口と初回紐付けの鍵とは別） | ○ | — | — | M9（ADR 0030 の O-114） |
 
 - sender、rp-kit、demo-rp は、鍵サービスの資格情報を持たない。表にない (サービス, 操作, 対象) は、すべて 403（理由によらず同じ本文とヘッダー）。表の本体は `packages/keysvc/src/acl.ts` の1か所に置く（ADR 0013）。
 - MAC の鍵は用途ごとに独立させる（KMS の鍵ごとのポリシーに写せるようにするため）。用途は使うマイルストーンで足す。M3 で、idp だけの用途として `pairwise_sub`、`oidc_storage_id`、`email_verify_code` を足した（ADR 0018）。M4 で、relay だけの用途として `relay_replay`、`relay_thread`、`message_id` を足した（ADR 0021）。M6 で、idp だけの用途として `approval_challenge` を足した（ADR 0023）。M7 で、company-api だけの用途として `desk_id`（外に出す ID の導出）と `desk_lookup`（照合用の索引）を足した（ADR 0026）。M8 で、idp だけの用途として `recovery_code`（回復コードの照合）を足した（ADR 0027）。協力者の招待コードと、協力者の承認の結び付けのコードは、DB に置かず、idp のメモリの保存先（鍵は `oidc_storage_id` の MAC）に10分だけ置くので、新しい用途は足していない。見込みは、初回紐付け用の用途（下記の追加案）。
@@ -70,7 +73,7 @@
 
 下表は**追加する能力の案**であり、現行ACLで使える操作ではない。各用途は別鍵とし、tenant・用途・鍵の版を結び付ける。入力・出力はログへ出さず、許可外の呼び出しは403にする（ADR 0019・0020、テスト8）。
 
-窓口の分は、M7 で次のように確定した（ADR 0026。上の能力の表）。初回移行の分（`initial_link_*`、sign の `initial_link`）は、案のまま M9 で決める。
+窓口の分は、M7 で次のように確定した（ADR 0026。上の能力の表）。初回移行の分（`initial_link_*`、sign の `initial_link`）は、M9 で、上の能力の表のとおりに確定した（ADR 0028）。高リスクの操作の承認の鍵 `operation_approval` も、M9 で足した（ADR 0030）。
 
 - `desk_request_lookup` と `desk_change_lookup` は、照合用の索引の1つの用途 `desk_lookup` にまとめた。入力に、ラベル、テナント、種類（`request` か `change`）を入れて分ける。
 - `desk_public_id` は `desk_id` にした。照合用の索引（`desk_lookup`）とは用途と鍵を分けた。
@@ -131,7 +134,7 @@
 
 ### 窓口・初回移行の保存先（将来の設計案）
 
-窓口の分は M7 で作った（上の表の `idp.desk_items` と `company_api.desk_changes`、idp から company-api への内部 API。ADR 0026）。次は、初回移行の分についての ADR 0020 の提案で、実装済みの表や既存の DB 権限を表さない。窓口・初回移行の申請状態の正本を company-api の `company_api` スキーマに置き、HMAC 索引とテナント境界で扱う。idp は本人の承認・チャレンジと受信箱を利用者境界で扱う。両サービスは認証済み内部経路で必要最小限の状態を連携する。表・列ごとの GRANT、内部経路の認証、鍵と ACL は M7・M9 の実装前に決定し、テスト6・8を更新する。新たなテナント横断や復号の例外は作らない。詳細は[仕様案 §2.5.1](../proposals/desk-and-initial-binding-v0.7.md#251-申請の保存先db境界鍵の能力案)を参照する。
+窓口の分は M7 で作った（上の表の `idp.desk_items` と `company_api.desk_changes`、idp から company-api への内部 API。ADR 0026）。初回移行の分も、M9 で作った（`company_api.initial_links`、`company_api.initial_link_records`、`company_api.initial_link_proof_jtis`、`idp.initial_link_items`、送信待ちの2つの種類。マイグレーション 0010。idp から company-api への内部 API に5つの操作を足した。ADR 0028）。次は、その元になった ADR 0020 の提案である。窓口・初回移行の申請状態の正本を company-api の `company_api` スキーマに置き、HMAC 索引とテナント境界で扱う。idp は本人の承認・チャレンジと受信箱を利用者境界で扱う。両サービスは認証済み内部経路で必要最小限の状態を連携する。表・列ごとの GRANT、内部経路の認証、鍵と ACL は M7・M9 の実装前に決定し、テスト6・8を更新する。新たなテナント横断や復号の例外は作らない。詳細は[仕様案 §2.5.1](../proposals/desk-and-initial-binding-v0.7.md#251-申請の保存先db境界鍵の能力案)を参照する。
 
 ## 4. 外向きの通信
 
@@ -155,7 +158,7 @@
 | keysvc | なし |
 | warifu-core | なし |
 | rp-kit | 企業の側のコード（割符の一部ではない）。SDK は自分ではつながず、企業が渡す通信の関数で、企業が設定した割符のオリジン（idp と company-api）だけに要求を送る。応答の中の URL に自動で進まない（ADR 0029 の O-108） |
-| demo-rp | 企業の参照実装（割符の一部ではない）。設定で固定した割符のオリジンと模擬 OP にだけつなぐ。つなぐのは `src/transport.ts` の1ファイルだけで、利用者などが渡した URL にはつながず、リダイレクトに従わない（ADR 0029 の O-109） |
+| demo-rp | 企業の参照実装（割符の一部ではない。A社のデモ証券は、ログイン、出金先の変更、窓口、旧会員の引き継ぎ。B社の予約サイトは、ログインだけ。保存はメモリ）。設定で固定した割符のオリジンと模擬 OP にだけつなぐ。つなぐのは `src/transport.ts` の1ファイルだけで、利用者などが渡した URL にはつながず、リダイレクトに従わない（ADR 0029 の O-109） |
 
 - 割符の内部の接続（サービスから keysvc、DB、relay の内部配送 API、sender へ）は、外向きの通信に当たらない。内部の接続の認証は、keysvc はサービスごとの bearer の資格情報と Unix ドメインソケットにした（ADR 0013）。relay の内部配送 API も同じ形にした（`POST /v1/deliver` だけ。呼べるのは idp だけ。ADR 0021）。sender も同じ形にし、口を呼び出し元ごとに分けた（`/v1/webhook` は company-api、`/v1/mail` と `/v1/dns` は relay。ADR 0022）。company-api の窓口の内部 API（ソケット `company-api.sock`）も同じ形にし、呼べるのは idp だけにした（`POST /v1/desk_approve`、`/v1/desk_status`、`/v1/desk_cancel`。逆向きは作らない。ADR 0026）。
 - 内部の接続の組の一覧（CAP-27）は、各サービスを作るマイルストーンで足す。本番のネットワークの設定は、未定（P1 の AWS アダプタで決める）。
@@ -179,9 +182,9 @@
 
 | サービス | 外から呼べるルートの種類（P0） | 呼ぶ人 | 認証 |
 |---|---|---|---|
-| idp | OIDC（discovery、jwks、認可、トークン）。パスキーの登録とログイン。step-up。PWA（別名の一覧、パスキーの管理、協力者、受信箱、回復、メールアドレスの登録と変更）。承認系の画面（承認用のオリジン。承認待ちの一覧と、承認と拒否は M6。ADR 0023。窓口での承認と、窓口の作成の項目の取消は M7。ADR 0026。回復と協力者の画面と API（回復コードの作成、協力者の招待・受け入れ・確定・削除、新しい端末での回復の開始と読み直し、協力者の承認、取消）は M8。ADR 0027）。PAR の受け口と、操作ごとの承認の公開鍵（M7。ADR 0025、ADR 0026） | 利用者の端末、企業 | パスキー（UV 付き）、private_key_jwt（ES256） |
+| idp | OIDC（discovery、jwks、認可、トークン）。パスキーの登録とログイン。step-up。PWA（別名の一覧、パスキーの管理、協力者、受信箱、回復、メールアドレスの登録と変更）。承認系の画面（承認用のオリジン。承認待ちの一覧と、承認と拒否は M6。ADR 0023。窓口での承認と、窓口の作成の項目の取消は M7。ADR 0026。回復と協力者の画面と API（回復コードの作成、協力者の招待・受け入れ・確定・削除、新しい端末での回復の開始と読み直し、協力者の承認、取消）は M8。ADR 0027）。PAR の受け口と、操作ごとの承認の公開鍵（M7。ADR 0025、ADR 0026）。初回紐付けの承認と、項目の取消、紐付けの承認の公開鍵（M9。ADR 0028）。高リスクの操作の承認と、その公開鍵（M9。ADR 0030） | 利用者の端末、企業 | パスキー（UV 付き）、private_key_jwt（ES256） |
 | relay | SMTP の受信（別名あてと、返信用のアドレスあて） | 企業の送信サーバー、利用者のメール事業者 | 送信元ロック、DMARC の整合 |
-| company-api | 企業向け API（`POST /token`、`POST /v1/aliases/rotate`、`POST /v1/events/verification`、`GET /jwks`。ADR 0022。窓口の `POST /v1/desk/change-notices`、`/v1/desk/execution-results`、`/v1/desk/cancellation-results`、`/v1/desk/cancellation-status`。scope `desk`。ADR 0026） | 企業 | private_key_jwt（ES256）の client_credentials で得た、テナントに結び付いた JWT（ES256） |
+| company-api | 企業向け API（`POST /token`、`POST /v1/aliases/rotate`、`POST /v1/events/verification`、`GET /jwks`。ADR 0022。窓口の `POST /v1/desk/change-notices`、`/v1/desk/execution-results`、`/v1/desk/cancellation-results`、`/v1/desk/cancellation-status`。scope `desk`。ADR 0026。初回紐付けの `POST /v1/initial-link/prepare`、`/v1/initial-link/proofs`、`/v1/initial-link/cancel-requests`、`/v1/initial-link/results`。scope `initial_link`。ADR 0028） | 企業 | private_key_jwt（ES256）の client_credentials で得た、テナントに結び付いた JWT（ES256） |
 | sender | なし（割符の内部のサービスからだけ呼ばれる） | — | — |
 | keysvc | なし（割符の内部のサービスからだけ呼ばれる） | — | サービスごとの資格情報 |
 | rp-kit | なし（ライブラリ） | — | — |
