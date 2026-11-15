@@ -1089,6 +1089,92 @@
     document.getElementById('desk-company')?.focus();
   }
 
+  // ---- 承認用のオリジン：高リスクの操作の承認（DESIGN.md 2章「端末での承認（step-up）」、ADR 0030） ----
+
+  const OPERATION_DECLINE_TEXT = Object.freeze({
+    denied: '承認しませんでした。企業の画面に戻ります。',
+    unrecognized:
+      'この申請を取りやめました。心当たりがない場合は、〈企業名〉の公式窓口に、自分から連絡して、不正の疑いを申告してください。',
+  });
+
+  async function renderOperation() {
+    const uid = window.location.hash.slice(1);
+    const loaded = /^[A-Za-z0-9_-]{1,64}$/.test(uid)
+      ? await call('POST', '/api/operation/view', { uid })
+      : { status: 400, data: {} };
+    if (loaded.status !== 200) {
+      return renderDeskEnded(
+        'この確認は、期限が切れたか、すでに終わっています。企業の画面から、もう一度お試しください。',
+      );
+    }
+    const card = loaded.data;
+    const note = el('div');
+    const decline = (reason) => async () => {
+      const result = await call('POST', '/api/operation/decline', { uid, reason });
+      const text = OPERATION_DECLINE_TEXT[reason].replace('〈企業名〉', () => card.company);
+      if (result.status === 200 && typeof result.data.redirectTo === 'string') {
+        const target = result.data.redirectTo;
+        return show(
+          status(text),
+          el(
+            'button',
+            { type: 'button', onclick: () => window.location.assign(target) },
+            '企業の画面に戻る',
+          ),
+        );
+      }
+      renderDeskEnded(text);
+    };
+    const approve = async () => {
+      const result = await ceremony(
+        'authenticate',
+        '/api/operation/approve/options',
+        '/api/operation/approve/verify',
+        { uid },
+        { uid },
+      );
+      if (go(result)) return;
+      note.replaceChildren(
+        status(
+          result.status === 429
+            ? failureText(result)
+            : result.status === 409 && result.data.error === 'restricted'
+              ? '回復の後の7日間は、この操作を承認できません。'
+              : 'パスキーでの確認ができませんでした。企業の画面でログインしているアカウントの割符で、もう一度お試しください。',
+        ),
+      );
+    };
+    show(
+      el(
+        'article',
+        { className: 'approval-card', 'aria-labelledby': 'operation-company' },
+        el('h2', { id: 'operation-company', className: 'company', tabindex: '-1' }, card.company),
+        el('p', { className: 'operation' }, card.operation),
+        el(
+          'dl',
+          {},
+          ...card.lines.flatMap((line) => [el('dt', {}, line.label), el('dd', {}, line.value)]),
+        ),
+        el('p', {}, card.demoNote),
+        el('p', {}, `要求の時刻：${DATE.format(new Date(card.createdAt))}`),
+        el('p', {}, `要求の端末：${card.device}`),
+        el('p', {}, `期限：${expiryText(card.expiresAt)}`),
+        el('p', {}, card.validity),
+        fixedWarning(card.warning, { operation: card.operation }),
+        note,
+        el(
+          'div',
+          { className: 'actions equal' },
+          el('button', { type: 'button', onclick: approve }, '承認する'),
+          el('button', { type: 'button', onclick: decline('denied') }, '承認しない'),
+          el('button', { type: 'button', onclick: decline('unrecognized') }, '心当たりがない'),
+        ),
+      ),
+    );
+    // 初期フォーカスは見出し（企業名）に置き、どのボタンにも置かない（DESIGN.md 原則4）。
+    document.getElementById('operation-company')?.focus();
+  }
+
   // ---- 承認用のオリジン：初回紐付けの承認（DESIGN.md 2章「初回紐付けの承認」「初回紐付けの最終確認」、ADR 0028） ----
 
   const INITIAL_LINK_DECLINE_TEXT = Object.freeze({
@@ -1974,6 +2060,8 @@
     void renderDesk();
   } else if (root.dataset.page === 'initial-link') {
     void renderInitialLink();
+  } else if (root.dataset.page === 'operation') {
+    void renderOperation();
   } else if (root.dataset.page === 'recover') {
     renderRecover();
   } else if (root.dataset.page === 'recovery') {

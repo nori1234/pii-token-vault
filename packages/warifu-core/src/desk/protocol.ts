@@ -111,6 +111,17 @@ export const INITIAL_LINK_ACTIONS: readonly InitialLinkAction[] = Object.freeze(
 ]);
 /** 紐付けの承認の JWT の typ（ID トークンや窓口の承認と取り違えないため。O-86 の手順7）。 */
 export const INITIAL_LINK_APPROVAL_TYP = 'warifu-initial-link-approval+jwt';
+/** 高リスクの操作の RAR の型（ADR 0030 の O-112）。P0 の操作は出金先の変更だけ。 */
+export const OPERATION_DETAIL_TYPE = 'warifu_operation';
+export type OperationAction = 'payout_destination.change';
+export const OPERATION_ACTIONS: readonly OperationAction[] = Object.freeze([
+  'payout_destination.change',
+]);
+/** 高リスクの操作の承認の JWT の typ（ADR 0030 の O-114）。 */
+export const OPERATION_APPROVAL_TYP = 'warifu-operation-approval+jwt';
+/** 企業の申請ID の形（128ビット以上の乱数の base64url）。 */
+export const OPERATION_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{22,128}$/;
+
 /** 引き継ぎと、紐付けの承認の JWT の有効期間（秒。仮置き）。 */
 export const INITIAL_LINK_IDP_TIMES = Object.freeze({
   requestTtlSeconds: 300,

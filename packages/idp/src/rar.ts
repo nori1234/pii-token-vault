@@ -1,11 +1,13 @@
 // authorization_details（RFC 9396）の2つの型を見分ける（ADR 0026 の O-60、ADR 0028 の O-86）。
 // - warifu_desk：窓口の操作別承認。クライアントに許した操作（deskActions）だけ。
 // - warifu_initial_link：既存会員の初回紐付け。クライアントに許したとき（initialLink）だけ。
+// - warifu_operation：高リスクの操作（ADR 0030）。クライアントに許した操作（operationActions）だけ。
 // どちらも、配列で1件だけ。2つの型を混ぜた要求、許していない型は受け付けない。
 
 import {
   DESK_DETAIL_TYPE,
   INITIAL_LINK_DETAIL_TYPE,
+  OPERATION_DETAIL_TYPE,
 } from '@pii-token-vault/warifu-core/desk/protocol';
 import {
   type DeskDetail,
@@ -20,17 +22,25 @@ import {
   parseInitialLinkDetail,
   sameInitialLinkDetail,
 } from './initial-link.ts';
+import {
+  type OperationDetail,
+  operationDetailJson,
+  parseOperationDetail,
+  sameOperationDetail,
+} from './operation.ts';
 import type { ClientEntry } from './registry.ts';
 
 export type RequestedDetail =
   | { readonly kind: 'desk'; readonly detail: DeskDetail }
-  | { readonly kind: 'initial_link'; readonly detail: InitialLinkDetail };
+  | { readonly kind: 'initial_link'; readonly detail: InitialLinkDetail }
+  | { readonly kind: 'operation'; readonly detail: OperationDetail };
 
 /** このクライアントが送れる RAR の型。 */
 export function detailTypesOf(entry: ClientEntry): string[] {
   return [
     ...(entry.deskActions.length > 0 ? [DESK_DETAIL_TYPE] : []),
     ...(entry.initialLink ? [INITIAL_LINK_DETAIL_TYPE] : []),
+    ...(entry.operationActions.length > 0 ? [OPERATION_DETAIL_TYPE] : []),
   ];
 }
 
@@ -41,6 +51,8 @@ export function parseRequestedDetail(
 ): RequestedDetail | undefined {
   const desk = parseDeskDetail(value, entry.deskActions);
   if (desk !== undefined) return { kind: 'desk', detail: desk };
+  const operation = parseOperationDetail(value, entry.operationActions);
+  if (operation !== undefined) return { kind: 'operation', detail: operation };
   if (!entry.initialLink) return undefined;
   const initialLink = parseInitialLinkDetail(value);
   return initialLink === undefined ? undefined : { kind: 'initial_link', detail: initialLink };
@@ -53,7 +65,7 @@ export function requestedDetailFromParam(
 ): RequestedDetail | undefined {
   const desk = deskDetailFromParam(param, entry.deskActions);
   if (desk !== undefined) return { kind: 'desk', detail: desk };
-  if (!entry.initialLink || typeof param !== 'string' || param.length > 4096) return undefined;
+  if (typeof param !== 'string' || param.length > 4096) return undefined;
   let parsed: unknown;
   try {
     parsed = JSON.parse(param);
@@ -61,20 +73,26 @@ export function requestedDetailFromParam(
     return undefined;
   }
   if (!Array.isArray(parsed) || parsed.length !== 1) return undefined;
+  const operation = parseOperationDetail(parsed[0], entry.operationActions);
+  if (operation !== undefined) return { kind: 'operation', detail: operation };
+  if (!entry.initialLink) return undefined;
   const detail = parseInitialLinkDetail(parsed[0]);
   return detail === undefined ? undefined : { kind: 'initial_link', detail };
 }
 
 export function requestedDetailJson(requested: RequestedDetail): Record<string, unknown> {
-  return requested.kind === 'desk'
-    ? deskDetailJson(requested.detail)
-    : initialLinkDetailJson(requested.detail);
+  if (requested.kind === 'desk') return deskDetailJson(requested.detail);
+  if (requested.kind === 'operation') return operationDetailJson(requested.detail);
+  return initialLinkDetailJson(requested.detail);
 }
 
 export function sameRequestedDetail(a: RequestedDetail, b: RequestedDetail): boolean {
   if (a.kind === 'desk' && b.kind === 'desk') return sameDeskDetail(a.detail, b.detail);
   if (a.kind === 'initial_link' && b.kind === 'initial_link') {
     return sameInitialLinkDetail(a.detail, b.detail);
+  }
+  if (a.kind === 'operation' && b.kind === 'operation') {
+    return sameOperationDetail(a.detail, b.detail);
   }
   return false;
 }

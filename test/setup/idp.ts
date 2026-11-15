@@ -64,6 +64,8 @@ export interface ClientSpec {
   readonly deskActions?: readonly DeskAction[];
   /** 初回紐付けの申請を受け付けるか（ADR 0028）。既定は false。 */
   readonly initialLink?: boolean;
+  /** 高リスクの操作（ADR 0030）。既定は空。 */
+  readonly operationActions?: readonly 'payout_destination.change'[];
 }
 
 /** テナントを tenants 個、クライアントを clients の指定どおりに作って起動する。 */
@@ -117,6 +119,7 @@ export async function startTestIdp(
       aliasClaim: c.aliasClaim ?? 'email',
       ...(c.deskActions === undefined ? {} : { deskActions: c.deskActions }),
       ...(c.initialLink === undefined ? {} : { initialLink: c.initialLink }),
+      ...(c.operationActions === undefined ? {} : { operationActions: c.operationActions }),
     });
   }
 

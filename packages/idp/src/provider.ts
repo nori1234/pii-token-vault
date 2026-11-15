@@ -15,6 +15,7 @@ import { isUuid } from '@pii-token-vault/warifu-core';
 import {
   DESK_DETAIL_TYPE,
   INITIAL_LINK_DETAIL_TYPE,
+  OPERATION_DETAIL_TYPE,
 } from '@pii-token-vault/warifu-core/desk/protocol';
 import type { IdpKeyClient } from '@pii-token-vault/warifu-core/keys/idp';
 import type { Account, Configuration, KoaContextWithOIDC } from 'oidc-provider';
@@ -328,7 +329,7 @@ export function buildProvider(deps: ProviderDeps): Provider {
       richAuthorizationRequests: {
         enabled: true,
         types: Object.fromEntries(
-          [DESK_DETAIL_TYPE, INITIAL_LINK_DETAIL_TYPE].map((type) => [
+          [DESK_DETAIL_TYPE, INITIAL_LINK_DETAIL_TYPE, OPERATION_DETAIL_TYPE].map((type) => [
             type,
             {
               validate: async (

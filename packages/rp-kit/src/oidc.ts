@@ -16,6 +16,7 @@ import { failureOf, guardedSend, jsonOf, parseOrigin, type Send } from './transp
 export const ACR_PASSKEY = 'urn:warifu:acr:passkey';
 export const OP_APPROVAL_TYP = 'warifu-op-approval+jwt';
 export const INITIAL_LINK_APPROVAL_TYP = 'warifu-initial-link-approval+jwt';
+export const OPERATION_APPROVAL_TYP = 'warifu-operation-approval+jwt';
 /** 承認の JWT の有効期間の上限（秒）。 */
 export const APPROVAL_MAX_SECONDS = 300;
 /** 時計のずれの許容（秒）。 */
@@ -24,6 +25,22 @@ const SUB_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 export type DeskAction = 'desk.case.status.read' | 'desk.order.status.read' | 'desk.case.create';
 export type InitialLinkAction = 'initial_link.approve' | 'initial_link.finalize';
+/** 高リスクの操作（ADR 0030）。P0 は出金先の変更だけ。 */
+export type OperationAction = 'payout_destination.change';
+
+/** 出金先の変更で、利用者に見せる内容（数字だけ）。口座番号の全桁と名義は、企業のサーバーに置き、割符に渡さない。 */
+export interface PayoutDestinationContent {
+  readonly bankCode: string;
+  readonly branchCode: string;
+  readonly accountLast4: string;
+}
+
+export interface OperationApproval {
+  readonly action: OperationAction;
+  readonly requestId: string;
+  /** ミリ秒。 */
+  readonly expiresAt: number;
+}
 
 export interface WarifuClientConfig {
   /** idp のオリジン（例：https://idp.warifu.example）。issuer は `${idpOrigin}/oidc`。 */
@@ -109,6 +126,26 @@ export interface WarifuClient {
   verifyDeskApproval(login: WarifuLogin, pending: PendingAuthorization): Promise<DeskApproval>;
   /** 初回紐付けの結果を読む。最初の承認は状態だけ、最終の承認は紐付けの承認の JWT を確かめる。 */
   readInitialLink(login: WarifuLogin, pending: PendingAuthorization): Promise<InitialLinkOutcome>;
+  /**
+   * 高リスクの操作の申請（PAR。ADR 0030）。企業は、申請ID を作るときに変更の内容の全体を申請ID に結び付けて固定し、
+   * 書き換えない（RP-09）。ここに渡すのは、申請ID と、利用者に見せる内容だけ。
+   */
+  pushOperation(input: {
+    readonly action: OperationAction;
+    readonly requestId: string;
+    readonly sub: string;
+    readonly content: PayoutDestinationContent;
+  }): Promise<{ readonly url: string; readonly pending: PendingAuthorization }>;
+  /**
+   * 高リスクの操作の承認の JWT を確かめる。expected には、企業が申請ID で自社に固定した内容を渡す。割符が検出できるのは、
+   * 申請ID と表示の項目の不一致だけ。表示が同じ別の口座への差し替えは、企業が RP-09 で防ぐ。
+   * 変更の実行と、申請ID を使い済みにする更新は、企業が1つのトランザクションで確定させる。
+   */
+  verifyOperationApproval(
+    login: WarifuLogin,
+    pending: PendingAuthorization,
+    expected: { readonly requestId: string; readonly content: PayoutDestinationContent },
+  ): Promise<OperationApproval>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -135,6 +172,7 @@ export async function createWarifuClient(config: WarifuClientConfig): Promise<Wa
   const idTokenKeys = jwksFetcher(send, `${issuer}/jwks`, nowMs);
   const opApprovalKeys = jwksFetcher(send, `${origin}/op-approval/jwks`, nowMs);
   const initialLinkKeys = jwksFetcher(send, `${origin}/initial-link/jwks`, nowMs);
+  const operationKeys = jwksFetcher(send, `${origin}/operation-approval/jwks`, nowMs);
 
   async function clientAssertion(): Promise<string> {
     const iat = Math.floor(nowMs() / 1000);
@@ -438,6 +476,65 @@ export async function createWarifuClient(config: WarifuClientConfig): Promise<Wa
       return {
         stage: 'finalize',
         initialLinkId: String(granted.identifier),
+        expiresAt: payload.exp * 1000,
+      };
+    },
+
+    async pushOperation(input) {
+      const { bankCode, branchCode, accountLast4 } = input.content;
+      if (
+        !SUB_PATTERN.test(input.sub) ||
+        !/^[A-Za-z0-9_-]{22,128}$/.test(input.requestId) ||
+        !/^\d{4}$/.test(bankCode) ||
+        !/^\d{3}$/.test(branchCode) ||
+        !/^\d{4}$/.test(accountLast4)
+      ) {
+        throw new RpKitError('invalid_config');
+      }
+      return push({
+        type: 'warifu_operation',
+        actions: [input.action],
+        identifier: input.requestId,
+        subject: input.sub,
+        content: { bank_code: bankCode, branch_code: branchCode, account_last4: accountLast4 },
+      });
+    },
+
+    async verifyOperationApproval(login, pending, expected) {
+      const granted = grantedDetail(login, pending);
+      if (granted.type !== 'warifu_operation' || granted.state !== undefined) {
+        throw new RpKitError('verification_failed');
+      }
+      const content = {
+        bank_code: expected.content.bankCode,
+        branch_code: expected.content.branchCode,
+        account_last4: expected.content.accountLast4,
+      };
+      // 申請と、企業が固定した内容が同じか（PAR で送ったものと、照らす相手を取り違えていないか）。
+      if (
+        granted.identifier !== expected.requestId ||
+        JSON.stringify(granted.content) !== JSON.stringify(content)
+      ) {
+        throw new RpKitError('verification_failed');
+      }
+      const payload = await verifyApproval(
+        granted.approval,
+        OPERATION_APPROVAL_TYP,
+        operationKeys,
+        login,
+      );
+      const [action] = granted.actions as string[];
+      if (
+        payload.purpose !== 'operation' ||
+        payload.action !== action ||
+        payload.request_id !== expected.requestId ||
+        JSON.stringify(payload.content) !== JSON.stringify(content)
+      ) {
+        throw new RpKitError('verification_failed');
+      }
+      return {
+        action: action as OperationAction,
+        requestId: expected.requestId,
         expiresAt: payload.exp * 1000,
       };
     },

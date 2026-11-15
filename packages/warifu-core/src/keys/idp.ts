@@ -24,9 +24,17 @@ const MAC_PURPOSES: readonly IdpMacPurpose[] = [
   'recovery_code',
 ];
 
-/** id_token：ID トークン。op_approval：操作ごとの承認（ADR 0026）。initial_link：初回紐付けの承認（ADR 0028）。 */
-export type IdpSigningKeyId = 'id_token' | 'op_approval' | 'initial_link';
-const SIGNING_KEY_IDS: readonly IdpSigningKeyId[] = ['id_token', 'op_approval', 'initial_link'];
+/**
+ * id_token：ID トークン。op_approval：窓口の操作ごとの承認（ADR 0026）。initial_link：初回紐付けの承認（ADR 0028）。
+ * operation_approval：高リスクの操作の承認（ADR 0030）。
+ */
+export type IdpSigningKeyId = 'id_token' | 'op_approval' | 'initial_link' | 'operation_approval';
+const SIGNING_KEY_IDS: readonly IdpSigningKeyId[] = [
+  'id_token',
+  'op_approval',
+  'initial_link',
+  'operation_approval',
+];
 
 export interface IdpKeyClient {
   encryptContact(input: {

@@ -15,6 +15,7 @@ import { deriveSub } from '../subject.ts';
 import type { RouteContext } from './context.ts';
 import { startDeskHandoff } from './desk.ts';
 import { startInitialLinkHandoff } from './initial-link.ts';
+import { startOperationHandoff } from './operation.ts';
 
 const UID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -84,9 +85,13 @@ export function registerInteractionRoutes(ctx: RouteContext): void {
         tenantId: found.tenant.tenantId as TenantId,
         clientId: found.entry.clientId,
       };
-      return requested.kind === 'desk'
-        ? startDeskHandoff(ctx, request, reply, { ...input, detail: requested.detail })
-        : startInitialLinkHandoff(ctx, request, reply, { ...input, detail: requested.detail });
+      if (requested.kind === 'desk') {
+        return startDeskHandoff(ctx, request, reply, { ...input, detail: requested.detail });
+      }
+      if (requested.kind === 'operation') {
+        return startOperationHandoff(ctx, request, reply, { ...input, detail: requested.detail });
+      }
+      return startInitialLinkHandoff(ctx, request, reply, { ...input, detail: requested.detail });
     }
     const prompt = found.details.prompt.name === 'consent' ? 'consent' : 'login';
     return ctx.sendHtml(request, reply, (nonce) =>

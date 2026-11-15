@@ -85,6 +85,20 @@ export const INITIAL_LINK_CANCEL_REQUESTED = defineAuditEvent('idp.initial_link.
   tenant_id: 'uuid',
 });
 
+// 高リスクの操作の step-up（ADR 0030）。申請ID と内容は入れない。
+
+/** 高リスクの操作を、利用者がパスキー（UV）で承認した（利用者の範囲）。 */
+export const OPERATION_APPROVED = defineAuditEvent('idp.operation.approved', {
+  tenant_id: 'uuid',
+  action: { enum: ['payout_destination_change'] },
+});
+
+/** 高リスクの操作を承認しなかった（テナントの範囲）。 */
+export const OPERATION_DECLINED = defineAuditEvent('idp.operation.declined', {
+  tenant_id: 'uuid',
+  reason: { enum: ['denied', 'unrecognized'] },
+});
+
 // 回復（ADR 0027 の O-85）。どれも持ち主の範囲で残す。回復コード、結び付け、表示名は入れない。
 
 /** 回復コードを作った（reissued は作り直し）。 */

@@ -78,7 +78,8 @@ export const MAX_MAC_KEY_VERSIONS = 3;
  * 署名の鍵。id_token は ES256。dkim は relay の DKIM と ARC の署名の鍵（RSA 2048、rsa-sha256。不変条件9の
  * プロトコルの例外。ADR 0021）。tenant_jwt（企業向け API のアクセストークン）と set（企業に送る SET）は
  * company-api の ES256 の鍵（ADR 0022）。op_approval は idp の操作ごとの承認の ES256 の鍵（ADR 0026）。
- * initial_link は idp の初回紐付けの承認の ES256 の鍵（ADR 0028 の O-86）。op_approval とは分ける。
+ * initial_link は idp の初回紐付けの承認の ES256 の鍵（ADR 0028 の O-86）。operation_approval は idp の高リスクの操作の
+ * 承認の ES256 の鍵（ADR 0030 の O-114）。どれも op_approval とは分ける。
  */
 export type SigningKeyId =
   | 'id_token'
@@ -86,7 +87,8 @@ export type SigningKeyId =
   | 'tenant_jwt'
   | 'set'
   | 'op_approval'
-  | 'initial_link';
+  | 'initial_link'
+  | 'operation_approval';
 export const SIGNING_KEY_IDS: readonly SigningKeyId[] = Object.freeze([
   'id_token',
   'dkim',
@@ -94,6 +96,7 @@ export const SIGNING_KEY_IDS: readonly SigningKeyId[] = Object.freeze([
   'set',
   'op_approval',
   'initial_link',
+  'operation_approval',
 ]);
 
 /** RSA 2048 の署名の長さ（バイト）。 */

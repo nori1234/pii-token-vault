@@ -133,6 +133,7 @@ export function createKeyring(): Keyring {
     set: es256(),
     op_approval: es256(),
     initial_link: es256(),
+    operation_approval: es256(),
   });
 
   const macVersions = (purpose: VersionedMacPurpose): VersionedMacKey[] => {

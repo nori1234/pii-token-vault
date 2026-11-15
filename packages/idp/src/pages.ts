@@ -73,6 +73,7 @@ export interface PageInput {
     | 'approval'
     | 'desk'
     | 'initial-link'
+    | 'operation'
     | 'recover'
     | 'recovery'
     | 'helper';
@@ -91,6 +92,7 @@ const TITLES: Readonly<Record<PageInput['page'], string>> = Object.freeze({
   approval: '割符：確認待ち',
   desk: '割符：窓口での確認',
   'initial-link': '割符：旧会員の紐付け',
+  operation: '割符：操作の確認',
   recover: '割符：回復',
   recovery: '割符：回復の設定',
   helper: '割符：協力者',
