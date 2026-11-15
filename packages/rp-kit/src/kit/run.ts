@@ -9,7 +9,7 @@ export interface RpTestHooks {
   /**
    * 模擬 OP の固定の利用者で、RP のふだんのログインを1回通し、RP の内部のアカウントの参照（不透明な文字列）を返す。
    * RP は、SDK の authorize() で作った URL を complete に渡して、戻りの URL を受け取り、finish() から先の自分の処理を行う。
-   * ログインを断ったら空文字を返す。
+   * ログインを断ったら空文字を返す。例外を投げたときは「検査できなかった」になる。
    */
   signIn(persona: MockPersona, complete: (authorizationUrl: string) => string): Promise<string>;
   /** 初回紐付けを済ませた会員で、旧ログイン（ENT-02）を試す。RP に旧ログインがなければ absent。 */
@@ -23,22 +23,25 @@ export interface RpTestHooks {
 }
 
 export async function collect(hooks: RpTestHooks, mockOp: MockOp): Promise<Observations> {
-  const signIn = async (persona: MockPersona) => {
+  // フックの例外は、値を残さずに undefined にする（judge が「検査できなかった」とする。合格にはしない）。
+  const attempt = async <T>(call: () => Promise<T>): Promise<T | undefined> => {
     try {
-      return await hooks.signIn(persona, (url) => mockOp.complete(url, persona));
+      return await call();
     } catch {
-      return '';
+      return undefined;
     }
   };
+  const signIn = (persona: MockPersona) =>
+    attempt(() => hooks.signIn(persona, (url) => mockOp.complete(url, persona)));
   const alpha = await signIn('alpha');
   const beta = await signIn('beta');
   return {
     sameAliasAccounts: [alpha, beta],
-    legacyLogin: await hooks.legacyLogin(),
-    legacyReset: await hooks.legacyReset(),
-    linkAttack: await hooks.linkAttack(),
-    routes: await hooks.routes(),
-  };
+    legacyLogin: await attempt(() => hooks.legacyLogin()),
+    legacyReset: await attempt(() => hooks.legacyReset()),
+    linkAttack: await attempt(() => hooks.linkAttack()),
+    routes: await attempt(() => hooks.routes()),
+  } as Observations;
 }
 
 /** 観測を集めて判定する。 */

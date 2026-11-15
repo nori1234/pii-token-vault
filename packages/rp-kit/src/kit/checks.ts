@@ -49,67 +49,150 @@ export type CheckId =
 
 export interface CheckResult {
   readonly check: CheckId;
-  /** relaxed は、移行中の企業が閉じたと報告していない入り口のために緩めた（不合格にしない）。 */
-  readonly status: 'pass' | 'fail' | 'relaxed';
+  /**
+   * - pass：観測が要件どおり。
+   * - fail：要件に反する観測、または禁止した機能があるとの申告。
+   * - relaxed：移行中の企業が閉じたと報告していない入り口のために緩めた（不合格にしない）。
+   * - review：要確認。申告の印はないが、ルートの名前が禁止した機能に似ている。名前だけでは違反と断定しない。
+   * - unverified：検査できなかった（フックが未実装、例外、想定外の値を返した）。合格にしない。
+   */
+  readonly status: 'pass' | 'fail' | 'relaxed' | 'review' | 'unverified';
   readonly requirements: readonly string[];
 }
 
 export interface KitReport {
+  /**
+   * fail（不合格がある）、incomplete（不合格はないが、検査できなかった項目がある）、review（要確認の項目だけがある）、
+   * pass の順に決める。
+   */
+  readonly outcome: 'fail' | 'incomplete' | 'review' | 'pass';
+  /** 不合格も、検査できなかった項目もない（要確認の項目は、企業が確かめる）。 */
   readonly passed: boolean;
   readonly results: readonly CheckResult[];
 }
 
-/** 申告の印がなくても、パスの名前から怪しいルートを拾う（申告の書き漏らしに備える。拾ったら不合格にする）。 */
+/** 申告の印がないときに、パスの名前から「要確認」として拾う（申告の書き漏らしに備える。不合格にはしない）。 */
 const SUSPICIOUS: Readonly<Record<'sub_rewrite' | 'guest_lookup', RegExp>> = Object.freeze({
   sub_rewrite:
     /(^|[/_-])(rebind|relink|re-?link|merge|reassign|change-?sub|set-?sub|subject)([/_-]|$)/i,
   guest_lookup: /(^|[/_-])(guest|lookup|by-?(email|phone|tel|name|order|reservation))([/_-]|$)/i,
 });
 
+const LEGACY_OUTCOMES: ReadonlySet<unknown> = new Set(['accepted', 'refused', 'absent']);
+const LINK_OUTCOMES: ReadonlySet<unknown> = new Set(['linked', 'refused']);
+const ROUTE_TAGS: ReadonlySet<unknown> = new Set([
+  'sub_rewrite',
+  'account_merge',
+  'guest_lookup',
+  'other',
+]);
+
+/** 1つの検査の観測の読み方。invalid は、検査できなかった（フックの応答が想定外）。 */
+type Verdict = 'ok' | 'bad' | 'suspect' | 'invalid';
+
 function relaxedFor(participation: KitParticipation, entry: EntryId): boolean {
   return participation.mode === 'migrating' && !participation.reportedClosed.includes(entry);
 }
 
-function routesTagged(
-  routes: readonly DeclaredRoute[],
-  tag: 'sub_rewrite' | 'guest_lookup',
-): boolean {
-  return routes.some(
-    (route) =>
-      route.tags.includes(tag) ||
-      (tag === 'sub_rewrite' && route.tags.includes('account_merge')) ||
-      SUSPICIOUS[tag].test(route.path),
+function isAccountRef(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 256;
+}
+
+/** 申告されたルートが、決めた形か（実行時にも確かめる。型だけに頼らない）。 */
+function validRoutes(value: unknown): value is readonly DeclaredRoute[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (route) =>
+        typeof route === 'object' &&
+        route !== null &&
+        typeof route.method === 'string' &&
+        typeof route.path === 'string' &&
+        route.path.startsWith('/') &&
+        Array.isArray(route.tags) &&
+        route.tags.length > 0 &&
+        route.tags.every((tag: unknown) => ROUTE_TAGS.has(tag)),
+    )
   );
 }
 
-/** 観測から合否を決める。 */
+function routeVerdict(routes: unknown, tag: 'sub_rewrite' | 'guest_lookup'): Verdict {
+  if (!validRoutes(routes)) return 'invalid';
+  const declared = routes.some(
+    (route) =>
+      route.tags.includes(tag) || (tag === 'sub_rewrite' && route.tags.includes('account_merge')),
+  );
+  if (declared) return 'bad';
+  return routes.some((route) => SUSPICIOUS[tag].test(route.path)) ? 'suspect' : 'ok';
+}
+
+function outcomeVerdict(value: unknown, allowed: ReadonlySet<unknown>, bad: string): Verdict {
+  if (!allowed.has(value)) return 'invalid';
+  return value === bad ? 'bad' : 'ok';
+}
+
+/** 観測から合否を決める。観測の値は、フックから来たものとして、実行時にも形を確かめる。 */
 export function judge(observations: Observations, participation: KitParticipation): KitReport {
   const results: CheckResult[] = [];
   const add = (
     check: CheckId,
-    failed: boolean,
+    verdict: Verdict,
     requirements: readonly string[],
     entry?: EntryId,
   ) => {
-    const status: CheckResult['status'] = !failed
-      ? 'pass'
-      : entry !== undefined && relaxedFor(participation, entry)
-        ? 'relaxed'
-        : 'fail';
+    const relaxed = entry !== undefined && relaxedFor(participation, entry);
+    const status: CheckResult['status'] =
+      verdict === 'ok'
+        ? 'pass'
+        : verdict === 'invalid'
+          ? 'unverified'
+          : relaxed
+            ? 'relaxed'
+            : verdict === 'suspect'
+              ? 'review'
+              : 'fail';
     results.push({ check, status, requirements });
   };
-  const [alpha, beta] = observations.sameAliasAccounts;
+  const accounts = (observations as { sameAliasAccounts?: unknown }).sameAliasAccounts;
+  const [alpha, beta] = Array.isArray(accounts) ? accounts : [];
   // 同じ別名で sub の違う2人は、移行中も緩めない（RP-05）。2人目のログインを断る（別名がすでにある、など）のも不合格。
-  add('same_alias_two_subs', alpha === beta || alpha === '' || beta === '', [
-    'RP-01',
-    'RP-03',
-    'RP-05',
-  ]);
-  add('legacy_login', observations.legacyLogin === 'accepted', ['RP-04', 'RP-31'], 'ENT-02');
-  add('legacy_reset', observations.legacyReset === 'accepted', ['RP-30', 'RP-31'], 'ENT-01');
-  add('link_attack', observations.linkAttack === 'linked', ['RP-32'], 'ENT-01');
+  add(
+    'same_alias_two_subs',
+    !Array.isArray(accounts) || accounts.length !== 2 || !isAccountRef(alpha) || !isAccountRef(beta)
+      ? 'invalid'
+      : alpha === beta || alpha === '' || beta === ''
+        ? 'bad'
+        : 'ok',
+    ['RP-01', 'RP-03', 'RP-05'],
+  );
+  add(
+    'legacy_login',
+    outcomeVerdict(observations.legacyLogin, LEGACY_OUTCOMES, 'accepted'),
+    ['RP-04', 'RP-31'],
+    'ENT-02',
+  );
+  add(
+    'legacy_reset',
+    outcomeVerdict(observations.legacyReset, LEGACY_OUTCOMES, 'accepted'),
+    ['RP-30', 'RP-31'],
+    'ENT-01',
+  );
+  add(
+    'link_attack',
+    outcomeVerdict(observations.linkAttack, LINK_OUTCOMES, 'linked'),
+    ['RP-32'],
+    'ENT-01',
+  );
   // sub の書き換えは、移行中も緩めない（RP-33）。
-  add('sub_rewrite', routesTagged(observations.routes, 'sub_rewrite'), ['RP-33']);
-  add('guest_lookup', routesTagged(observations.routes, 'guest_lookup'), ['RP-40'], 'ENT-03');
-  return { passed: results.every((r) => r.status !== 'fail'), results };
+  add('sub_rewrite', routeVerdict(observations.routes, 'sub_rewrite'), ['RP-33']);
+  add('guest_lookup', routeVerdict(observations.routes, 'guest_lookup'), ['RP-40'], 'ENT-03');
+  const has = (status: CheckResult['status']) => results.some((r) => r.status === status);
+  const outcome: KitReport['outcome'] = has('fail')
+    ? 'fail'
+    : has('unverified')
+      ? 'incomplete'
+      : has('review')
+        ? 'review'
+        : 'pass';
+  return { outcome, passed: outcome === 'pass' || outcome === 'review', results };
 }

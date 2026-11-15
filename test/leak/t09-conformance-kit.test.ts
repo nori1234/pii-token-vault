@@ -59,15 +59,6 @@ describe('テスト9：適合テストキット（ADR 0029）', () => {
         { routes: [{ method: 'POST', path: '/admin/accounts', tags: ['account_merge'] }] },
         'sub_rewrite',
       ],
-      // 申告の印がなくても、パスの名前で拾う。
-      [
-        { routes: [{ method: 'POST', path: '/admin/members/rebind', tags: ['other'] }] },
-        'sub_rewrite',
-      ],
-      [
-        { routes: [{ method: 'GET', path: '/reservations/by-phone', tags: ['other'] }] },
-        'guest_lookup',
-      ],
       [
         { routes: [{ method: 'GET', path: '/orders/guest', tags: ['guest_lookup'] }] },
         'guest_lookup',
@@ -131,10 +122,10 @@ describe('テスト9：適合テストキット（ADR 0029）', () => {
     }
   });
 
-  it('観測を集める部分：固定の値を返すフックの応答を、そのまま観測に写す。ログインの例外は空文字にする', async () => {
+  it('観測を集める部分：固定の値を返すフックの応答を、そのまま観測に写す。ログインの例外は検査できなかったことにする', async () => {
     // 攻撃者が持っている情報：なし（集める部分の写し方を、固定の応答で確かめる）
     // 試す経路：どの利用者にも同じ参照を返すフック、2人目で例外を投げるフックを collect に渡す
-    // 期待する結果：観測は、フックの値と同じ。例外は空文字になり、判定で fail
+    // 期待する結果：観測は、フックの値と同じ。例外は undefined になり、判定で unverified（合格にしない）
     // plan 11章：テスト9
     const mockOp = await createMockOp({ clientId: CLIENT_ID, redirectUri: REDIRECT });
     const fixed = (signIn: RpTestHooks['signIn']): RpTestHooks => ({
@@ -164,8 +155,13 @@ describe('テスト9：適合テストキット（ADR 0029）', () => {
       }),
       mockOp,
     );
-    expect(second.sameAliasAccounts).toEqual(['fixed-account', '']);
-    expect(judge(second, FULL).passed).toBe(false);
+    expect(second.sameAliasAccounts).toEqual(['fixed-account', undefined]);
+    const report = judge(second, FULL);
+    // このフックは旧ログインを accepted と返すので、全体は fail。2人目のログインの例外は unverified。
+    expect(report.outcome).toBe('fail');
+    expect(report.results.find((r) => r.check === 'same_alias_two_subs')?.status).toBe(
+      'unverified',
+    );
   });
 
   it('SDK と模擬 OP：(iss, sub) で内部のアカウントを決める RP は、同じ別名で sub の違う2人を別のアカウントにして合格', async () => {
@@ -244,5 +240,50 @@ describe('テスト9：適合テストキット（ADR 0029）', () => {
         mockOp.send({ method: 'GET', url: 'https://evil.example/oidc/jwks', headers: {} }),
       ),
     ).toBe('forbidden_destination');
+  });
+
+  it('名前だけが似たルートは要確認で、禁止した機能の申告は不合格。フックの想定外の応答は合格にしない', () => {
+    // 攻撃者が持っている情報：なし（判定の分け方を、作り物の観測で確かめる）
+    // 試す経路：印のない、名前だけが似たルートを申告する。フックが undefined、知らない値、形の違うルートを返す
+    // 期待する結果：名前だけなら review（合否は変えない）。印付きの申告は fail。想定外の応答は unverified で、
+    //               報告は incomplete（合格にしない）
+    // plan 11章：テスト9
+    for (const path of [
+      '/admin/members/rebind',
+      '/reservations/by-phone',
+      '/api/subject/profile',
+    ]) {
+      const report = judge({ ...CLEAN, routes: [{ method: 'GET', path, tags: ['other'] }] }, FULL);
+      expect(report.outcome).toBe('review');
+      expect(report.passed).toBe(true);
+      expect(report.results.some((r) => r.status === 'review')).toBe(true);
+    }
+    // 移行中で ENT-03 が開いているときの、名前だけのゲスト照会は relaxed。
+    const migrating: KitParticipation = { mode: 'migrating', reportedClosed: [] };
+    expect(
+      statusOf(
+        { ...CLEAN, routes: [{ method: 'GET', path: '/orders/guest', tags: ['other'] }] },
+        migrating,
+      ).guest_lookup,
+    ).toBe('relaxed');
+    const odd: [Record<string, unknown>, string][] = [
+      [{ legacyLogin: undefined }, 'legacy_login'],
+      [{ legacyReset: 'ok' }, 'legacy_reset'],
+      [{ linkAttack: false }, 'link_attack'],
+      [{ routes: undefined }, 'sub_rewrite'],
+      [{ routes: [{ method: 'GET', path: 'no-slash', tags: ['other'] }] }, 'guest_lookup'],
+      [{ routes: [{ method: 'GET', path: '/x', tags: [] }] }, 'sub_rewrite'],
+      [{ routes: [{ method: 'GET', path: '/x', tags: ['unknown'] }] }, 'sub_rewrite'],
+      [{ sameAliasAccounts: ['account-1'] }, 'same_alias_two_subs'],
+      [{ sameAliasAccounts: [1, 2] }, 'same_alias_two_subs'],
+    ];
+    for (const [change, check] of odd) {
+      for (const participation of [FULL, migrating]) {
+        const report = judge({ ...CLEAN, ...change } as unknown as Observations, participation);
+        expect(report.results.find((r) => r.check === check)?.status).toBe('unverified');
+        expect(report.passed).toBe(false);
+        expect(report.outcome).toBe('incomplete');
+      }
+    }
   });
 });
