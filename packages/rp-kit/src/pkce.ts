@@ -15,8 +15,12 @@ export interface Pkce {
   readonly method: 'S256';
 }
 
+/** S256 のチャレンジ（verifier の SHA-256 の base64url）。模擬 OP の検査でも使う。 */
+export function s256(verifier: string): string {
+  return createHash('sha256').update(verifier, 'ascii').digest('base64url');
+}
+
 export function newPkce(): Pkce {
   const verifier = randomToken(32);
-  const challenge = createHash('sha256').update(verifier, 'ascii').digest('base64url');
-  return { verifier, challenge, method: 'S256' };
+  return { verifier, challenge: s256(verifier), method: 'S256' };
 }
