@@ -54,6 +54,8 @@ export interface VerifiedSet {
   readonly jti: string;
   /** 秒。 */
   readonly iat: number;
+  /** この企業の sub（回復の SET の sub_id。ほかの SET にはない）。 */
+  readonly subId: string | null;
   readonly events: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
@@ -251,7 +253,17 @@ export async function createCompanyApiClient(config: CompanyApiConfig): Promise<
             // SET は送り直しで古い iat のまま届く。古さの上限は企業の記録（jti）で扱う。
             maxTokenAge: '7d',
           });
-          const { jti, iat, events } = payload as Record<string, unknown>;
+          const { jti, iat, events, sub_id: subIdClaim } = payload as Record<string, unknown>;
+          const subject =
+            typeof subIdClaim === 'object' && subIdClaim !== null
+              ? (subIdClaim as { format?: unknown; id?: unknown })
+              : undefined;
+          if (
+            subIdClaim !== undefined &&
+            (subject?.format !== 'opaque' || typeof subject.id !== 'string')
+          ) {
+            throw new RpKitError('verification_failed');
+          }
           if (
             typeof jti !== 'string' ||
             typeof iat !== 'number' ||
@@ -264,7 +276,12 @@ export async function createCompanyApiClient(config: CompanyApiConfig): Promise<
           ) {
             throw new RpKitError('verification_failed');
           }
-          return { jti, iat, events: events as VerifiedSet['events'] };
+          return {
+            jti,
+            iat,
+            subId: typeof subject?.id === 'string' ? subject.id : null,
+            events: events as VerifiedSet['events'],
+          };
         } catch (error) {
           if (error instanceof RpKitError) throw error;
           if (!refresh && (error as { code?: unknown }).code === 'ERR_JWKS_NO_MATCHING_KEY')

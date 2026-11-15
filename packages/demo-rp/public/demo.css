@@ -1,0 +1,47 @@
+/* demo-rp の見た目。外部のフォントや CDN は使わない。 */
+body {
+  font-family: system-ui, sans-serif;
+  line-height: 1.7;
+  margin: 0 auto;
+  max-width: 40rem;
+  padding: 1rem;
+}
+header {
+  border-bottom: 1px solid #999;
+  margin-bottom: 1rem;
+}
+.company {
+  font-size: 1.25rem;
+  font-weight: bold;
+  margin: 0;
+}
+.demo-note {
+  font-size: 0.85rem;
+  margin: 0.25rem 0;
+}
+.notice {
+  border: 1px solid #555;
+  padding: 0.5rem;
+}
+.warning,
+.hold {
+  border-left: 4px solid #8a4b00;
+  background: #fff4e0;
+  padding: 0.5rem;
+}
+label {
+  display: block;
+  margin: 0.5rem 0;
+}
+input,
+select,
+button {
+  font: inherit;
+  padding: 0.3rem 0.5rem;
+}
+button {
+  min-height: 2.75rem;
+}
+dt {
+  font-weight: bold;
+}

@@ -59,6 +59,7 @@ export async function startDeskWorld(spec: {
     readonly deskActions?: readonly DeskAction[];
     readonly initialLink?: boolean;
     readonly operationActions?: readonly 'payout_destination.change'[];
+    readonly redirectUri?: string;
   }[];
   readonly now?: () => Date;
   /** company-api のテナントに、初回紐付けの移行プロファイルと scope initial_link を付ける（ADR 0028）。 */
@@ -95,6 +96,7 @@ export async function startDeskWorld(spec: {
         deskActions: c.deskActions ?? ALL_DESK_ACTIONS,
         ...(c.initialLink === undefined ? {} : { initialLink: c.initialLink }),
         ...(c.operationActions === undefined ? {} : { operationActions: c.operationActions }),
+        ...(c.redirectUri === undefined ? {} : { redirectUri: c.redirectUri }),
       })),
     },
     spec.now,

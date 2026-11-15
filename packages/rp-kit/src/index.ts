@@ -31,4 +31,6 @@ export {
   type WarifuClientConfig,
   type WarifuLogin,
 } from './oidc.ts';
+/** 企業の申請ID やセッションの ID に使う乱数（既定は256ビットの base64url）。 */
+export { randomToken as newRandomId } from './pkce.ts';
 export type { HttpRequest, HttpResponse, Send } from './transport.ts';

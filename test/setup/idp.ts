@@ -66,6 +66,8 @@ export interface ClientSpec {
   readonly initialLink?: boolean;
   /** 高リスクの操作（ADR 0030）。既定は空。 */
   readonly operationActions?: readonly 'payout_destination.change'[];
+  /** 企業の戻り先（demo-rp を相手にするとき）。既定は、テストが読むだけの宛先。 */
+  readonly redirectUri?: string;
 }
 
 /** テナントを tenants 個、クライアントを clients の指定どおりに作って起動する。 */
@@ -99,7 +101,7 @@ export async function startTestIdp(
     const kid = `rp-key-${i}`;
     const jwk = await exportJWK(publicKey);
     const clientId = `rp-${i}-${randomBytes(3).toString('hex')}`;
-    const redirectUri = `http://127.0.0.1:65000/callback/${i}`;
+    const redirectUri = c.redirectUri ?? `http://127.0.0.1:65000/callback/${i}`;
     clients.push({
       clientId,
       tenantId: tenant.tenantId,
