@@ -20,7 +20,7 @@ import {
   stripComments,
 } from '../setup/source.ts';
 
-// node:crypto を import してよいファイルと、その名前（ADR 0013）。
+// node:crypto を import してよいファイルと、その名前（ADR 0013。rp-kit の PKCE は ADR 0029 の O-110）。
 const CRYPTO_IMPORTERS: Readonly<Record<string, readonly string[]>> = {
   'packages/keysvc/src/crypto.ts': [
     'createCipheriv',
@@ -32,13 +32,15 @@ const CRYPTO_IMPORTERS: Readonly<Record<string, readonly string[]>> = {
     'sign',
   ],
   'packages/warifu-core/src/random.ts': ['randomBytes', 'randomUUID', 'timingSafeEqual'],
+  'packages/rp-kit/src/pkce.ts': ['createHash', 'randomBytes'],
 };
 
 describe('漏えい：暗号の許可リスト（plan 11章 テスト8）', () => {
-  it('node:crypto を import するのは2つのファイルだけで、名前も一覧の中だけ', () => {
+  it('node:crypto を import するのは3つのファイルだけで、名前も一覧の中だけ', () => {
     // 攻撃者が持っている情報：なし（静的な固定。暗号の誤用（TH-38）と、依存や貢献者の変更（ATK-09）に備える）
     // 試す経路：packages/*/src の .ts の、静的・動的な import と再エクスポートを調べる
-    // 期待する結果：packages/keysvc/src/crypto.ts と packages/warifu-core/src/random.ts だけ。名前は一覧の中だけ。
+    // 期待する結果：packages/keysvc/src/crypto.ts、packages/warifu-core/src/random.ts、packages/rp-kit/src/pkce.ts だけ。
+    //               名前は一覧の中だけ。
     //               既定の import、名前空間の import、動的な import はない
     // plan 11章：テスト8
     const found: Record<string, string[]> = {};
@@ -57,6 +59,21 @@ describe('漏えい：暗号の許可リスト（plan 11章 テスト8）', () =
     for (const [file, names] of Object.entries(found)) {
       for (const name of names) expect(CRYPTO_IMPORTERS[file]).toContain(name);
     }
+  });
+
+  it('rp-kit の PKCE のファイルが使う方式は、SHA-256（S256）と乱数だけ', () => {
+    // 攻撃者が持っている情報：なし（静的な固定。不変条件9 の、PKCE の例外を広げさせない。ADR 0029 の O-110）
+    // 試す経路：packages/rp-kit/src/pkce.ts の、英数字の文字列リテラルと、createHash の呼び出しを集める
+    // 期待する結果：方式の名前は sha256 だけ。createHash の呼び出しは1つで、引数は 'sha256'
+    // plan 11章：テスト8
+    const source = read('packages/rp-kit/src/pkce.ts');
+    const ascii = stringLiterals(source).filter((s) => /^[ -~]+$/.test(s));
+    expect(new Set(ascii)).toEqual(
+      new Set(['node:crypto', 'sha256', 'ascii', 'base64url', 'S256']),
+    );
+    const code = stripComments(source);
+    expect(code.match(/createHash\(/g)).toHaveLength(1);
+    expect(code).toMatch(/createHash\('sha256'\)/);
   });
 
   it('鍵サービスの暗号のファイルに書いた方式は、許可リストのものだけ', () => {

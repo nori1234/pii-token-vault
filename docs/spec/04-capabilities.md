@@ -154,7 +154,8 @@
 | sender | 唯一の出口（CAP-21〜23） |
 | keysvc | なし |
 | warifu-core | なし |
-| rp-kit、demo-rp | 企業の側のコード。割符のエンドポイント（トークン、company-api）を呼ぶ方法と、不変条件7・lint の規則との関係は、未定（M9 で決める） |
+| rp-kit | 企業の側のコード（割符の一部ではない）。SDK は自分ではつながず、企業が渡す通信の関数で、企業が設定した割符のオリジン（idp と company-api）だけに要求を送る。応答の中の URL に自動で進まない（ADR 0029 の O-108） |
+| demo-rp | 企業の参照実装（割符の一部ではない）。設定で固定した割符のオリジンと模擬 OP にだけつなぐ。つなぐのは `src/transport.ts` の1ファイルだけで、利用者などが渡した URL にはつながず、リダイレクトに従わない（ADR 0029 の O-109） |
 
 - 割符の内部の接続（サービスから keysvc、DB、relay の内部配送 API、sender へ）は、外向きの通信に当たらない。内部の接続の認証は、keysvc はサービスごとの bearer の資格情報と Unix ドメインソケットにした（ADR 0013）。relay の内部配送 API も同じ形にした（`POST /v1/deliver` だけ。呼べるのは idp だけ。ADR 0021）。sender も同じ形にし、口を呼び出し元ごとに分けた（`/v1/webhook` は company-api、`/v1/mail` と `/v1/dns` は relay。ADR 0022）。company-api の窓口の内部 API（ソケット `company-api.sock`）も同じ形にし、呼べるのは idp だけにした（`POST /v1/desk_approve`、`/v1/desk_status`、`/v1/desk_cancel`。逆向きは作らない。ADR 0026）。
 - 内部の接続の組の一覧（CAP-27）は、各サービスを作るマイルストーンで足す。本番のネットワークの設定は、未定（P1 の AWS アダプタで決める）。

@@ -63,6 +63,7 @@ rg -n 'CIBA|ciba|login_hint|receiptCode|desk' packages/ spikes/
 
 # 観点7：sender 以外からの外向きの通信
 grep -rnE "fetch\(|https?\.(request|get)\(|net\.connect|tls\.connect|dns\.|from ['\"](undici|got|axios|node-fetch|ky|web-push)['\"]|createTransport" packages/ spikes/ | grep -v '^packages/sender/'
+# （demo-rp の src/transport.ts はヒットしてよい。宛先が設定のオリジンの完全一致だけで、redirect: 'manual' かを読む。ADR 0029）
 
 # 観点7：oidc-provider の認可要求の受け方（PAR、要求オブジェクト、POST の認可要求、入口の検査。ADR 0025）
 grep -rnE "pushedAuthorizationRequests|requestObjects|enableHttpPostMethods|richAuthorizationRequests|REJECTED_AUTHORIZATION_PARAMS" packages/ spikes/
@@ -71,7 +72,8 @@ grep -rnE "pushedAuthorizationRequests|requestObjects|enableHttpPostMethods|rich
 grep -rniE 'SECURITY DEFINER|USING \(true\)|GRANT .* ON .* TO|BYPASSRLS|DISABLE ROW LEVEL' packages/ test/ scripts/
 
 # 観点9：暗号の呼び出し（node:crypto を import してよいのは packages/keysvc/src/crypto.ts と
-# packages/warifu-core/src/random.ts だけ。t08-crypto-allowlist で固定している）
+# packages/warifu-core/src/random.ts と、PKCE のための packages/rp-kit/src/pkce.ts だけ。t08-crypto-allowlist で固定している。
+# pkce.ts で使うのは randomBytes と createHash('sha256') だけ。ADR 0029）
 grep -rnE 'createCipheriv|createDecipheriv|createHash|createHmac|createSign|generateKeyPair' packages/ spikes/
 
 # 観点7と9：lint を黙って外せる書き方（CI の「lint をすり抜ける書き方がないことを確かめる」と同じ検査に、
@@ -88,9 +90,9 @@ git ls-files -s | awk '$1 == "120000"'   # 追跡しているシンボリック�
 `npm run lint`（Biome）は、観点7と9の一部をすでに止める。対象は次のとおり。
 
 - `packages/sender` 以外での、外向きの通信のモジュール（`node:net`、`node:dns`、`node:https`、`undici` など）と `node:child_process` の import。`node:http` は、`createServer`、`Server`、`IncomingMessage`、`ServerResponse`、`STATUS_CODES` だけを許す。例外は `packages/warifu-core/src/internal/uds-client.ts` の1ファイルで、`request` だけを許す（ADR 0013）。
-- `packages/sender` 以外での、`fetch` などのグローバル。
+- `packages/sender` 以外での、`fetch` などのグローバル。例外は `packages/demo-rp/src/transport.ts` の1ファイル（設定した割符のオリジンだけにつなぎ、リダイレクトに従わない。ADR 0029）。
 - `packages/sender` も含めて、`node:module` の import（`createRequire` などで import の制限を回避させない）と、グローバルの `crypto`（Web Crypto）、`globalThis`、`global`。
-- `packages/warifu-core`・`packages/keysvc`・`spikes/` 以外での、`node:crypto` の import。
+- `packages/warifu-core`・`packages/keysvc`・`spikes/` 以外での、`node:crypto` の import。例外は `packages/rp-kit/src/pkce.ts` の1ファイル（PKCE の `randomBytes` と `createHash('sha256')` だけ。ADR 0029）。
 
 ただし、テスト（`*.test.ts`、`*.e2e.ts`）、`scripts/`、`test/`、ルートの `*.config.ts` は対象外で、`public/` の中ではグローバルの制限（`fetch` など）を外している。CI は、lint に加えて、`packages/` と `spikes/` の中（Markdown を除く）の `biome-ignore` と `getBuiltinModule`（`process.getBuiltinModule` を含む）と、ルートの `biome.json` 以外の Biome の設定ファイル（入れ子のものと、ルートの `biome.jsonc`、`.biome.json`、`.biome.jsonc`）を拒否する。本体のコード（`packages/` と `spikes/` の、テスト以外のファイル）から、テスト、`scripts/`、`test/`、ルートの `*.config.ts` への import（Node と同じ方法でたどった import のグラフで確かめる）と、引用符で囲んだ文字列リテラル1つ以外を渡す動的な import（括弧の中の型の構文を含む）、ファイルと `node:` の組み込み以外を読み込む import（`data:` など）、CommonJS として読み込まれるファイル、追跡したシンボリックリンクも拒否する。コードの文字列の実行（`Function`、`node:vm`）と、別のファイルの起動（`node:worker_threads`）は、この検査では見ないので、上の検索で点検する。lint と CI が通っても、次の4つは点検する。
 

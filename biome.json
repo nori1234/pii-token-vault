@@ -288,6 +288,93 @@
       }
     },
     {
+      "includes": ["packages/rp-kit/src/pkce.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "node:dns": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:dns/promises": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "dns": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "dns/promises": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:net": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "net": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:tls": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "tls": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:http": {
+                    "message": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。node:http は、サーバーを立てるための名前（createServer など）だけを許す。",
+                    "allowImportNames": [
+                      "createServer",
+                      "Server",
+                      "IncomingMessage",
+                      "ServerResponse",
+                      "STATUS_CODES"
+                    ]
+                  },
+                  "http": {
+                    "message": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。node:http は、サーバーを立てるための名前（createServer など）だけを許す。",
+                    "allowImportNames": [
+                      "createServer",
+                      "Server",
+                      "IncomingMessage",
+                      "ServerResponse",
+                      "STATUS_CODES"
+                    ]
+                  },
+                  "node:https": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "https": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:http2": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "http2": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:dgram": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "dgram": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:child_process": "不変条件7：外部のコマンド（curl など）で外へつながせない。外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "child_process": "不変条件7：外部のコマンド（curl など）で外へつながせない。外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node:module": "不変条件7、9：createRequire などで、import の制限（外向きの通信と node:crypto）を回避させない。",
+                  "module": "不変条件7、9：createRequire などで、import の制限（外向きの通信と node:crypto）を回避させない。",
+                  "undici": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "axios": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "node-fetch": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "got": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "ky": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "web-push": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "nodemailer": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "jose": {
+                    "message": "不変条件7：鍵を外から取りに行く createRemoteJWKSet などは使わない。企業の鍵は登録時の jwks で受け取る（ADR 0022）。",
+                    "importNames": ["createRemoteJWKSet", "customFetch", "jwksCache"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/demo-rp/src/transport.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "XMLHttpRequest": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "WebSocket": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "EventSource": "不変条件7：外向きの通信は送信サービス（packages/sender）だけが行う。",
+                  "crypto": "不変条件9：暗号は packages/warifu-core と packages/keysvc を通して使う（許可リストで固定するため）。グローバルの crypto（Web Crypto）も使わない。",
+                  "globalThis": "不変条件7、9：globalThis と global を通して、fetch や crypto などの制限を回避させない。",
+                  "global": "不変条件7、9：globalThis と global を通して、fetch や crypto などの制限を回避させない。"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["spikes/**"],
       "linter": {
         "rules": {

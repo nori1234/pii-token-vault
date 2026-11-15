@@ -245,7 +245,7 @@
   - JWS（ID トークン、SET、操作ごとの承認、テナントの JWT、企業の client assertion の検証）：ES256 だけ。oidc-provider の設定で固定する
   - WebAuthn：ES256、EdDSA（曲線は Ed25519）、RS256 だけを受け付ける。RS256 は、登録のときに RSA の鍵長を確かめて記録し、2048 ビット未満は拒否する（M3）。CRYPTREC の設定基準で、RSA 2048 ビットのエンティティ認証は2030年までなので、2030年中に3072 ビット未満の RSA を受け付けない設定に移る（手順は P1。ADR 0012）
     - EdDSA（-8）は、WebAuthn Level 3（2026-08-25 勧告）が、幅広い認証器に対応したい RP に含めることを勧めている（SHOULD）ので、2026-10-23 に足した（ADR 0012 の決定10。オーナーが決めた）。登録の選択肢の順は、ES256、EdDSA、RS256 にする。
-  - プロトコルで決まる例外（CRYPTREC への掲載を問わない）：Web Push（RFC 8291、VAPID は ES256）、DKIM と ARC の署名（rsa-sha256）、受け取ったメールの DKIM の検証（rsa-sha256 と ed25519-sha256。rsa-sha1 は不合格）
+  - プロトコルで決まる例外（CRYPTREC への掲載を問わない）：PKCE（RFC 7636）の S256（SHA-256。rp-kit が PKCE のチャレンジを作るときだけ。ADR 0029）、Web Push（RFC 8291、VAPID は ES256）、DKIM と ARC の署名（rsa-sha256）、受け取ったメールの DKIM の検証（rsa-sha256 と ed25519-sha256。rsa-sha1 は不合格）
   - テストで固定する範囲は、自前のコードが直接呼ぶ `node:crypto` と、ライブラリに渡すアルゴリズムの設定。
 - **ローカルの鍵サービス**（`packages/keysvc`）：別プロセスで立て、サービスごとの資格情報と、操作ごとの ACL を持たせて、KMS の IAM を模す。本番は KMS（HMAC 鍵も外に出せない）。サービスと能力の対応：
   - idp：encrypt（連絡先）、照合用の mac、derive_alias、ID トークンの署名（sign と public_keys。ADR 0014）
