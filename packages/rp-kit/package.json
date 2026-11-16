@@ -1,10 +1,18 @@
 {
   "name": "@pii-token-vault/rp-kit",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "企業向け SDK と適合テスト",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nori1234/pii-token-vault.git",
+    "directory": "packages/rp-kit"
+  },
   "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./kit": "./src/kit/index.ts"

@@ -19,7 +19,8 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "pg-up": "node scripts/pg-up.ts",
-    "migrate": "node scripts/migrate.ts"
+    "migrate": "node scripts/migrate.ts",
+    "pack:rp-kit": "node scripts/pack-rp-kit.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",
