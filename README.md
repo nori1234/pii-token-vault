@@ -115,7 +115,7 @@ npm run migrate     # pg-up で起動した Postgres に、マイグレーショ
   - M6：`idp` に、端末の受信箱、要求に結び付いたチャレンジでの承認と拒否、承認用のオリジンを足しました。
   - M7：窓口の操作別承認。`idp` に、PAR と RAR で受け取る操作ごとの承認と、受信箱での取消を、`company-api` に、窓口の作成の正本と取消の SET を足しました。
   - M8：回復。`idp` に、回復コード、回復協力者、新しい端末での回復、待機と取消、回復の後の制限を足しました。
-  - M9：既存会員の初回紐付けと、高リスクの操作（出金先の変更）の承認を、`idp` と `company-api` に足しました。`rp-kit`（企業向け SDK と、模擬 OP を含む適合テストキット）と、`demo-rp`（A社のデモ証券と B社の予約サイト、窓口担当者の画面）を作りました。企業が試す先は、手元で動かす模擬 OP です。公開の試験用サーバーはありません（[ADR 0029](docs/adr/0029-company-side-code-boundary.md)）。
+  - M9：既存会員の初回紐付けと、高リスクの操作（出金先の変更）の承認を、`idp` と `company-api` に足しました。`rp-kit`（企業向け SDK と、模擬 OP を含む適合テストキット）と、`demo-rp`（A社のデモ証券と B社の予約サイト、窓口担当者の画面）を作りました。企業が試す先は、手元で動かす模擬 OP です。公開の試験用サーバーはありません（[ADR 0029](docs/adr/0029-company-side-code-boundary.md)）。SDK とキットの使い方は [packages/rp-kit/README.md](packages/rp-kit/README.md) にあります（npm には、まだ公開していません）。
 - `spikes/`：M1 の捨てスパイクです。本実装に置き換えたら消します。詳しくは [spikes/README.md](spikes/README.md) を参照してください。
   - `spikes/ciba-poll`：M1 の CIBA 試作です（`npm test`）。P0 の窓口方式には使いません。
 - `test/leak/`：漏えいシナリオのテストの置き場所です。plan 11章のテスト1、2、3、4、5、6、8、9、10、11、12 と、RLS の固定テスト、各サービスのルート一覧、パスキーの検証の守り、端末承認の守りなどがあります。一覧と書き方は [test/leak/README.md](test/leak/README.md) にあります。

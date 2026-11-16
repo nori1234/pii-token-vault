@@ -4,7 +4,15 @@
   "private": true,
   "description": "企業向け SDK と適合テスト",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nori1234/pii-token-vault.git",
+    "directory": "packages/rp-kit"
+  },
   "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./kit": "./src/kit/index.ts"
