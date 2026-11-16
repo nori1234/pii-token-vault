@@ -6,6 +6,7 @@ import { exportJWK, type JWK, SignJWT } from 'jose';
 import { describe, expect, it } from 'vitest';
 import { createCompanyApiClient, setRefusalOf } from '../src/company-api.ts';
 import { RpKitError } from '../src/errors.ts';
+import type { Send } from '../src/transport.ts';
 
 const ORIGIN = 'https://api.warifu.example';
 const TENANT = randomUUID();
@@ -98,7 +99,39 @@ describe('rp-kit の SET の検証（spec 02 の7章）', () => {
       await refusalOf(client.verifySet(await signedSet(NOW - 600, { key: otherKey.privateKey }))),
     ).toEqual(plain);
     expect(await refusalOf(client.verifySet('not-a-jwt'))).toEqual(plain);
-    expect(setRefusalOf(new Error('x'))).toEqual(plain);
+  });
+
+  it('割符の公開鍵を取れず、SET を確かめられなかったときは、503 で割符に送り直させる', async () => {
+    // 攻撃者が持っている情報：なし（企業のサーバーから割符の company-api に、一時的につながらない）
+    // 試す経路：署名の正しい SET を受け口に送る。企業のサーバーが割符の公開鍵を取ろうとして、
+    //           つながらない、5xx、3xx、形の違う応答のどれかになる
+    // 期待する結果：503（本文なし）。400 にすると、割符は SET を保留にし、待機の知らせや取消が届かなくなる
+    //               （spec 02 の7章：一時的に受け取れないときは 429 か 5xx）
+    // plan 11章：テスト12（RP-50）
+    const unavailable = { status: 503, body: null };
+    const answers: Send[] = [
+      async () => {
+        throw new Error('つながらない');
+      },
+      async () => ({ status: 502, headers: {}, body: '' }),
+      async () => ({ status: 302, headers: {}, body: '' }),
+      async () => ({ status: 200, headers: {}, body: '{"keys":"x"}' }),
+    ];
+    for (const answer of answers) {
+      const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+      const client = await createCompanyApiClient({
+        origin: ORIGIN,
+        clientId: 'api-client',
+        tenantId: TENANT,
+        privateKey: (await exportJWK(privateKey)) as JWK,
+        kid: 'k1',
+        now: () => new Date(NOW * 1000),
+        send: answer,
+      });
+      expect(await refusalOf(client.verifySet(await signedSet(NOW)))).toEqual(unavailable);
+    }
+    // verifySet 以外の例外（企業のコードの失敗）も、確かめられなかったものとして扱う。
+    expect(setRefusalOf(new Error('x'))).toEqual(unavailable);
   });
 
   it('知らない kid の SET を送り続けても、割符へ鍵を取りに行くのは30秒に1回まで', async () => {

@@ -9,6 +9,7 @@ export {
   createCompanyApiClient,
   INITIAL_LINK_PROOF_TYP,
   type InitialLinkProofClaims,
+  type SetRefusal,
   setRefusalOf,
   type VerifiedSet,
 } from './company-api.ts';
