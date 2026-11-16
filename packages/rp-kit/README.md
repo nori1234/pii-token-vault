@@ -156,10 +156,10 @@ const mockOp = await createMockOp({ clientId, redirectUri });
 // テスト環境の RP の SDK を、模擬 OP に向ける（idpOrigin: mockOp.origin、send: mockOp.send）。
 
 const hooks: RpTestHooks = {
-  // 模擬 OP の固定の利用者で、RP のふだんのログインを1回通し、RP の内部のアカウントの参照を返す。
-  async signIn(persona, complete) {
-    /* authorize() の url を complete(url) に渡し、戻りの URL で finish() から先の自分の処理を行う */
-  },
+  // 模擬 OP の固定の利用者で、RP のふだんのログインを1回通し、RP の内部のアカウントの参照を返す
+  // （signInOnTestRp は、企業が自分のテスト環境に書く関数。authorize() の url を complete(url) に渡し、
+  // 戻りの URL で finish() から先の自分の処理を行う。ログインを断ったら空文字を返す）。
+  signIn: (persona, complete) => signInOnTestRp(persona, complete),
   legacyLogin: async () => 'absent', // 紐付けを済ませた会員の旧ログイン：accepted / refused / absent
   legacyReset: async () => 'absent', // メールや SMS による再設定
   linkAttack: async () => 'refused', // 漏れたメールで旧アカウントを奪って紐付ける攻撃：linked / refused
@@ -196,3 +196,4 @@ npm run pack:rp-kit -- <出力先のディレクトリ>
 - このコマンドは、公開をしません。中身を確かめた後、メンテナーが出力先で `npm publish` を実行します。
 - 公開の前に決めること：版（いまは `0.0.0`）、npm のスコープ `@pii-token-vault` の持ち主、公開の範囲。
 - `scripts/pack-rp-kit.test.ts`（`npm test` に入っています）が、まとめたものを、別のプロセスの Node で読み込めることを確かめています。
+- `packages/rp-kit/test/readme.test.ts`（`npm test` に入っています）が、この README の `ts` のコードの例を、SDK の型で確かめています。例を変えたら、`npm test` で確かめてください。
