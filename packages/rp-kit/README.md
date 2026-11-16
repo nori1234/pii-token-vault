@@ -218,6 +218,7 @@ npm run pack:rp-kit -- <出力先のディレクトリ>
 ```
 
 - 出力先に、変換した `.js` と `.d.ts`、公開用の `package.json`、README、LICENSE が入ります。テストと、変換の前の `.ts` は入りません。
+- README の相対のリンク（`../../docs/…` など）は、npm のページでも開けるように、GitHub の `main` の URL に書き換えて入れます。
 - このコマンドは、公開をしません。中身を確かめた後、メンテナーが出力先で `npm publish` を実行します。
 - 版は `packages/rp-kit/package.json` の `version` です（同じ版は、二度と公開できません）。公開の範囲は public です（まとめた `package.json` の `publishConfig`）。
 - 公開する人の npm のアカウントが、npm の組織 `pii-token-vault`（スコープ `@pii-token-vault`）で、公開の権限を持っている必要があります。
