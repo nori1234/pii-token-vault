@@ -137,7 +137,8 @@ describe('漏えい：0009 の前に足して消したパスキー（plan 11章 
     const never = await seedUser([]);
 
     // 0009 を流す（残りのマイグレーション）。
-    expect(await migrate(bootstrap)).toEqual(['0009_recovery']);
+    // 0009 の後のマイグレーション（0010 以降）も続けて流れる。
+    expect((await migrate(bootstrap))[0]).toBe('0009_recovery');
 
     const deps: RepoDeps = { db, keys, now: () => new Date(now) };
     const eligible = async (helper: WarifuUserId) =>

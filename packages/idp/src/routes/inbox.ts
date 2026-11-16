@@ -6,6 +6,7 @@ import { type InboxItem, isItemId, listInbox, markNoticeRead, NOTICE_TYPES } fro
 import { collectHelperNotices } from '../recovery.ts';
 import type { RouteContext } from './context.ts';
 import { deskItemEntries } from './desk.ts';
+import { initialLinkItemEntries } from './initial-link.ts';
 import { recoverySummary } from './recovery.ts';
 
 export function registerInboxRoutes(ctx: RouteContext): void {
@@ -61,6 +62,8 @@ export function registerInboxRoutes(ctx: RouteContext): void {
       pendingApprovals: entries.filter((e) => e.kind === 'approval' && e.state === 'pending')
         .length,
       desk: await deskItemEntries(ctx, current.session.userId),
+      // 初回紐付けの項目（ADR 0028 の O-90）。取り消すのは承認用のオリジンだけ。
+      initialLink: await initialLinkItemEntries(ctx, current.session.userId),
       // 進行中の回復（ADR 0027）。取り消すのは承認用のオリジン（警告文 F）。
       recovery: await recoverySummary(ctx, current.session.userId),
     };

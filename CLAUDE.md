@@ -49,6 +49,9 @@
    - oidc-provider では `jwks_uri` と `sector_identifier_uri` を受け付けず、企業の鍵は登録時に `jwks` で受け取る。`request_uri` は、割符の PAR の受け口が発行した `urn:ietf:params:oauth:request_uri:` の値だけを受け付け、それ以外は拒否する。どの値も外へ取りに行かない（ADR 0025）。動的クライアント登録は無効にする。企業のクライアント認証は `private_key_jwt` だけ。
    - DNS は、注入したリゾルバを通してだけ引く（mailauth の `resolver` を使う）。
    - relay から本物のアドレスへの配送は、署名したメッセージを送信サービスの内部 API に渡す形にする（ADR 0021、ADR 0022）。実配送は、受け取ったメールの永続化と再試行を作るまで始めない（ADR 0021 の O-19）。それまでは、開発とテストだけで使う。
+   - 適用範囲：この不変条件は、割符のサービス（idp、relay、company-api、keysvc、sender、warifu-core）に適用する。企業の側のコードは、次のとおりにする（ADR 0029）。
+     - rp-kit の SDK は、自分ではつながない。企業が渡す通信の関数を使い、要求を送る先は、企業が設定した割符のオリジンだけにする。応答の中の URL に自動で進まない。
+     - demo-rp（企業の参照実装）は、設定で固定した割符のオリジンと模擬 OP にだけつないでよい。つなぐのは `packages/demo-rp/src/transport.ts` の1ファイルだけにし、利用者などが渡した URL にはつながず、リダイレクトに従わない。
 8. **DB の境界**：
    - アプリのコードは、`withTenant(tenantId, fn)` か `withWarifuUser(userId, fn)` を通してだけ DB に触れる。どちらも、トランザクションごとに `set_config(…, …, true)` で境界を渡す。
    - 全テーブルに RLS の ENABLE と FORCE の両方を付ける。接続ロールは NOSUPERUSER と NOBYPASSRLS にする。サービスごとにスキーマとログインロールを分け、列単位で GRANT する。
@@ -58,7 +61,7 @@
    - MAC と照合用の索引：HMAC-SHA-256（Message-ID などの「ハッシュ」も、これで作る）
    - JWS（ID トークン、SET、操作ごとの承認、テナントの JWT、企業の client assertion の検証）：ES256 だけ
    - WebAuthn：ES256、EdDSA（曲線は Ed25519）、RS256 だけを受け付ける。それ以外は登録時に拒否する（EdDSA は ADR 0012 で足した）
-   - プロトコルで決まる例外：Web Push（RFC 8291、VAPID は ES256）、DKIM と ARC の署名（rsa-sha256）、受け取ったメールの DKIM の検証（rsa-sha256 と ed25519-sha256。rsa-sha1 は不合格にする）
+   - プロトコルで決まる例外：Web Push（RFC 8291、VAPID は ES256）、DKIM と ARC の署名（rsa-sha256）、受け取ったメールの DKIM の検証（rsa-sha256 と ed25519-sha256。rsa-sha1 は不合格にする）、PKCE（RFC 7636）の S256（SHA-256。rp-kit が PKCE のチャレンジを作るときだけ。ADR 0029）
 10. **連絡先を列挙させない**：登録、回復、宛先確認、SMTP の RCPT への応答は、登録済みかどうかで、本文・ステータス・所要時間を変えない。
 11. **電話**：電話の中継（番号の種類を問わない）は、ADR 0004 の保留が解けるまで作らない。P0 では、割符は電話番号を集めない（入力欄、列、クレームを作らない）。原則2（企業に持たせない）は、電話については未達である。だからこそ、電話番号を根拠にしないことを不変条件1で担保する。
 12. **漏えいシナリオのテスト**：新しいルートを足したとき、または認証・回復・承認・窓口・中継の分岐を変えたときは、`test/leak/` にテストを足す。テストの名前か先頭のコメントに、次の3つと、plan 11章のテスト番号を書く：(1) 攻撃者が持っている情報、(2) 試す経路、(3) 期待する結果（拒否と、そのステータス）。
@@ -98,9 +101,9 @@ npm run migrate     # pg-up が表示した接続先と PGDATABASE に、マイ�
 
 - 4つのコマンド（lint、typecheck、test、e2e）は、各マイルストーンの PR で通す。CI（`.github/workflows/ci.yml`）も同じものを実行する。
 - `npm run lint` は、不変条件7と9に反するものも止める。対象は次のとおり。
-  - `packages/sender` 以外での、外向きの通信のモジュールと `node:child_process` の import、`fetch` などのグローバル。`node:http` は、`createServer`、`Server`、`IncomingMessage`、`ServerResponse`、`STATUS_CODES` だけを許す。ただし `packages/warifu-core/src/internal/uds-client.ts` だけは、割符の内部の Unix ドメインソケット（鍵サービスなど）につなぐために `request` を許す（ADR 0013。t08-key-client-surface で固定する）。
+  - `packages/sender` 以外での、外向きの通信のモジュールと `node:child_process` の import、`fetch` などのグローバル。`node:http` は、`createServer`、`Server`、`IncomingMessage`、`ServerResponse`、`STATUS_CODES` だけを許す。ただし `packages/warifu-core/src/internal/uds-client.ts` だけは、割符の内部の Unix ドメインソケット（鍵サービスなど）につなぐために `request` を許す（ADR 0013。t08-key-client-surface で固定する）。`packages/demo-rp/src/transport.ts` だけは、設定した割符のオリジンにつなぐために `fetch` を許す（ADR 0029）。
   - `packages/sender` も含めて、`node:module` の import と、グローバルの `crypto`、`globalThis`、`global`（`packages/sender` で外しているのは、1つ目の項目の制限だけ）。
-  - `packages/warifu-core`・`packages/keysvc`・`spikes/` 以外での、`node:crypto` の import。
+  - `packages/warifu-core`・`packages/keysvc`・`spikes/` 以外での、`node:crypto` の import。例外は `packages/rp-kit/src/pkce.ts` の1ファイルで、PKCE のための `randomBytes` と `createHash('sha256')` だけを使う（ADR 0029。テストで固定する）。
   - CI は、さらに `packages/` と `spikes/` の中（Markdown を除く）の `biome-ignore` と `getBuiltinModule`（`process.getBuiltinModule` を含む）と、ルートの `biome.json` 以外の Biome の設定ファイル（入れ子のものと、ルートの `biome.jsonc`、`.biome.json`、`.biome.jsonc`）を見つけたら失敗する。本体のコード（`packages/` と `spikes/` の、テスト以外のファイル）から、テスト、`scripts/`、`test/`、ルートの `*.config.ts` に import でたどり着くとき（`scripts/check-entry-imports.ts` が、Node と同じ方法（型の除去と `import.meta.resolve`）でたどった import のグラフで確かめる。副作用だけの import と間接の import も含む）と、本体のコードで、引用符で囲んだ文字列リテラル1つ以外を渡す動的な import（括弧の中の型の構文を含む）や、ファイルと `node:` の組み込み以外を読み込む import を使ったとき、CommonJS として読み込まれるファイルを置いたとき、シンボリックリンクを追跡したとき（依存を入れる前に確かめる）も失敗する。
   - テスト（`*.test.ts`、`*.e2e.ts`）、`scripts/`、`test/`、ルートの `*.config.ts` では、上の3つの制限と `noConsole` を外している（Biome のほかの規則と書式の検査はかかる）。ブラウザで動く `public/` の中では、グローバルの制限（`fetch` など）を外している。制限を外したところでも、不変条件は適用する。
   - 例外は `biome.json` の overrides にまとめてある。overrides を広げる変更は、principle-review で点検する。

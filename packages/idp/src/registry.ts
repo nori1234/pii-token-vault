@@ -1,5 +1,5 @@
 // 静的な登録簿（M3）。テナントとクライアントを設定で受け取り、起動の時点で検査する（ADR 0018）。
-// company-api の登録も静的な設定にした（ADR 0022）。1つの登録簿にまとめるかは M9 で決める。
+// company-api の登録も静的な設定にした（ADR 0022）。M9 でも、1つの登録簿にはまとめていない（ADR 0018 の追記）。
 //
 // - 不変条件7：割符から外へ取りに行く項目（jwks_uri、sector_identifier_uri、request_uris など）は、肯定リストで止める。
 //   oidc-provider 9.12.2 は、認識した項目をそのまま受け入れる（lib/helpers/client_schema.js）。
@@ -8,9 +8,17 @@
 //   （oidc-provider は、ホストが複数の pairwise のクライアントに sector_identifier_uri を求めるため）。
 // - DESIGN.md 原則2：画面に出す企業名は、この登録簿の値（displayName）だけ。企業が送る client_name などは使わない。
 // - 窓口の操作は、クライアントごとに許す（deskActions。既定は空で、窓口の申請を受け付けない。ADR 0026 の O-60）。
+// - 初回紐付けの申請（RAR の warifu_initial_link）も、クライアントごとに許す（initialLink。既定は false。ADR 0028 の
+//   O-89）。company-api の登録簿に移行プロファイルのないテナントでは、内部 API が断る（二重の守り）。
+// - 高リスクの操作（RAR の warifu_operation）も、クライアントごとに許す（operationActions。既定は空。ADR 0030）。
 
 import { parseTenantId, type TenantId } from '@pii-token-vault/warifu-core';
-import { DESK_ACTIONS, type DeskAction } from '@pii-token-vault/warifu-core/desk/protocol';
+import {
+  DESK_ACTIONS,
+  type DeskAction,
+  OPERATION_ACTIONS,
+  type OperationAction,
+} from '@pii-token-vault/warifu-core/desk/protocol';
 
 export interface TenantEntry {
   readonly tenantId: TenantId;
@@ -41,6 +49,10 @@ export interface ClientEntry {
   readonly aliasClaim: AliasClaim;
   /** このクライアントに許す窓口の操作（DESIGN.md 3章の3つから）。空なら、窓口の申請を受け付けない。 */
   readonly deskActions: readonly DeskAction[];
+  /** 初回紐付けの申請を受け付けるか（ADR 0028 の O-89）。 */
+  readonly initialLink: boolean;
+  /** このクライアントに許す高リスクの操作（ADR 0030 の O-112）。空なら、高リスクの操作の申請を受け付けない。 */
+  readonly operationActions: readonly OperationAction[];
 }
 
 export interface Registry {
@@ -74,6 +86,8 @@ const CLIENT_KEYS: ReadonlySet<string> = new Set([
   'jwks',
   'aliasClaim',
   'deskActions',
+  'initialLink',
+  'operationActions',
 ]);
 const JWK_MEMBERS: ReadonlySet<string> = new Set(['kty', 'crv', 'x', 'y', 'kid', 'alg', 'use']);
 const CLIENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -218,6 +232,20 @@ function parseClient(input: unknown, tenants: ReadonlyMap<TenantId, TenantEntry>
   ) {
     throw new RegistryError(`${clientId}：deskActions は窓口の操作の一覧から（重複なし）`);
   }
+  const operationActions = input.operationActions ?? [];
+  if (
+    !Array.isArray(operationActions) ||
+    !operationActions.every((action) =>
+      (OPERATION_ACTIONS as readonly unknown[]).includes(action),
+    ) ||
+    new Set(operationActions).size !== operationActions.length
+  ) {
+    throw new RegistryError(`${clientId}：operationActions は高リスクの操作の一覧から（重複なし）`);
+  }
+  const initialLink = input.initialLink ?? false;
+  if (typeof initialLink !== 'boolean') {
+    throw new RegistryError(`${clientId}：initialLink は true か false`);
+  }
   return Object.freeze({
     clientId,
     tenantId,
@@ -225,6 +253,8 @@ function parseClient(input: unknown, tenants: ReadonlyMap<TenantId, TenantEntry>
     jwks: Object.freeze({ keys: Object.freeze(keys) }),
     aliasClaim,
     deskActions: Object.freeze([...deskActions] as DeskAction[]),
+    initialLink,
+    operationActions: Object.freeze([...operationActions] as OperationAction[]),
   });
 }
 

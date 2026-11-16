@@ -1,4 +1,4 @@
-// company-api のレート制限（plan 2章、CAP-34、ADR 0022）。値は ADR 0022 と ADR 0026 の表を正とする。
+// company-api のレート制限（plan 2章、CAP-34、ADR 0022）。値は ADR 0022、ADR 0026、ADR 0028 の表を正とする。
 // キーは、送信元の IP（トークンの発行の前）と、テナント・クライアント（確かめた後）。
 
 import { type LimitRule, RateLimiter } from '@pii-token-vault/warifu-core';
@@ -16,6 +16,10 @@ export const COMPANY_API_LIMITS = Object.freeze({
   verificationByTenant: { limit: 10, windowSeconds: 3600 },
   /** 窓口のルート（テナントごと。apiByTenant とは別に。ADR 0026 の O-70）。 */
   deskByTenant: { limit: 300, windowSeconds: 60 },
+  /** 初回紐付けのルート（テナントごと。apiByTenant とは別に。ADR 0028 の O-101）。 */
+  initialLinkByTenant: { limit: 300, windowSeconds: 60 },
+  /** 初回紐付けの prepare（テナントごと。ADR 0028 の O-101）。 */
+  initialLinkPrepareByTenant: { limit: 1000, windowSeconds: 3600 },
 } satisfies Record<string, LimitRule>);
 
 export type CompanyApiLimitName = keyof typeof COMPANY_API_LIMITS;

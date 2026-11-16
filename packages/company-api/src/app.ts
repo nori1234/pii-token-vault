@@ -40,9 +40,18 @@ import {
   recordNotCreated,
   recordNotice,
 } from './desk.ts';
+import {
+  acceptCompanyCancel,
+  acceptProof as acceptInitialLinkProof,
+  type RouteResult as InitialLinkRouteResult,
+  prepare as prepareInitialLink,
+  recordResult as recordInitialLinkResult,
+  referencedVersionsAvailable,
+} from './initial-link.ts';
 import { type DeskInternalApi, startDeskInternalApi } from './internal-api.ts';
 import { PublicKeyCache } from './jwt.ts';
 import { deliverDue, enqueueEvent, STATE_PATTERN } from './outbox.ts';
+import { recordParticipationRevisions } from './participation.ts';
 import { type CompanyApiLimitName, companyApiLimiter } from './rate-limit.ts';
 import { ACCESS_TOKEN_TTL_SECONDS, type Caller, TokenService } from './tokens.ts';
 
@@ -119,6 +128,13 @@ export async function createCompanyApi(options: CompanyApiOptions): Promise<Comp
     options.sender === undefined ? undefined : createSenderWebhookClient(options.sender);
   const outboxDeps = { config, db, keys, cache, sender, log, now };
   const deskDeps: DeskDeps = { db, keys, now };
+  // 参加の状態の版が、監査ログに最後に残した版と違えば残す（ADR 0028 の O-95）。
+  await recordParticipationRevisions({ config, db, keys, now });
+  // 初回紐付けの行が参照する鍵の版が鍵サービスになければ、起動しない（別の版で導いた ID を黙って出さない。O-87）。
+  if (!(await referencedVersionsAvailable({ db, keys }, config.tenants.values()))) {
+    await db.close();
+    throw new Error('初回紐付けの行が参照する鍵の版が、鍵サービスにない（ADR 0028 の O-87）');
+  }
 
   const app = fastify({
     loggerInstance: log as unknown as FastifyBaseLogger,
@@ -311,6 +327,110 @@ export async function createCompanyApi(options: CompanyApiOptions): Promise<Comp
     });
     log.info({ event: 'company_api.desk_cancellation_status', status: result.status });
     return sendDesk(reply, result);
+  });
+
+  // ---- 初回紐付け（ADR 0028 の O-86〜O-91。scope は initial_link） ----
+
+  const initialLinkDeps = {
+    db,
+    keys,
+    now,
+    onLinkedAfterCancel: () =>
+      log.warn({ event: 'company_api.initial_link.linked_after_cancel', count: 1 }),
+  };
+
+  /** scope が initial_link の呼び出し元と、決まった形の本文を確かめる。だめなら応答を送って undefined。 */
+  const initialLinkCallerOf = async (
+    request: { headers: { authorization?: string }; body: unknown },
+    reply: FastifyReply,
+    required: readonly string[],
+  ): Promise<{ caller: Caller; body: Record<string, unknown> } | undefined> => {
+    const caller = await callerOf(request.headers.authorization, reply, 'initial_link');
+    if (caller === undefined) return undefined;
+    const body = exactKeys(request.body, required);
+    if (body === undefined) {
+      void reply.code(400).send(ERROR.invalid_request);
+      return undefined;
+    }
+    if (limited(reply, 'initialLinkByTenant', caller.tenant.tenantId)) return undefined;
+    return { caller, body };
+  };
+
+  const sendInitialLink = (
+    reply: FastifyReply,
+    result: InitialLinkRouteResult<object | undefined>,
+  ) => {
+    if (result.status === 200) return reply.code(200).send(result.body);
+    if (result.status === 204) return reply.code(204).send();
+    const body =
+      result.status === 400
+        ? ERROR.invalid_request
+        : result.status === 404
+          ? ERROR.not_found
+          : ERROR.conflict;
+    return reply.code(result.status).send(body);
+  };
+
+  app.post('/v1/initial-link/prepare', async (request, reply) => {
+    const got = await initialLinkCallerOf(request, reply, ['request_id', 'member_ref']);
+    if (got === undefined) return reply;
+    if (limited(reply, 'initialLinkPrepareByTenant', got.caller.tenant.tenantId)) return reply;
+    if (got.caller.tenant.webhookUrl === undefined) {
+      return reply.code(409).send(ERROR.webhook_not_registered);
+    }
+    return sendInitialLink(
+      reply,
+      await prepareInitialLink(initialLinkDeps, got.caller.tenant, {
+        requestId: got.body.request_id,
+        memberRef: got.body.member_ref,
+      }),
+    );
+  });
+
+  app.post('/v1/initial-link/proofs', async (request, reply) => {
+    const got = await initialLinkCallerOf(request, reply, ['proof']);
+    if (got === undefined) return reply;
+    return sendInitialLink(
+      reply,
+      await acceptInitialLinkProof(
+        initialLinkDeps,
+        got.caller.tenant,
+        got.caller.client,
+        config.issuer,
+        {
+          proof: got.body.proof,
+        },
+      ),
+    );
+  });
+
+  app.post('/v1/initial-link/cancel-requests', async (request, reply) => {
+    const got = await initialLinkCallerOf(request, reply, ['proof']);
+    if (got === undefined) return reply;
+    return sendInitialLink(
+      reply,
+      await acceptCompanyCancel(
+        initialLinkDeps,
+        got.caller.tenant,
+        got.caller.client,
+        config.issuer,
+        {
+          proof: got.body.proof,
+        },
+      ),
+    );
+  });
+
+  app.post('/v1/initial-link/results', async (request, reply) => {
+    const got = await initialLinkCallerOf(request, reply, ['initial_link_id', 'result']);
+    if (got === undefined) return reply;
+    return sendInitialLink(
+      reply,
+      await recordInitialLinkResult(initialLinkDeps, got.caller.tenant, {
+        initialLinkId: got.body.initial_link_id,
+        result: got.body.result,
+      }),
+    );
   });
 
   app.get('/jwks', async () => ({ keys: await cache.get('set') }));

@@ -31,6 +31,11 @@ import { DecryptFailedError, InvalidRequestError, runOp, targetOf } from './ops.
 
 export interface KeysvcServer {
   readonly socketPath: string;
+  /**
+   * 版を持つ MAC の鍵（ADR 0028 の O-87）に新しい版を足す。古い版は消さない。上限に達していれば false。
+   * 鍵サービスのプロセスの中からだけ呼ぶ（main.ts の SIGUSR2）。ソケットの操作にはしない。
+   */
+  rotateVersionedMacKeys(): boolean;
   close(): Promise<void>;
 }
 
@@ -174,6 +179,11 @@ export async function startKeysvcServer(
   let closing: Promise<void> | undefined;
   return {
     socketPath,
+    rotateVersionedMacKeys() {
+      const rotated = keyring.rotateVersionedMacKeys();
+      logger.info({ event: 'keysvc.mac_rotated', rotated });
+      return rotated;
+    },
     close() {
       closing ??= new Promise<void>((resolve) => {
         server.close(() => resolve());

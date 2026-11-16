@@ -17,6 +17,7 @@ import {
   type WarifuUserId,
 } from '../../packages/warifu-core/src/ids.ts';
 import { createIdpKeyClient } from '../../packages/warifu-core/src/keys/idp.ts';
+import type { KeysvcConnection } from '../../packages/warifu-core/src/keys/protocol.ts';
 import type { SenderConnection } from '../../packages/warifu-core/src/sender/client.ts';
 import { serviceDb } from './db.ts';
 import { keysvcConnection } from './keys.ts';
@@ -45,10 +46,16 @@ export interface TenantSpec {
   readonly webhookUrl?: string;
   readonly suspended?: boolean;
   readonly client?: TestApiClient;
-  /** クライアントに許す scope（既定は company_api だけ。窓口は desk。ADR 0026）。 */
-  readonly scopes?: readonly ('company_api' | 'desk')[];
+  /** クライアントに許す scope（既定は company_api だけ。窓口は desk。ADR 0026。初回紐付けは initial_link）。 */
+  readonly scopes?: readonly ('company_api' | 'desk' | 'initial_link')[];
   /** SET の受け口の設定の版（ADR 0026 の O-72）。 */
   readonly setDeliveryRevision?: number;
+  /** 参加の状態と移行中の期限と、その版（既定は full、期限なし、0。ADR 0028 の O-95）。 */
+  readonly participation?: 'full' | 'migrating';
+  readonly migrationDeadline?: string;
+  readonly participationRevision?: number;
+  /** 初回紐付けの移行プロファイル（ADR 0028 の O-89）。 */
+  readonly initialLink?: { readonly profileVersion: number; readonly approvedOn: string };
 }
 
 export interface InjectResult {
@@ -65,7 +72,7 @@ export interface TestCompanyApi {
   /** POST /token（client assertion の中身を変えられる）。 */
   token(tenant: TestTenant, form?: Record<string, string>): Promise<InjectResult>;
   /** トークンを得る（失敗したら例外）。scope を省けば company_api。 */
-  accessToken(tenant: TestTenant, scope?: 'company_api' | 'desk'): Promise<string>;
+  accessToken(tenant: TestTenant, scope?: 'company_api' | 'desk' | 'initial_link'): Promise<string>;
   request(input: {
     readonly method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
     readonly path: string;
@@ -119,6 +126,8 @@ export async function clientAssertion(
 export async function startTestCompanyApi(options: {
   readonly tenants: readonly TenantSpec[];
   readonly sender?: SenderConnection;
+  /** 既定は globalSetup の鍵サービス。鍵を入れ替えるテストは、自分で起動した鍵サービスを渡す。 */
+  readonly keysvc?: KeysvcConnection;
   readonly now?: () => Date;
   /** idp からの窓口の内部 API（ADR 0026）。 */
   readonly deskInternal?: {
@@ -140,7 +149,16 @@ export async function startTestCompanyApi(options: {
       tenants: tenants.map((t, i) => ({
         tenantId: t.tenantId,
         relayDomain: t.relayDomain,
-        participation: 'full',
+        participation: options.tenants[i]?.participation ?? 'full',
+        ...(options.tenants[i]?.migrationDeadline === undefined
+          ? {}
+          : { migrationDeadline: options.tenants[i]?.migrationDeadline }),
+        ...(options.tenants[i]?.participationRevision === undefined
+          ? {}
+          : { participationRevision: options.tenants[i]?.participationRevision }),
+        ...(options.tenants[i]?.initialLink === undefined
+          ? {}
+          : { initialLink: options.tenants[i]?.initialLink }),
         ...(options.tenants[i]?.suspended === true ? { suspended: true } : {}),
         apiClients: [
           {
@@ -157,7 +175,7 @@ export async function startTestCompanyApi(options: {
           : { setDeliveryRevision: options.tenants[i]?.setDeliveryRevision }),
       })),
     },
-    keysvc: keysvcConnection('company-api'),
+    keysvc: options.keysvc ?? keysvcConnection('company-api'),
     db: { host: String(db.host), port: Number(db.port), database: String(db.database) },
     ...(options.sender === undefined ? {} : { sender: options.sender }),
     ...(options.now === undefined ? {} : { now: options.now }),

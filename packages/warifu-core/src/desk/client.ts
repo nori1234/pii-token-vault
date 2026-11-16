@@ -2,7 +2,7 @@
 // 資格情報は `idp.<32バイトの base64url>`。時間切れは5秒、再試行はしない（呼び出し元が決める）。
 // 応答の本文を例外に入れない（不変条件4）。
 
-import { isUuid } from '../ids.ts';
+import { isUuid, type TenantId, type WarifuUserId } from '../ids.ts';
 import { UdsError, udsPost } from '../internal/uds-client.ts';
 import {
   type AccountRecoveredRequest,
@@ -17,6 +17,9 @@ import {
   type DeskOp,
   type DeskStatusItem,
   type DeskStatusRequest,
+  INITIAL_LINK_ID_PATTERN,
+  type InitialLinkState,
+  type InitialLinkStatusItem,
 } from './protocol.ts';
 
 export type DeskClientErrorCode = 'invalid_request' | 'forbidden' | 'unavailable';
@@ -45,17 +48,69 @@ export type DeskCancelResult =
   | { readonly ok: true; readonly state: DeskChangeState }
   | { readonly ok: false; readonly reason: 'closed' | 'not_found' };
 
+/** 初回紐付けの内部 API の結果（ADR 0028）。理由は company-api の正本の判定のまま。 */
+export type InitialLinkCallResult<T = unknown> =
+  | ({ readonly ok: true } & T)
+  | { readonly ok: false; readonly reason: 'not_found' | 'conflict' | 'not_ready' };
+
+export interface InitialLinkItemRequest {
+  readonly tenantId: TenantId;
+  readonly userId: WarifuUserId;
+  /** idp.initial_link_items の link_ref（idp が作った乱数の UUID）。 */
+  readonly itemRef: string;
+}
+
 export interface DeskClient {
   approve(request: DeskApproveRequest): Promise<DeskApproveResult>;
   status(request: DeskStatusRequest): Promise<readonly DeskStatusItem[]>;
   cancel(request: DeskCancelRequest): Promise<DeskCancelResult>;
   /** 回復の成立を、企業への送信待ちに入れる（ADR 0027 の O-81）。入れられなければ DeskClientError。 */
   accountRecovered(request: AccountRecoveredRequest): Promise<void>;
+  /** 本人の承認の前の確かめ（ADR 0028 の O-86）。 */
+  initialLinkCheck(request: {
+    readonly tenantId: TenantId;
+    readonly userId: WarifuUserId;
+    readonly initialLinkId: string;
+  }): Promise<InitialLinkCallResult>;
+  /** 本人の承認を記録し、待機の知らせの SET を送信待ちに入れる（O-103）。同じ itemRef の再送は同じ結果。 */
+  initialLinkApprove(
+    request: InitialLinkItemRequest & { readonly initialLinkId: string },
+  ): Promise<InitialLinkCallResult<{ readonly state: InitialLinkState }>>;
+  /** 最終の承認（O-86 の手順7）。通れば移行専用ID を返す。 */
+  initialLinkFinalize(
+    request: InitialLinkItemRequest & { readonly initialLinkId: string },
+  ): Promise<InitialLinkCallResult<{ readonly initialLinkId: string }>>;
+  initialLinkStatus(request: {
+    readonly tenantId: TenantId;
+    readonly userId: WarifuUserId;
+    readonly itemRefs: readonly string[];
+  }): Promise<readonly InitialLinkStatusItem[]>;
+  /** 利用者の取消（O-90）。 */
+  initialLinkCancel(
+    request: InitialLinkItemRequest,
+  ): Promise<InitialLinkCallResult<{ readonly state: InitialLinkState }>>;
 }
 
 const CREDENTIAL_PATTERN = /^idp\.[A-Za-z0-9_-]{43}$/;
 const ISO_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const encoder = new TextEncoder();
+
+const INITIAL_LINK_STATES: readonly InitialLinkState[] = Object.freeze([
+  'prepared',
+  'pending_notice',
+  'pending_link',
+  'awaiting_final',
+  'approved',
+  'linked',
+  'cancel_requested',
+  'cancelled',
+  'expired',
+  'not_linked',
+]);
+
+function isInitialLinkState(value: unknown): value is InitialLinkState {
+  return typeof value === 'string' && (INITIAL_LINK_STATES as readonly string[]).includes(value);
+}
 
 function isState(value: unknown): value is DeskChangeState {
   return typeof value === 'string' && (DESK_CHANGE_STATES as readonly string[]).includes(value);
@@ -115,7 +170,7 @@ export function createDeskClient(connection: DeskConnection): DeskClient {
     return response;
   }
 
-  return Object.freeze({
+  const client: DeskClient = {
     async approve(request: DeskApproveRequest): Promise<DeskApproveResult> {
       if (
         !isUuid(request?.tenantId) ||
@@ -229,5 +284,130 @@ export function createDeskClient(connection: DeskConnection): DeskClient {
       });
       if (response.status !== 204) throw new DeskClientError('unavailable');
     },
-  });
+
+    async initialLinkCheck(request) {
+      if (
+        !isUuid(request?.tenantId) ||
+        !isUuid(request.userId) ||
+        !isLinkId(request.initialLinkId)
+      ) {
+        throw new DeskClientError('invalid_request');
+      }
+      const response = await call('initial_link_check', {
+        tenantId: request.tenantId,
+        userId: request.userId,
+        initialLinkId: request.initialLinkId,
+      });
+      if (response.status === 204) return { ok: true };
+      return initialLinkFailure(response);
+    },
+
+    async initialLinkApprove(request) {
+      if (!isItemRequest(request) || !isLinkId(request.initialLinkId)) {
+        throw new DeskClientError('invalid_request');
+      }
+      const response = await call('initial_link_approve', {
+        tenantId: request.tenantId,
+        userId: request.userId,
+        itemRef: request.itemRef,
+        initialLinkId: request.initialLinkId,
+      });
+      if (response.status === 200) {
+        const { state } = jsonOf(response.body);
+        if (isInitialLinkState(state)) return { ok: true, state };
+        throw new DeskClientError('unavailable');
+      }
+      return initialLinkFailure(response);
+    },
+
+    async initialLinkFinalize(request) {
+      if (!isItemRequest(request) || !isLinkId(request.initialLinkId)) {
+        throw new DeskClientError('invalid_request');
+      }
+      const response = await call('initial_link_finalize', {
+        tenantId: request.tenantId,
+        userId: request.userId,
+        itemRef: request.itemRef,
+        initialLinkId: request.initialLinkId,
+      });
+      if (response.status === 200) {
+        const { initialLinkId } = jsonOf(response.body);
+        if (isLinkId(initialLinkId)) return { ok: true, initialLinkId };
+        throw new DeskClientError('unavailable');
+      }
+      return initialLinkFailure(response);
+    },
+
+    async initialLinkStatus(request) {
+      if (
+        !isUuid(request?.tenantId) ||
+        !isUuid(request.userId) ||
+        !Array.isArray(request.itemRefs) ||
+        request.itemRefs.length > DESK_LIMITS.statusItems ||
+        !request.itemRefs.every((ref) => isUuid(ref))
+      ) {
+        throw new DeskClientError('invalid_request');
+      }
+      if (request.itemRefs.length === 0) return [];
+      const response = await call('initial_link_status', {
+        tenantId: request.tenantId,
+        userId: request.userId,
+        itemRefs: [...request.itemRefs],
+      });
+      if (response.status !== 200) throw new DeskClientError('unavailable');
+      const { items } = jsonOf(response.body);
+      if (!Array.isArray(items) || items.length !== request.itemRefs.length) {
+        throw new DeskClientError('unavailable');
+      }
+      return items.map((raw: unknown, index): InitialLinkStatusItem => {
+        const item = (raw ?? {}) as Record<string, unknown>;
+        const { itemRef, state, waitUntil } = item;
+        if (
+          typeof itemRef !== 'string' ||
+          itemRef !== request.itemRefs[index] ||
+          !(state === 'unknown' || isInitialLinkState(state)) ||
+          !(waitUntil === null || (typeof waitUntil === 'string' && ISO_PATTERN.test(waitUntil)))
+        ) {
+          throw new DeskClientError('unavailable');
+        }
+        return { itemRef, state, waitUntil };
+      });
+    },
+
+    async initialLinkCancel(request) {
+      if (!isItemRequest(request)) throw new DeskClientError('invalid_request');
+      const response = await call('initial_link_cancel', {
+        tenantId: request.tenantId,
+        userId: request.userId,
+        itemRef: request.itemRef,
+      });
+      if (response.status === 200) {
+        const { state } = jsonOf(response.body);
+        if (isInitialLinkState(state)) return { ok: true, state };
+        throw new DeskClientError('unavailable');
+      }
+      return initialLinkFailure(response);
+    },
+  };
+  return Object.freeze(client);
+}
+
+function isLinkId(value: unknown): value is string {
+  return typeof value === 'string' && INITIAL_LINK_ID_PATTERN.test(value);
+}
+
+function isItemRequest(request: InitialLinkItemRequest | undefined): boolean {
+  return isUuid(request?.tenantId) && isUuid(request?.userId) && isUuid(request?.itemRef);
+}
+
+function initialLinkFailure(response: { readonly status: number; readonly body: Uint8Array }): {
+  readonly ok: false;
+  readonly reason: 'not_found' | 'conflict' | 'not_ready';
+} {
+  if (response.status === 404) return { ok: false, reason: 'not_found' };
+  if (response.status === 409) {
+    const error = errorOf(response.body);
+    if (error === 'conflict' || error === 'not_ready') return { ok: false, reason: error };
+  }
+  throw new DeskClientError('unavailable');
 }

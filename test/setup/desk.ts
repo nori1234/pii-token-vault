@@ -1,6 +1,6 @@
 // 窓口の操作別承認のテストの補助（ADR 0026）。idp、company-api（idp からの内部 API）、sender（取消の SET の配送）を
 // 1つのテストの中で立て、企業のサーバーの役（PAR、トークン、操作ごとの承認の検証、作成の知らせ、取消の結果の報告）を
-// テストの中で行う。企業の側の参照実装（rp-kit）は M9 で作る。ここの検証は、その手前のテストのためのもの。
+// テストの中で行う。企業の側の SDK（rp-kit）を通すテストの補助は `test/setup/rp-kit.ts` と `test/setup/demo-rp.ts`（M9）。ここの検証は、SDK を通さずに、割符の側だけを確かめるテストのためのもの。
 
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -57,8 +57,13 @@ export async function startDeskWorld(spec: {
   readonly clients: readonly {
     readonly tenant: number;
     readonly deskActions?: readonly DeskAction[];
+    readonly initialLink?: boolean;
+    readonly operationActions?: readonly 'payout_destination.change'[];
+    readonly redirectUri?: string;
   }[];
   readonly now?: () => Date;
+  /** company-api のテナントに、初回紐付けの移行プロファイルと scope initial_link を付ける（ADR 0028）。 */
+  readonly initialLink?: boolean;
 }): Promise<DeskWorld> {
   const dir = await mkdtemp(join(tmpdir(), 'warifu-desk-'));
   const secret = randomBytes(32);
@@ -71,7 +76,13 @@ export async function startDeskWorld(spec: {
     tenants: tenantIds.map((tenantId, i) => ({
       tenantId: parseTenantId(tenantId),
       webhookUrl: `https://${WEBHOOK_HOST}/set/${i}`,
-      scopes: ['company_api', 'desk'] as const,
+      scopes:
+        spec.initialLink === true
+          ? (['company_api', 'desk', 'initial_link'] as const)
+          : (['company_api', 'desk'] as const),
+      ...(spec.initialLink === true
+        ? { initialLink: { profileVersion: 3, approvedOn: '2026-11-01' } }
+        : {}),
     })),
     sender: { socketPath: sender.sender.socketPath, credential: sender.credentials['company-api'] },
     deskInternal: { socketPath: join(dir, 'company-api.sock'), credentials: { idp: secret } },
@@ -83,6 +94,9 @@ export async function startDeskWorld(spec: {
       clients: spec.clients.map((c) => ({
         tenant: c.tenant,
         deskActions: c.deskActions ?? ALL_DESK_ACTIONS,
+        ...(c.initialLink === undefined ? {} : { initialLink: c.initialLink }),
+        ...(c.operationActions === undefined ? {} : { operationActions: c.operationActions }),
+        ...(c.redirectUri === undefined ? {} : { redirectUri: c.redirectUri }),
       })),
     },
     spec.now,

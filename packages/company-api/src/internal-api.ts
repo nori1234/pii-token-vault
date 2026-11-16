@@ -3,7 +3,8 @@
 //
 // - 資格情報は `Authorization: Bearer idp.<32バイトの base64url>`。形が違う、知らない呼び出し元、長さが違うときも、
 //   ダミーと比べてから失敗にする（所要時間をそろえる。relay の内部配送 API と同じ。ADR 0021）。
-// - POST /v1/desk_approve、/v1/desk_status、/v1/desk_cancel、/v1/account_recovered（ADR 0027）だけ。JSON の本文は 8KB まで。ほかはすべて 404。
+// - POST /v1/desk_approve、/v1/desk_status、/v1/desk_cancel、/v1/account_recovered（ADR 0027）と、初回紐付けの
+//   /v1/initial_link_check、_approve、_finalize、_status、_cancel（ADR 0028）だけ。JSON の本文は 8KB まで。ほかはすべて 404。
 // - テナントは、company-api の登録簿にあるものだけ。利用者 ID は idp が自分の認証から渡す。company-api は、
 //   行の利用者が頼んだ利用者と同じかも確かめる（BOLA の二重の守り。D-41）。
 // - 応答の本文に、受け取った値（申請ID など）を入れない。ログは固定の事象の名前だけ（不変条件4）。
@@ -24,10 +25,19 @@ import {
   DESK_REQUEST_ID_PATTERN,
   type DeskOp,
   type DeskStatusItem,
+  INITIAL_LINK_ID_PATTERN,
 } from '@pii-token-vault/warifu-core/desk/protocol';
 import type { Logger } from '@pii-token-vault/warifu-core/log';
 import type { CompanyApiConfig } from './config.ts';
 import { acceptCancel, type DeskDeps, recordApproval, statusOf } from './desk.ts';
+import {
+  acceptUserCancel as acceptInitialLinkCancel,
+  checkForApproval as checkInitialLink,
+  type InternalResult as InitialLinkResult,
+  statusOf as initialLinkStatusOf,
+  recordApproval as recordInitialLinkApproval,
+  recordFinalApproval as recordInitialLinkFinal,
+} from './initial-link.ts';
 import { enqueueRecovered } from './recovery.ts';
 
 const SECRET_BYTES = 32;
@@ -107,9 +117,114 @@ export async function startDeskInternalApi(
   const { config, deps, log } = options;
   const dummy = randomBytesOf(SECRET_BYTES);
 
+  /** 初回紐付けの結果の失敗を、応答にする（本文は固定。受け取った値を返さない）。 */
+  const initialLinkFailure = (
+    result: InitialLinkResult & { readonly ok: false },
+  ): [number, string] =>
+    result.reason === 'conflict'
+      ? [409, DESK_ERROR_BODY.conflict]
+      : result.reason === 'not_ready'
+        ? [409, DESK_ERROR_BODY.not_ready]
+        : [404, DESK_ERROR_BODY.not_found];
+
   /** 応答（ステータスと本文）。形が違えば undefined（400）。 */
   async function handle(op: DeskOp, value: unknown): Promise<[number, string] | undefined> {
     switch (op) {
+      case 'initial_link_check':
+      case 'initial_link_approve': {
+        const keys =
+          op === 'initial_link_check'
+            ? ['tenantId', 'userId', 'initialLinkId']
+            : ['tenantId', 'userId', 'itemRef', 'initialLinkId'];
+        const body = objectWithKeys(value, keys);
+        if (
+          body === undefined ||
+          !isUuid(body.tenantId) ||
+          !isUuid(body.userId) ||
+          (op === 'initial_link_approve' && !isUuid(body.itemRef)) ||
+          typeof body.initialLinkId !== 'string' ||
+          !INITIAL_LINK_ID_PATTERN.test(body.initialLinkId)
+        ) {
+          return undefined;
+        }
+        const tenant = config.tenants.get(body.tenantId as TenantId);
+        if (tenant === undefined) return [404, DESK_ERROR_BODY.not_found];
+        const userId = body.userId as WarifuUserId;
+        if (op === 'initial_link_check') {
+          const result = await checkInitialLink(deps, tenant, {
+            userId,
+            initialLinkId: body.initialLinkId,
+          });
+          return result.ok ? [204, ''] : initialLinkFailure(result);
+        }
+        const result = await recordInitialLinkApproval(deps, tenant, {
+          userId,
+          itemRef: body.itemRef as string,
+          initialLinkId: body.initialLinkId,
+        });
+        if (!result.ok) return initialLinkFailure(result);
+        log.info({ event: 'company_api.initial_link_approval_recorded' });
+        return [200, JSON.stringify({ state: result.state })];
+      }
+      case 'initial_link_finalize':
+      case 'initial_link_cancel': {
+        const body = objectWithKeys(
+          value,
+          op === 'initial_link_finalize'
+            ? ['tenantId', 'userId', 'itemRef', 'initialLinkId']
+            : ['tenantId', 'userId', 'itemRef'],
+        );
+        if (
+          body === undefined ||
+          !isUuid(body.tenantId) ||
+          !isUuid(body.userId) ||
+          !isUuid(body.itemRef) ||
+          (op === 'initial_link_finalize' &&
+            (typeof body.initialLinkId !== 'string' ||
+              !INITIAL_LINK_ID_PATTERN.test(body.initialLinkId)))
+        ) {
+          return undefined;
+        }
+        const tenant = config.tenants.get(body.tenantId as TenantId);
+        if (tenant === undefined) return [404, DESK_ERROR_BODY.not_found];
+        const input = { userId: body.userId as WarifuUserId, itemRef: body.itemRef };
+        if (op === 'initial_link_finalize') {
+          const result = await recordInitialLinkFinal(deps, tenant, {
+            ...input,
+            initialLinkId: body.initialLinkId as string,
+          });
+          if (!result.ok) return initialLinkFailure(result);
+          log.info({ event: 'company_api.initial_link_final_recorded' });
+          return [200, JSON.stringify({ initialLinkId: result.initialLinkId })];
+        }
+        const result = await acceptInitialLinkCancel(deps, tenant, input);
+        if (!result.ok) return initialLinkFailure(result);
+        log.info({ event: 'company_api.initial_link_cancel_accepted' });
+        return [200, JSON.stringify({ state: result.state })];
+      }
+      case 'initial_link_status': {
+        const body = objectWithKeys(value, ['tenantId', 'userId', 'itemRefs']);
+        if (
+          body === undefined ||
+          !isUuid(body.tenantId) ||
+          !isUuid(body.userId) ||
+          !Array.isArray(body.itemRefs) ||
+          body.itemRefs.length > DESK_LIMITS.statusItems ||
+          !body.itemRefs.every((ref) => isUuid(ref))
+        ) {
+          return undefined;
+        }
+        const tenant = config.tenants.get(body.tenantId as TenantId);
+        const itemRefs = body.itemRefs as string[];
+        const items =
+          tenant === undefined
+            ? itemRefs.map((itemRef) => ({ itemRef, state: 'unknown', waitUntil: null }))
+            : await initialLinkStatusOf(deps, tenant, {
+                userId: body.userId as WarifuUserId,
+                itemRefs,
+              });
+        return [200, JSON.stringify({ items })];
+      }
       case 'approve': {
         const body = objectWithKeys(value, [
           'tenantId',

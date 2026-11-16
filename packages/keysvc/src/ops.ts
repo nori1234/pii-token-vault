@@ -32,7 +32,7 @@ import {
   signEs256,
   signRsaSha256,
 } from './crypto.ts';
-import { ENCRYPTION_KEY_NUMBER, type Keyring } from './keyring.ts';
+import { ENCRYPTION_KEY_NUMBER, isVersionedMacPurpose, type Keyring } from './keyring.ts';
 
 /** 入力の形が違う（400 invalid_request）。 */
 export class InvalidRequestError extends Error {
@@ -150,10 +150,45 @@ function decrypt(body: Record<string, unknown>, keyring: Keyring): { plaintext: 
   }
 }
 
-function mac(body: Record<string, unknown>, keyring: Keyring): { mac: string } {
+// 版を持つ用途（ADR 0028 の O-87）は、次の3つの形を受け付ける。
+// - { purpose, message }：最新の版で作り、{ mac, version } を返す。
+// - { purpose, message, version }：指定した版で作る。持っていない版は 400。
+// - { purpose, message, allVersions: true }：持っているすべての版で作り、{ macs: [{ version, mac }] } を古い順に返す。
+//   照合で、当たったかどうかで作る回数を変えないために使う。
+// 版を持たない用途は、これまでどおり { purpose, message } だけを受け付け、{ mac } だけを返す。
+function mac(body: Record<string, unknown>, keyring: Keyring): object {
+  const purpose = body.purpose;
+  if (!isVersionedMacPurpose(purpose)) {
+    exactKeys(body, ['purpose', 'message']);
+    const message = bytesField(body.message, 1, LIMITS.macMessageBytes);
+    return { mac: toBase64Url(hmacSha256(keyring.macKey(purpose as MacPurpose), message)) };
+  }
+  if (Object.hasOwn(body, 'allVersions')) {
+    exactKeys(body, ['purpose', 'message', 'allVersions']);
+    if (body.allVersions !== true) throw new InvalidRequestError();
+    const message = bytesField(body.message, 1, LIMITS.macMessageBytes);
+    return {
+      macs: keyring.macKeyVersions(purpose).map((k) => ({
+        version: k.version,
+        mac: toBase64Url(hmacSha256(k.key, message)),
+      })),
+    };
+  }
+  if (Object.hasOwn(body, 'version')) {
+    exactKeys(body, ['purpose', 'message', 'version']);
+    const version = body.version;
+    if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1) {
+      throw new InvalidRequestError();
+    }
+    const message = bytesField(body.message, 1, LIMITS.macMessageBytes);
+    const key = keyring.macKeyByVersion(purpose, version);
+    if (key === undefined) throw new InvalidRequestError();
+    return { mac: toBase64Url(hmacSha256(key.key, message)), version: key.version };
+  }
   exactKeys(body, ['purpose', 'message']);
   const message = bytesField(body.message, 1, LIMITS.macMessageBytes);
-  return { mac: toBase64Url(hmacSha256(keyring.macKey(body.purpose as MacPurpose), message)) };
+  const key = keyring.latestMacKey(purpose);
+  return { mac: toBase64Url(hmacSha256(key.key, message)), version: key.version };
 }
 
 function deriveAlias(body: Record<string, unknown>, keyring: Keyring): { localPart: string } {
