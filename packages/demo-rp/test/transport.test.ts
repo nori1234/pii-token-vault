@@ -33,6 +33,11 @@ beforeAll(async () => {
       res.end();
       return;
     }
+    if (req.url === '/huge') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('x'.repeat(256 * 1024 + 1));
+      return;
+    }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end('{"ok":true}');
   });
@@ -68,8 +73,14 @@ describe('demo-rp の通信（ADR 0029 の O-109）', () => {
     ).rejects.toThrow(TransportError);
     const redirected = await send({ method: 'GET', url: `${allowedOrigin}/redirect`, headers: {} });
     expect(redirected.status).toBe(302);
-    expect(hits).toEqual(['allowed /jwks', 'allowed /redirect']);
+    // 上限（256 KiB）を超える応答は、読み切らずに失敗にする。
+    await expect(
+      send({ method: 'GET', url: `${allowedOrigin}/huge`, headers: {} }),
+    ).rejects.toThrow(TransportError);
+    expect(hits).toEqual(['allowed /jwks', 'allowed /redirect', 'allowed /huge']);
     expect(() => createTransport(['https://idp.example/path'])).toThrow(TransportError);
     expect(() => createTransport(['ftp://idp.example'])).toThrow(TransportError);
+    // http（平文）は、ループバックだけ。
+    expect(() => createTransport(['http://idp.example'])).toThrow(TransportError);
   });
 });

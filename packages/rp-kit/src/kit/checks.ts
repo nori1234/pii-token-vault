@@ -98,10 +98,15 @@ function isAccountRef(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 256;
 }
 
-/** 申告されたルートが、決めた形か（実行時にも確かめる。型だけに頼らない）。 */
+/**
+ * 申告されたルートが、決めた形か（実行時にも確かめる。型だけに頼らない）。
+ * 空の申告は、検査できなかったとする（ログインの戻り先すらない RP はない。フックを仮に置いただけの空の配列を、
+ * 「禁止した機能がない」として合格にしない）。
+ */
 function validRoutes(value: unknown): value is readonly DeclaredRoute[] {
   return (
     Array.isArray(value) &&
+    value.length > 0 &&
     value.every(
       (route) =>
         typeof route === 'object' &&

@@ -154,10 +154,18 @@ describe('rp-kit の単体検査（ADR 0029）', () => {
       'https://idp.example/path',
       'ftp://idp.example',
       'https://a@b.example',
+      // http（平文）は、ループバックだけ。
+      'http://idp.example',
+      'http://localhost.example',
+      'http://169.254.169.254',
       'x',
     ]) {
       expect(() => parseOrigin(bad)).toThrow(RpKitError);
     }
+    for (const ok of ['https://idp.example', 'http://localhost:3000', 'http://127.0.0.1:3000']) {
+      expect(parseOrigin(ok)).toBe(ok);
+    }
+    expect(parseOrigin('http://[::1]:3000/')).toBe('http://[::1]:3000');
   });
 
   it('エラーには値を入れない。割符の error の値も、形の合うものだけ', () => {

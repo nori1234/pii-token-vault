@@ -271,6 +271,8 @@ describe('テスト9：適合テストキット（ADR 0029）', () => {
       [{ legacyReset: 'ok' }, 'legacy_reset'],
       [{ linkAttack: false }, 'link_attack'],
       [{ routes: undefined }, 'sub_rewrite'],
+      [{ routes: [] }, 'sub_rewrite'],
+      [{ routes: [] }, 'guest_lookup'],
       [{ routes: [{ method: 'GET', path: 'no-slash', tags: ['other'] }] }, 'guest_lookup'],
       [{ routes: [{ method: 'GET', path: '/x', tags: [] }] }, 'sub_rewrite'],
       [{ routes: [{ method: 'GET', path: '/x', tags: ['unknown'] }] }, 'sub_rewrite'],

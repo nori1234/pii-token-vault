@@ -253,12 +253,13 @@ export function registerOperationRoutes(ctx: RouteContext): void {
         acr: ACR_PASSKEY,
         authTime: Math.floor(approvedAt / 1000),
       });
+      // 監査を先に残す。監査に失敗したら、承認を引き継ぎに入れない（監査のない承認を、企業に渡さない）。
+      await auditOperationApproved(repo, userId, tenantId);
       await saveOperationHandoff(
         store,
         { ...handoff, state: 'approved', approval: { userId, approvedAt, jwt } },
         approvedAt,
       );
-      await auditOperationApproved(repo, userId, tenantId);
       request.log.info({ event: 'idp.operation_approved' });
       return { redirectTo: finishUrl(uid) };
     } finally {

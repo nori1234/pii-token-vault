@@ -1,6 +1,6 @@
 // 窓口の操作別承認のテストの補助（ADR 0026）。idp、company-api（idp からの内部 API）、sender（取消の SET の配送）を
 // 1つのテストの中で立て、企業のサーバーの役（PAR、トークン、操作ごとの承認の検証、作成の知らせ、取消の結果の報告）を
-// テストの中で行う。企業の側の参照実装（rp-kit）は M9 で作る。ここの検証は、その手前のテストのためのもの。
+// テストの中で行う。企業の側の SDK（rp-kit）を通すテストの補助は `test/setup/rp-kit.ts` と `test/setup/demo-rp.ts`（M9）。ここの検証は、SDK を通さずに、割符の側だけを確かめるテストのためのもの。
 
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';

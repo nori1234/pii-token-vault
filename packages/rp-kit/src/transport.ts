@@ -23,7 +23,14 @@ export type Send = (request: HttpRequest) => Promise<HttpResponse>;
 /** 応答の本文の上限（大きすぎる応答で、企業のサーバーのメモリを使わせない）。 */
 export const MAX_RESPONSE_BYTES = 256 * 1024;
 
-/** オリジン（scheme://host[:port]）の形。パス、クエリ、利用者情報を持たない。 */
+/** http（平文）を許すホスト。手元の開発とテストだけ。 */
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * オリジン（scheme://host[:port]）の形。パス、クエリ、利用者情報を持たない。
+ * https だけを受け付ける。http は、ループバック（localhost、127.0.0.1、[::1]）に限る（client assertion や承認の JWT を、
+ * 平文で外へ送らせない）。
+ */
 export function parseOrigin(value: string): string {
   let url: URL;
   try {
@@ -33,6 +40,7 @@ export function parseOrigin(value: string): string {
   }
   if (
     (url.protocol !== 'https:' && url.protocol !== 'http:') ||
+    (url.protocol === 'http:' && !LOOPBACK_HOSTS.has(url.hostname)) ||
     url.username !== '' ||
     url.password !== '' ||
     url.pathname !== '/' ||

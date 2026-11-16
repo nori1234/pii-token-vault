@@ -13,7 +13,7 @@ const NOW = 1_800_000_000;
 const setKey = generateKeyPairSync('ec', { namedCurve: 'P-256' });
 const otherKey = generateKeyPairSync('ec', { namedCurve: 'P-256' });
 
-async function sdk() {
+async function sdk(clock: { now: number; fetches: number } = { now: NOW, fetches: 0 }) {
   const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const jwks = {
     keys: [{ ...(await exportJWK(setKey.publicKey)), kid: 'set', alg: 'ES256', use: 'sig' }],
@@ -24,19 +24,23 @@ async function sdk() {
     tenantId: TENANT,
     privateKey: (await exportJWK(privateKey)) as JWK,
     kid: 'k1',
-    now: () => new Date(NOW * 1000),
+    now: () => new Date(clock.now * 1000),
     send: async (request) => {
       if (request.url !== `${ORIGIN}/jwks`) throw new Error('予期しない宛先');
+      clock.fetches += 1;
       return { status: 200, headers: {}, body: JSON.stringify(jwks) };
     },
   });
 }
 
-function signedSet(iat: number, options: { aud?: string; key?: typeof setKey.privateKey } = {}) {
+function signedSet(
+  iat: number,
+  options: { aud?: string; key?: typeof setKey.privateKey; kid?: string } = {},
+) {
   return new SignJWT({
     events: { 'urn:warifu:secevent:initial-link-waiting': { initial_link_id: 'L'.repeat(43) } },
   })
-    .setProtectedHeader({ alg: 'ES256', kid: 'set', typ: 'secevent+jwt' })
+    .setProtectedHeader({ alg: 'ES256', kid: options.kid ?? 'set', typ: 'secevent+jwt' })
     .setIssuer(ORIGIN)
     .setAudience(options.aud ?? TENANT)
     .setIssuedAt(iat)
@@ -95,5 +99,27 @@ describe('rp-kit の SET の検証（spec 02 の7章）', () => {
     ).toEqual(plain);
     expect(await refusalOf(client.verifySet('not-a-jwt'))).toEqual(plain);
     expect(setRefusalOf(new Error('x'))).toEqual(plain);
+  });
+
+  it('知らない kid の SET を送り続けても、割符へ鍵を取りに行くのは30秒に1回まで', async () => {
+    // 攻撃者が持っている情報：企業の SET の受け口の URL（公開の入口）
+    // 試す経路：自分の鍵で署名し、割符にない kid を付けた SET を、受け口に何度も送る
+    // 期待する結果：どれも 400 と err だけ。企業のサーバーが割符へ鍵を取りに行くのは、30秒に1回まで
+    //               （受け口を、割符への要求を増やす踏み台にさせない）。30秒たてば、取り直して鍵の入れ替えに追いつく
+    // plan 11章：テスト12（RP-50）
+    const clock = { now: NOW, fetches: 0 };
+    const client = await sdk(clock);
+    const plain = { status: 400, body: { err: 'invalid_request' } };
+    const forged = () => signedSet(clock.now, { key: otherKey.privateKey, kid: 'unknown' });
+    for (let i = 0; i < 5; i += 1) {
+      expect(await refusalOf(client.verifySet(await forged()))).toEqual(plain);
+    }
+    expect(clock.fetches).toBe(1);
+    clock.now += 31;
+    expect(await refusalOf(client.verifySet(await forged()))).toEqual(plain);
+    expect(clock.fetches).toBe(2);
+    // 正しい SET は、その間も受け取れる。
+    await expect(client.verifySet(await signedSet(clock.now))).resolves.toBeDefined();
+    expect(clock.fetches).toBe(2);
   });
 });
