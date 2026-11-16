@@ -3,7 +3,7 @@
 割符（Warifu）に接続する企業のための SDK と、適合テストキットです。企業のサーバー（Node 22 以上）で動かします。
 
 - これは PoC です。本番では使わないでください。
-- npm には、まだ公開していません（公開は、M9 のマージの後に、メンテナーが行います）。
+- npm のパッケージ名は `@pii-token-vault/rp-kit` です（公開の手順は、下の「メンテナー向け」に書いています）。
 - 接続要件の正本は、リポジトリの [`docs/spec/02-rp-requirements.md`](../../docs/spec/02-rp-requirements.md) です。この README と食い違ったら、仕様を正とします。設計の判断は [ADR 0029](../../docs/adr/0029-company-side-code-boundary.md) と [ADR 0030](../../docs/adr/0030-high-risk-step-up.md) にあります。
 
 ## SDK が受け持つこと、企業が受け持つこと
@@ -194,6 +194,18 @@ npm run pack:rp-kit -- <出力先のディレクトリ>
 
 - 出力先に、変換した `.js` と `.d.ts`、公開用の `package.json`、README、LICENSE が入ります。テストと、変換の前の `.ts` は入りません。
 - このコマンドは、公開をしません。中身を確かめた後、メンテナーが出力先で `npm publish` を実行します。
-- 公開の前に決めること：版（いまは `0.0.0`）、npm のスコープ `@pii-token-vault` の持ち主、公開の範囲。
+- 版は `packages/rp-kit/package.json` の `version` です（同じ版は、二度と公開できません）。公開の範囲は public です（まとめた `package.json` の `publishConfig`）。
+- 公開する人の npm のアカウントが、npm の組織 `pii-token-vault`（スコープ `@pii-token-vault`）で、公開の権限を持っている必要があります。
+
+公開の手順（`main` で）：
+
+```
+npm ci
+npm run pack:rp-kit -- ../rp-kit-publish
+cd ../rp-kit-publish
+npm publish --dry-run   # 入るファイルと版を確かめる
+npm publish
+```
+
 - `scripts/pack-rp-kit.test.ts`（`npm test` に入っています）が、まとめたものを、別のプロセスの Node で読み込めることを確かめています。
 - `packages/rp-kit/test/readme.test.ts`（`npm test` に入っています）が、この README の `ts` のコードの例を、SDK の型で確かめています。例を変えたら、`npm test` で確かめてください。

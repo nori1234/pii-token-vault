@@ -38,6 +38,7 @@ describe('rp-kit の公開の準備（plan 10章「公開の順番」）', () =>
     }
     const manifest = JSON.parse(readFileSync(join(packed.dir, 'package.json'), 'utf8'));
     expect(manifest.private).toBeUndefined();
+    expect(manifest.publishConfig).toEqual({ access: 'public' });
     expect(manifest.exports).toEqual({
       '.': { types: './index.d.ts', default: './index.js' },
       './kit': { types: './kit/index.d.ts', default: './kit/index.js' },

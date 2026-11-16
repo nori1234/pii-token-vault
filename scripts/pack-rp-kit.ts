@@ -68,6 +68,8 @@ export function publishManifest(source: Record<string, unknown>): Record<string,
     type: 'module',
     engines: source.engines,
     sideEffects: false,
+    // スコープ付きのパッケージは、既定では公開されない（有料の組織だけの restricted になる）。公開の範囲を固定する。
+    publishConfig: { access: 'public' },
     exports: {
       '.': { types: './index.d.ts', default: './index.js' },
       './kit': { types: './kit/index.d.ts', default: './kit/index.js' },
