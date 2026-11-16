@@ -68,7 +68,7 @@ async function client(now = () => new Date()) {
     kid: 'k1',
     send: await fakeIdp(),
     now,
-    jtiStore: memoryJtiStore(),
+    jtiStore: memoryJtiStore(() => now().getTime()),
   });
 }
 
@@ -296,5 +296,47 @@ describe('rp-kit の単体検査（ADR 0029）', () => {
       pendingFor(finalize),
     );
     expect(outcome).toMatchObject({ stage: 'finalize', initialLinkId: id });
+  });
+
+  it('使った承認は、exp を過ぎて時計のずれの許容の間も、もう一度は通らない', async () => {
+    // 攻撃者が持っている情報：一度使われた承認の JWT（企業のサーバーの記録などから）
+    // 試す経路：exp の前に1回使う。exp の1秒後（検証は、時計のずれの許容の30秒の間は通る）に、同じ JWT をもう一度確かめる。
+    //           許容を過ぎた後にも確かめる
+    // 期待する結果：exp の1秒後と29秒後は replayed（使い済みの記録を、exp では忘れない）。31秒後は期限切れで
+    //               verification_failed。どの時刻でも、2回目は通らない
+    // plan 11章：テスト1（RP-12、ADR 0030 の O-115）
+    let offsetMs = 0;
+    const base = Date.now();
+    const sdk = await client(() => new Date(base + offsetMs));
+    const requestId = randomBytes(16).toString('base64url');
+    const detail = {
+      type: 'warifu_desk',
+      actions: ['desk.case.status.read'],
+      identifier: requestId,
+      subject: SUB,
+    };
+    const jwt = await approvalJwt(op.privateKey, 'op', OP_APPROVAL_TYP, {
+      purpose: 'desk',
+      action: 'desk.case.status.read',
+      request_id: requestId,
+    });
+    const verify = () =>
+      codeOf(sdk.verifyDeskApproval(loginWith({ ...detail, approval: jwt }), pendingFor(detail)));
+    offsetMs = 299_000;
+    expect(await verify()).toBeUndefined();
+    expect(await verify()).toBe('replayed');
+    for (const seconds of [301, 329]) {
+      offsetMs = seconds * 1000;
+      expect(await verify()).toBe('replayed');
+      expect(await verify()).toBe('replayed');
+    }
+    offsetMs = 331_000;
+    expect(await verify()).toBe('verification_failed');
+    // 置き場所の単体でも、keepUntil を過ぎるまでは忘れない。
+    let nowMs = 0;
+    const store = memoryJtiStore(() => nowMs);
+    expect(await store.use('j', 1000)).toBe(true);
+    nowMs = 999;
+    expect(await store.use('j', 1000)).toBe(false);
   });
 });

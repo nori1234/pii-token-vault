@@ -21,6 +21,8 @@ import type { SoftAuthenticator } from '../setup/soft-authenticator.ts';
 const HOUR = 3600 * 1000;
 let clock = Date.now();
 const now = () => new Date(clock);
+/** demo-rp（企業）の時計のずれ（ミリ秒）。割符の時計とずれた受け口を作る。 */
+let demoSkew = 0;
 let world: DeskWorld;
 let demo: DemoRp;
 
@@ -36,7 +38,7 @@ beforeAll(async () => {
     origin: DEMO_ORIGIN_A,
     client: world.t.clients[0] as never,
     tenantIndex: 0,
-    now,
+    now: () => new Date(clock + demoSkew),
     initialLink: true,
   });
 });
@@ -179,6 +181,140 @@ describe('テスト9：demo-rp の旧会員の引き継ぎと窓口（ADR 0028�
       (await fresh.site.post('/legacy/link/start', { email: 'victim@example.com' })).location,
     ).toBe('/legacy?n=legacy_required');
     expect(demo.routes.filter((r) => /mail|phone|lookup|search|merge|rebind/i.test(r))).toEqual([]);
+  });
+
+  it('受け口が古い SET を set_too_old で断ると、割符は新しい jti と iat で送り直し、待機はその後に始まる', async () => {
+    // 攻撃者が持っている情報：以前に送られた、署名の正しい SET（受け口に送り直して、古い知らせを受け取らせたい）
+    // 試す経路：企業の時計が10分進んでいる（SET が10分前のものに見える）ときに、待機の知らせの SET が届く。
+    //           時計を直した後に、割符が送り直す。先の時刻の SET と、壊れた本文も受け口に送る
+    // 期待する結果：最初の SET は 400 と set_too_old で、申請は待機に入らない。割符は5秒あけて新しい jti と iat で送り直し、
+    //               それを受け取って待機が始まる。先の時刻は iat_in_future、壊れた本文は理由なしの 400
+    // plan 11章：テスト12（RP-50、spec 02 の7章、ADR 0026 の O-67）
+    const user = await newUser();
+    expect((await user.site.seedLegacy()).status).toBe(200);
+    expect((await startLink(user)).callback.location).toBe('/legacy?n=link_waiting');
+    const mine = async () => {
+      const key = await demo.store.read(
+        (state) => state.sessions.get([...user.site.cookies.values()][0] ?? '')?.accountKey,
+      );
+      return demo.store.read((state) =>
+        [...state.linkAttempts.values()].filter((a) => a.accountKey === key).map((a) => a.state),
+      );
+    };
+    const answers: { status: number; body: string }[] = [];
+    world.sender.respondThrough(async (request) => {
+      const res = await demo.app.inject({
+        method: 'POST',
+        url: '/warifu/events',
+        headers: { 'content-type': 'application/secevent+jwt' },
+        payload: request.body,
+      });
+      answers.push({ status: res.statusCode, body: res.body });
+      return {
+        status: res.statusCode,
+        headers: { 'content-type': 'application/json' },
+        body: res.body,
+      };
+    });
+    try {
+      const logged = demo.setLog.length;
+      const from = world.sender.requests.length;
+      demoSkew = 10 * 60_000;
+      clock += 61_000;
+      expect(await world.company.api.deliverDue()).toMatchObject({ delivered: 0, reissue: 1 });
+      expect(answers).toEqual([
+        { status: 400, body: '{"err":"invalid_request","warifu_reason":"set_too_old"}' },
+      ]);
+      expect(await mine()).toEqual(['pending_notice']);
+      expect(demo.setLog).toHaveLength(logged);
+
+      // 先の時刻の SET（企業の時計が遅れている）と、壊れた本文。
+      const first = String(world.sender.requests[from]?.body);
+      demoSkew = -10 * 60_000;
+      const future = await demo.app.inject({
+        method: 'POST',
+        url: '/warifu/events',
+        headers: { 'content-type': 'application/secevent+jwt' },
+        payload: first,
+      });
+      expect([future.statusCode, future.body]).toEqual([
+        400,
+        '{"err":"invalid_request","warifu_reason":"iat_in_future"}',
+      ]);
+      demoSkew = 0;
+      const broken = await demo.app.inject({
+        method: 'POST',
+        url: '/warifu/events',
+        headers: { 'content-type': 'application/secevent+jwt' },
+        payload: `${first.slice(0, -4)}AAAA`,
+      });
+      expect([broken.statusCode, broken.body]).toEqual([400, '{"err":"invalid_request"}']);
+
+      // 企業の時計が直った後、割符は5秒あけて、新しい jti と iat で送り直す。
+      clock += 6_000;
+      expect(await world.company.api.deliverDue()).toMatchObject({ delivered: 1 });
+      expect(answers.at(-1)?.status).toBe(202);
+      expect(await mine()).toEqual(['waiting']);
+      const claimsOf = (body: string) =>
+        JSON.parse(Buffer.from(body.split('.')[1] ?? '', 'base64url').toString('utf8')) as {
+          jti: string;
+          iat: number;
+        };
+      const sent = world.sender.requests.slice(from).map((r) => claimsOf(r.body));
+      expect(sent).toHaveLength(2);
+      expect(sent[1]?.jti).not.toBe(sent[0]?.jti);
+      expect(Number(sent[1]?.iat)).toBeGreaterThan(Number(sent[0]?.iat));
+      expect(demo.setLog).toHaveLength(logged + 1);
+      expect(demo.setLog.at(-1)?.jti).toBe(sent[1]?.jti);
+    } finally {
+      demoSkew = 0;
+      world.sender.respondThrough(undefined);
+    }
+  });
+
+  it('期限の切れた申請は、割符の正本と照らして閉じ、同じ旧会員と割符のアカウントで申請し直せる', async () => {
+    // 攻撃者が持っている情報：なし（利用者が、最初の承認の後に手続きを放置した、ふつうの場合）
+    // 試す経路：最初の承認と待機の SET の後、親申請の期限（72時間）を過ぎてから、確定、取消、申請のやり直しを試す
+    // 期待する結果：確定と取消はできない（申請は期限切れ）。企業の側の申請は expired に閉じ、同じ旧会員と同じ割符の
+    //               アカウントで、新しい申請を出して、割符の最初の承認まで進める。割符に確かめられない間は、閉じない
+    // plan 11章：テスト9（ADR 0028 の O-90）
+    const user = await newUser();
+    expect((await user.site.seedLegacy()).status).toBe(200);
+    expect((await startLink(user)).callback.location).toBe('/legacy?n=link_waiting');
+    await deliverSets();
+    const accountKey = await demo.store.read(
+      (state) => state.sessions.get([...user.site.cookies.values()][0] ?? '')?.accountKey,
+    );
+    const mine = () =>
+      demo.store.read((state) =>
+        [...state.linkAttempts.values()]
+          .filter((a) => a.accountKey === accountKey)
+          .map((a) => a.state),
+      );
+    expect(await mine()).toEqual(['waiting']);
+
+    // 割符に確かめられないとき（受け口の時計が大きくずれて、企業の資格情報が通らない）は、申請を閉じない。
+    clock += 73 * HOUR;
+    demoSkew = 60 * 60_000;
+    expect((await user.site.verifyLegacy()).status).toBe(200);
+    await user.site.get('/legacy');
+    expect(await mine()).toEqual(['waiting']);
+    demoSkew = 0;
+
+    // 期限の後：確定も取消もできず、企業の側の申請は、正本と同じ expired に閉じる。
+    expect((await user.site.verifyLegacy()).status).toBe(200);
+    expect((await user.site.post('/legacy/link/finalize')).location).toBe(
+      '/legacy?n=link_not_ready',
+    );
+    expect(await mine()).toEqual(['expired']);
+    expect((await user.site.post('/legacy/cancel')).location).toBe('/legacy?n=link_closed');
+    const page = await user.site.get('/legacy');
+    expect(page.text).toContain('割符で確認して、引き継ぎを申請する');
+    expect(page.text).not.toContain('引き継ぐ申請が出ています');
+
+    // 同じ旧会員と、同じ割符のアカウントで、申請し直せる。
+    expect((await startLink(user)).callback.location).toBe('/legacy?n=link_waiting');
+    expect(await mine()).toEqual(['expired', 'pending_notice']);
   });
 
   it('窓口：受付番号だけでは何も見えず、利用者が割符で承認した注文1件の状態だけを、担当者が1回だけ見られる', async () => {

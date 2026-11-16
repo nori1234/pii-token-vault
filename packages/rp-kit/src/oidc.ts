@@ -21,6 +21,8 @@ export const OPERATION_APPROVAL_TYP = 'warifu-operation-approval+jwt';
 export const APPROVAL_MAX_SECONDS = 300;
 /** 時計のずれの許容（秒）。 */
 const CLOCK_TOLERANCE = 30;
+/** 使い済みの jti を、JWT を受理しうる時刻（exp と時計のずれの許容）より長く覚えておくための余裕（秒）。 */
+const JTI_KEEP_MARGIN = 60;
 const SUB_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 export type DeskAction = 'desk.case.status.read' | 'desk.order.status.read' | 'desk.case.create';
@@ -301,7 +303,10 @@ export async function createWarifuClient(config: WarifuClientConfig): Promise<Wa
     ) {
       throw new RpKitError('verification_failed');
     }
-    if (!(await jtis.use(jti, exp * 1000))) throw new RpKitError('replayed');
+    // 検証は exp の後も CLOCK_TOLERANCE 秒は通る。使い済みの記録は、それより長く持つ（exp で忘れると、exp の直後に
+    // 同じ承認がもう一度通ってしまう）。
+    const keepUntil = (exp + CLOCK_TOLERANCE + JTI_KEEP_MARGIN) * 1000;
+    if (!(await jtis.use(jti, keepUntil))) throw new RpKitError('replayed');
     return payload as JWTPayload & { exp: number; jti: string };
   }
 

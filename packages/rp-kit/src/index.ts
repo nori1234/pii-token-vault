@@ -9,6 +9,7 @@ export {
   createCompanyApiClient,
   INITIAL_LINK_PROOF_TYP,
   type InitialLinkProofClaims,
+  setRefusalOf,
   type VerifiedSet,
 } from './company-api.ts';
 export { RpKitError, type RpKitErrorCode } from './errors.ts';

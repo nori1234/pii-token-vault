@@ -80,10 +80,51 @@ export function registerLegacyRoutes(
     }
   }
 
+  /** 割符の正本で終わっている状態（企業の側の申請も閉じる）。 */
+  const ENDED: ReadonlySet<string> = new Set(['expired', 'cancelled', 'not_linked']);
+
+  /**
+   * 企業の側で開いたままの申請を、割符の正本の状態と照らして閉じる（ADR 0028 の O-90）。
+   * - 正本が expired・cancelled・not_linked なら、企業の側も閉じる。正本の行が保存期間を過ぎて消えていたとき
+   *   （別の移行専用ID が返る）も、閉じる。閉じた後は、同じ旧会員と割符のアカウントで、新しい申請ができる。
+   * - 閉じるかどうかは、正本の状態だけで決める。企業の側の時計だけでは閉じない（承認済みや紐付け済みの申請を、
+   *   時刻だけで取り消さない）。割符に確かめられないときは、開いたままにする。
+   */
+  async function reconcile(match: (attempt: LinkAttempt) => boolean): Promise<void> {
+    const open = await store.read((state) =>
+      [...state.linkAttempts.values()].filter((a) => OPEN_STATES.has(a.state) && match(a)),
+    );
+    for (const attempt of open) {
+      let current: { initialLinkId: string; state: string };
+      try {
+        current = await company.initialLink.status({
+          requestId: attempt.requestId,
+          memberRef: attempt.memberRef,
+        });
+      } catch (error) {
+        if (!(error instanceof RpKitError)) throw error;
+        continue;
+      }
+      const gone = current.initialLinkId !== attempt.initialLinkId;
+      if (!gone && !ENDED.has(current.state)) continue;
+      await store.transaction((state) => {
+        const stored = state.linkAttempts.get(attempt.requestId);
+        if (stored !== undefined && OPEN_STATES.has(stored.state)) {
+          stored.state = !gone && current.state === 'cancelled' ? 'cancelled' : 'expired';
+        }
+      });
+    }
+  }
+
+  /** この画面の人（旧パスキーで確かめた旧会員と、ログイン中のアカウント）に関わる申請を、正本と照らす。 */
+  const reconcileFor = (memberId: string | undefined, accountKey: string | undefined) =>
+    reconcile((a) => a.memberId === memberId || a.accountKey === accountKey);
+
   app.get('/legacy', async (request, reply) => {
     const session = await ctx.sessionOf(request, reply);
     const account = await ctx.accountOf(session);
     const memberId = verifiedMemberId(session);
+    await reconcileFor(memberId, account?.key);
     const n = (request.query as { n?: unknown }).n;
     const view = await store.read((state) => {
       const member = memberId === undefined ? undefined : state.legacyMembers.get(memberId);
@@ -215,6 +256,8 @@ export function registerLegacyRoutes(
     const memberId = verifiedMemberId(session);
     if (account === undefined) return ctx.go(reply, '/legacy', 'login_required');
     if (memberId === undefined) return ctx.go(reply, '/legacy', 'legacy_required');
+    // 期限切れなどで終わった前の申請が、新しい申請を塞がないようにする。
+    await reconcileFor(memberId, account.key);
     const member = await store.read((state) => {
       const found = state.legacyMembers.get(memberId);
       const busy =
@@ -288,6 +331,7 @@ export function registerLegacyRoutes(
     if (account === undefined) return ctx.go(reply, '/legacy', 'login_required');
     // 旧パスキーを、待機の後にもう一度確かめていること（新しいチャレンジ。O-86 の手順6）。
     if (memberId === undefined) return ctx.go(reply, '/legacy', 'legacy_required');
+    await reconcileFor(memberId, account.key);
     const attempt = await store.read((state) => {
       const found = openAttemptOf(state, memberId);
       const member = state.legacyMembers.get(memberId);
@@ -366,8 +410,9 @@ export function registerLegacyRoutes(
     const session = await ctx.sessionOf(request, reply);
     const memberId = verifiedMemberId(session);
     if (memberId === undefined) return ctx.go(reply, '/legacy', 'legacy_required');
+    await reconcileFor(memberId, undefined);
     const attempt = await store.read((state) => openAttemptOf(state, memberId));
-    if (attempt === undefined) return ctx.go(reply, '/legacy', 'failed');
+    if (attempt === undefined) return ctx.go(reply, '/legacy', 'link_closed');
     try {
       // 旧会員の側の新しい確かめを添えた取消（証跡の stage は cancel）。
       await company.initialLink.cancel(proofOf(attempt));

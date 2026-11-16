@@ -21,6 +21,9 @@ import {
 
 export const INITIAL_LINK_PROOF_TYP = 'warifu-initial-link-proof+jwt';
 export const SET_TYP = 'secevent+jwt';
+/** SET の iat の古さの上限（秒）と、先の時刻の許容（秒）。spec 02 の7章、ADR 0026 の O-67。 */
+export const SET_MAX_AGE_SECONDS = 300;
+export const SET_FUTURE_TOLERANCE_SECONDS = 30;
 const CLOCK_TOLERANCE = 30;
 const ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const REF_PATTERN = /^[A-Za-z0-9_-]{22,128}$/;
@@ -70,6 +73,14 @@ export interface CompanyApiClient {
   ): Promise<Record<string, unknown>>;
   readonly initialLink: {
     prepare(input: { readonly requestId: string; readonly memberRef: string }): Promise<string>;
+    /**
+     * 申請のいまの状態（割符の正本）を確かめる。同じ申請ID と会員参照の仮申請の再送で読む。正本の行が、終端の後の
+     * 保存期間を過ぎて消えていれば、新しい仮申請として作られ、別の移行専用ID が返る（企業は、前の申請を終わったものとして扱う）。
+     */
+    status(input: {
+      readonly requestId: string;
+      readonly memberRef: string;
+    }): Promise<{ readonly initialLinkId: string; readonly state: string }>;
     /** 旧会員の側の確かめの後の証跡（stage は initial か final）。 */
     submitProof(claims: InitialLinkProofClaims): Promise<void>;
     /** 企業の側の取消（証跡の stage は cancel）。 */
@@ -79,8 +90,33 @@ export interface CompanyApiClient {
       readonly result: 'linked' | 'not_linked' | 'cancelled';
     }): Promise<void>;
   };
-  /** 受け口に届いた SET（本文の文字列）を確かめる。jti の重複の扱いは、企業が自分の記録で行う。 */
+  /**
+   * 受け口に届いた SET（本文の文字列）を確かめる。署名、iss、aud、typ、形式を確かめた後、iat が300秒より古ければ
+   * reason が set_too_old、30秒より先なら iat_in_future の RpKitError（verification_failed）にする。
+   * 受け口は、失敗を setRefusalOf で応答にする。jti の重複の扱いは、企業が自分の記録で行う。
+   */
   verifySet(body: string): Promise<VerifiedSet>;
+}
+
+/**
+ * SET の受け口が、検証の失敗に返す応答（RFC 8935 の形。spec 02 の7章）。割符は、warifu_reason が set_too_old なら
+ * 新しい jti と iat で送り直し、それ以外は保留にする。description は付けない（割符は読まない）。
+ */
+export function setRefusalOf(error: unknown): {
+  readonly status: 400;
+  readonly body: {
+    readonly err: 'invalid_request';
+    readonly warifu_reason?: 'set_too_old' | 'iat_in_future';
+  };
+} {
+  const reason = error instanceof RpKitError ? error.reason : undefined;
+  return {
+    status: 400,
+    body:
+      reason === 'set_too_old' || reason === 'iat_in_future'
+        ? { err: 'invalid_request', warifu_reason: reason }
+        : { err: 'invalid_request' },
+  };
 }
 
 export async function createCompanyApiClient(config: CompanyApiConfig): Promise<CompanyApiClient> {
@@ -199,23 +235,32 @@ export async function createCompanyApiClient(config: CompanyApiConfig): Promise<
     });
   }
 
+  async function prepared(input: { readonly requestId: string; readonly memberRef: string }) {
+    if (!REQUEST_ID_PATTERN.test(input.requestId) || !REF_PATTERN.test(input.memberRef)) {
+      throw new RpKitError('invalid_config');
+    }
+    const body = await call('initial_link', '/v1/initial-link/prepare', {
+      request_id: input.requestId,
+      member_ref: input.memberRef,
+    });
+    if (
+      typeof body.initial_link_id !== 'string' ||
+      !ID_PATTERN.test(body.initial_link_id) ||
+      typeof body.state !== 'string'
+    ) {
+      throw new RpKitError('invalid_response');
+    }
+    return { initialLinkId: body.initial_link_id, state: body.state };
+  }
+
   return {
     accessToken,
     call,
     initialLink: {
       async prepare(input) {
-        if (!REQUEST_ID_PATTERN.test(input.requestId) || !REF_PATTERN.test(input.memberRef)) {
-          throw new RpKitError('invalid_config');
-        }
-        const body = await call('initial_link', '/v1/initial-link/prepare', {
-          request_id: input.requestId,
-          member_ref: input.memberRef,
-        });
-        if (typeof body.initial_link_id !== 'string' || !ID_PATTERN.test(body.initial_link_id)) {
-          throw new RpKitError('invalid_response');
-        }
-        return body.initial_link_id;
+        return (await prepared(input)).initialLinkId;
       },
+      status: prepared,
       async submitProof(claims) {
         if (claims.stage === 'cancel') throw new RpKitError('invalid_config');
         await call('initial_link', '/v1/initial-link/proofs', { proof: await proof(claims) });
@@ -250,8 +295,6 @@ export async function createCompanyApiClient(config: CompanyApiConfig): Promise<
             requiredClaims: ['jti', 'iat', 'events'],
             clockTolerance: CLOCK_TOLERANCE,
             currentDate: new Date(nowMs()),
-            // SET は送り直しで古い iat のまま届く。古さの上限は企業の記録（jti）で扱う。
-            maxTokenAge: '7d',
           });
           const { jti, iat, events, sub_id: subIdClaim } = payload as Record<string, unknown>;
           const subject =
@@ -275,6 +318,14 @@ export async function createCompanyApiClient(config: CompanyApiConfig): Promise<
             'email' in payload
           ) {
             throw new RpKitError('verification_failed');
+          }
+          // 署名、宛先、形式が正しいと分かった後で、鮮度を確かめる（割符は、古くなった SET を新しい jti と iat で送り直す）。
+          const nowSeconds = nowMs() / 1000;
+          if (iat < nowSeconds - SET_MAX_AGE_SECONDS) {
+            throw new RpKitError('verification_failed', 'set_too_old');
+          }
+          if (iat > nowSeconds + SET_FUTURE_TOLERANCE_SECONDS) {
+            throw new RpKitError('verification_failed', 'iat_in_future');
           }
           return {
             jti,

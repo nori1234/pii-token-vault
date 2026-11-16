@@ -49,6 +49,7 @@ export const NOTICES: Readonly<Record<string, string>> = Object.freeze({
   link_done:
     '旧会員を、この割符のアカウントに引き継ぎました。旧パスキーでの確認は、今後は受け付けません。',
   link_cancelled: '引き継ぎの申請を取り消しました。',
+  link_closed: '進行中の引き継ぎの申請はありません（期限が切れたか、すでに終わっています）。',
   link_refused: '引き継ぎを始められませんでした。すでに引き継ぎ済みか、進行中の申請があります。',
   legacy_required: '先に、旧パスキーで確かめてください。',
   login_required: '先に、割符でログインしてください。',

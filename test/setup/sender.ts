@@ -140,6 +140,14 @@ export interface TestSender {
   readonly logs: string[];
   /** Webhook の受け口の応答を変える（本文の既定は `{}`）。 */
   respondWith(status: number, headers?: Record<string, string>, body?: string): void;
+  /** 受け口の応答を、関数で決める（企業の受け口の役を、demo-rp にさせるとき）。undefined で、固定の応答に戻す。 */
+  respondThrough(
+    handler:
+      | ((
+          request: ReceivedRequest,
+        ) => Promise<{ status: number; headers?: Record<string, string>; body: string }>)
+      | undefined,
+  ): void;
   stop(): Promise<void>;
 }
 
@@ -152,6 +160,11 @@ export async function startTestSender(table: DnsTable, fixture: TlsFixture): Pro
   const mails: ReceivedMail[] = [];
   const logs: string[] = [];
   let response = { status: 202, headers: {} as Record<string, string>, body: '{}' };
+  let responder:
+    | ((
+        request: ReceivedRequest,
+      ) => Promise<{ status: number; headers?: Record<string, string>; body: string }>)
+    | undefined;
 
   const https: HttpsServer = createHttpsServer(
     { cert: fixture.cert, key: fixture.key },
@@ -165,8 +178,17 @@ export async function startTestSender(table: DnsTable, fixture: TlsFixture): Pro
           headers: req.headers,
           body: Buffer.concat(chunks).toString('utf8'),
         });
-        res.writeHead(response.status, response.headers);
-        res.end(response.body);
+        const received = requests.at(-1) as ReceivedRequest;
+        void (responder === undefined ? Promise.resolve(response) : responder(received)).then(
+          (answer) => {
+            res.writeHead(answer.status, answer.headers ?? {});
+            res.end(answer.body);
+          },
+          () => {
+            res.writeHead(500);
+            res.end();
+          },
+        );
       });
     },
   );
@@ -222,6 +244,9 @@ export async function startTestSender(table: DnsTable, fixture: TlsFixture): Pro
     logs,
     respondWith(status, headers = {}, body = '{}') {
       response = { status, headers, body };
+    },
+    respondThrough(handler) {
+      responder = handler;
     },
     async stop() {
       await sender.close();
