@@ -85,6 +85,10 @@ export interface CompanyApiClient {
     submitProof(claims: InitialLinkProofClaims): Promise<void>;
     /** 企業の側の取消（証跡の stage は cancel）。 */
     cancel(claims: Omit<InitialLinkProofClaims, 'stage'>): Promise<string>;
+    /**
+     * 確定や取消の適用の結果の報告。自社の確定と同じトランザクションで送信待ちに残し、成功する（割符が 204 を返す）
+     * まで送り直す。同じ報告の再送も成功する。rejected（4xx）は、送り直しても変わらない（自社の記録と割符の食い違い）。
+     */
     report(input: {
       readonly initialLinkId: string;
       readonly result: 'linked' | 'not_linked' | 'cancelled';

@@ -4,7 +4,7 @@
 
 import { readFileSync } from 'node:fs';
 import { createLocalJWKSet, decodeProtectedHeader, type JSONWebKeySet, jwtVerify } from 'jose';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sql } from '../../packages/warifu-core/src/db/sql.ts';
 import { parseWarifuUserId, type WarifuUserId } from '../../packages/warifu-core/src/ids.ts';
 import { userIdOf } from '../setup/approvals.ts';
@@ -19,6 +19,24 @@ import {
 } from '../setup/desk.ts';
 import { type Browser, redeemCode, type TestClient } from '../setup/idp.ts';
 import { initialLinkProof, newMemberRef, newRequestId } from '../setup/initial-link.ts';
+
+// idp の監査の書き込みの失敗を差し込む（failNextAudits に回数を入れたときだけ失敗させる。ほかは本物を呼ぶ）。
+const auditFault = vi.hoisted(() => ({ failNextAudits: 0 }));
+vi.mock('../../packages/idp/src/initial-link.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../packages/idp/src/initial-link.ts')>();
+  return {
+    ...actual,
+    auditInitialLinkApproved: async (
+      ...args: Parameters<typeof actual.auditInitialLinkApproved>
+    ): Promise<void> => {
+      if (auditFault.failNextAudits > 0) {
+        auditFault.failNextAudits -= 1;
+        throw new Error('監査の書き込みに失敗した（テストで差し込んだ障害）');
+      }
+      await actual.auditInitialLinkApproved(...args);
+    },
+  };
+});
 
 const HOUR = 3600 * 1000;
 const APPROVAL_TYP = 'warifu-initial-link-approval+jwt';
@@ -141,6 +159,37 @@ async function idpItemCount(userId: WarifuUserId): Promise<number> {
   } finally {
     await db.close();
   }
+}
+
+/** この利用者の、idp の初回紐付けの承認の監査（stage を、残した順に）。 */
+async function approvalAudits(userId: WarifuUserId): Promise<string[]> {
+  const db = await serviceDb('idp');
+  try {
+    const rows = await db.withWarifuUser(userId, (tx) =>
+      tx.query<{ stage: string }>(
+        sql`SELECT attrs->>'stage' AS stage FROM audit.events
+             WHERE event_type = 'idp.initial_link.approved' ORDER BY scope_seq`,
+      ),
+    );
+    return rows.map((row) => row.stage);
+  } finally {
+    await db.close();
+  }
+}
+
+/** 承認が通らなかった後に、そのまま finish に進む。企業に戻る URL の error と code を返す。 */
+async function finishAfterFailure(
+  user: { readonly browser: Browser },
+  uid: string | undefined,
+): Promise<[string | null | undefined, string | null | undefined]> {
+  expect(uid).toBeDefined();
+  const finished = await user.browser.follow(
+    `${world.t.origin}/interaction/${uid}/initial-link/finish`,
+  );
+  return [
+    finished.external?.searchParams.get('error'),
+    finished.external?.searchParams.get('code'),
+  ];
 }
 
 describe('テスト9：初回紐付け（idp。ADR 0028）', () => {
@@ -390,5 +439,61 @@ describe('テスト9：初回紐付け（idp。ADR 0028）', () => {
     );
     expect(appJs.split(String(sentence)).length - 1).toBe(1);
     expect(appJs.match(/responsibilityNote\(\)/g)?.length).toBe(3);
+  });
+
+  it('idp の監査に失敗した承認は、finish で企業に渡さず、最終の承認はもう一度の承認で渡す', async () => {
+    // 攻撃者が持っている情報：なし（障害。承認の後の、idp の監査の書き込みだけが失敗する）
+    // 試す経路：最初の承認と最終の承認のそれぞれで、idp の監査を1回だけ失敗させ、そのまま finish に進む。
+    //           最終の承認は、その後にもう一度承認する
+    // 期待する結果：監査に失敗した承認の verify は 500。その後の finish は access_denied で、認可コードを出さない
+    //               （状態も、紐付けの承認の JWT も、企業に渡らない）。もう一度の最終の承認では、監査が残り、JWT が渡る
+    // plan 11章：テスト9、ADR 0028 の O-102（オーナーのレビュー、2026-11-16）
+    const user = await connectedUser(world, client(0));
+    const userId = parseWarifuUserId(userIdOf(user.browser.authenticator));
+    const { id, memberRef } = await preparedWithProof();
+
+    auditFault.failNextAudits = 1;
+    const first = await approveFlow(
+      user,
+      client(0),
+      detailOf('initial_link.approve', id, user.sub),
+    );
+    expect(first.approve?.status).toBe(500);
+    expect(await finishAfterFailure(user, first.uid)).toEqual(['access_denied', null]);
+    expect(await approvalAudits(userId)).toEqual([]);
+
+    // 最初の承認は、正本には記録されている。待機の SET の後、企業の側の流れは進む。
+    clock += 61_000;
+    await world.company.api.deliverDue();
+    clock += 24 * HOUR + 1000;
+    const finalProof = await companyCall('proofs', {
+      proof: await initialLinkProof(
+        companyTenant(0),
+        { initial_link_id: id, member_ref: memberRef, stage: 'final' },
+        { nowMs: clock },
+      ),
+    });
+    expect(finalProof.status).toBe(204);
+    await user.approval.approvalLogin();
+
+    auditFault.failNextAudits = 1;
+    const failed = await approveFlow(
+      user,
+      client(0),
+      detailOf('initial_link.finalize', id, user.sub),
+    );
+    expect(failed.approve?.status).toBe(500);
+    expect(await finishAfterFailure(user, failed.uid)).toEqual(['access_denied', null]);
+    expect(await approvalAudits(userId)).toEqual([]);
+
+    const retried = await approveFlow(
+      user,
+      client(0),
+      detailOf('initial_link.finalize', id, user.sub),
+    );
+    expect(retried.approve?.status).toBe(200);
+    expect(typeof retried.authorizationDetails?.[0]?.approval).toBe('string');
+    expect(await approvalAudits(userId)).toEqual(['final']);
+    expect(auditFault.failNextAudits).toBe(0);
   });
 });

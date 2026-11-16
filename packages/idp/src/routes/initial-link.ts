@@ -506,8 +506,11 @@ export function registerInitialLinkRoutes(ctx: RouteContext): void {
         }
         approval = { userId, approvedAt, state: done.state };
       }
-      await saveInitialLinkHandoff(store, { ...handoff, state: 'approved', approval }, approvedAt);
+      // 監査を先に残す。監査に失敗したら、承認を引き継ぎに入れない（監査のない承認を、finish で企業に渡さない）。
+      // 引き継ぎは pending のままなので、最終の承認は、利用者がもう一度承認すれば出る（正本は、approved の申請の
+      // 確かめに、同じ結果を返す）。
       await auditInitialLinkApproved(repo, userId, tenantId, final ? 'final' : 'initial');
+      await saveInitialLinkHandoff(store, { ...handoff, state: 'approved', approval }, approvedAt);
       request.log.info({ event: 'idp.initial_link_approved', stage: final ? 'final' : 'initial' });
       return { redirectTo: finishUrl(uid) };
     } finally {
