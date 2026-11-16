@@ -5,7 +5,7 @@
 //   状態の照会だけを許す（RP-20・RP-21）。高リスクの操作（出金先の変更など）には使えない。
 // - 窓口担当者の画面には、連絡先や番号での検索も、代わりの本人確認も置かない（RP-27）。
 
-import { newRandomId, type PendingAuthorization } from '@pii-token-vault/rp-kit';
+import { newRandomId, type PendingAuthorization, RpKitError } from '@pii-token-vault/rp-kit';
 import type { Ctx } from './app.ts';
 import { esc, FIXED_S, postButton, STAFF_FAILED, STAFF_HIGH_RISK, WARNING_B } from './pages.ts';
 
@@ -137,11 +137,18 @@ export function registerDeskRoutes(ctx: Ctx): void {
     const checked = await checkDeskInput(account.key, ctx.bodyOf(request));
     if (!checked.ok) return ctx.go(reply, '/desk', checked.notice);
     // 申請ID は、この承認のための乱数。受付番号は、割符に渡さない（RP-22）。
-    const started = await warifu.pushDesk({
-      action: 'desk.order.status.read',
-      requestId: newRandomId(),
-      sub: account.sub,
-    });
+    let started: { readonly url: string; readonly pending: PendingAuthorization };
+    try {
+      started = await warifu.pushDesk({
+        action: 'desk.order.status.read',
+        requestId: newRandomId(),
+        sub: account.sub,
+      });
+    } catch (error) {
+      if (!(error instanceof RpKitError)) throw error;
+      // 割符が要求を断った、または割符につながらない（出金先の変更や引き継ぎの申請と同じ扱い）。
+      return ctx.go(reply, '/desk', 'failed');
+    }
     const ref = JSON.stringify({
       receiptNo: checked.desk.receiptNo,
       orderId: checked.order.orderId,
@@ -231,7 +238,8 @@ export function registerDeskRoutes(ctx: Ctx): void {
     if (config.staffKey === undefined || typeof key !== 'string' || key !== config.staffKey) {
       return ctx.go(reply, '/staff', 'failed');
     }
-    await ctx.updateSession(session.sessionId, (s) => {
+    // 担当者の権限を付けるときは、セッションの ID を作り直す（利用者のログインと同じ。固定されたセッションを使わせない）。
+    await ctx.renewSession(reply, session, (s) => {
       s.staff = true;
     });
     return ctx.go(reply, '/staff');

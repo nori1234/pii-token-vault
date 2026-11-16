@@ -85,7 +85,9 @@ export type LinkAttemptState =
   | 'final_proof_submitted'
   | 'linked'
   | 'cancelled'
-  | 'expired';
+  | 'expired'
+  /** 割符の最終の承認の後、企業が紐付けなかった（認証世代が変わっていた。割符に not_linked を報告した）。 */
+  | 'not_linked';
 
 /** 初回紐付けの申請（企業の側の記録）。申請ID、会員参照、移行専用ID は、ここにだけ置く（ログ、URL、画面に出さない）。 */
 export interface LinkAttempt {

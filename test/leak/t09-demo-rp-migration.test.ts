@@ -388,4 +388,55 @@ describe('テスト9：demo-rp の旧会員の引き継ぎと窓口（ADR 0028�
     expect(results.slice(0, 5)).toEqual(Array(5).fill('/desk?n=desk_not_found'));
     expect(results[5]).toBe('/desk?n=desk_limited');
   });
+
+  it('最終の承認の後、確定の前に旧会員の側の認証世代が変わっていたら、紐付けず、割符に not_linked を報告する', async () => {
+    // 攻撃者が持っている情報：盗んだ旧パスキー（持ち主は、待機の知らせを見落とした）
+    // 試す経路：待機の後、最終の確かめと割符の最終の承認まで進める。企業が確定する前に、持ち主が旧会員の側で認証器を
+    //           変える（認証世代が上がる。デモには、その画面がないので、企業の記録を直接変える）
+    // 期待する結果：企業は紐付けず（旧会員は閉じない）、割符に not_linked を報告して申請を終える。割符の正本も
+    //               not_linked になる（approved のまま残らない）。同じ旧会員で、新しい申請を出せる
+    // plan 11章：テスト9（ADR 0028 の O-88・O-91）
+    const user = await newUser();
+    expect((await user.site.seedLegacy()).status).toBe(200);
+    expect((await startLink(user)).callback.location).toBe('/legacy?n=link_waiting');
+    await deliverSets();
+    const accountKey = await demo.store.read(
+      (state) => state.sessions.get([...user.site.cookies.values()][0] ?? '')?.accountKey,
+    );
+    const mine = () =>
+      demo.store.read((state) =>
+        [...state.linkAttempts.values()].filter((a) => a.accountKey === accountKey),
+      );
+    clock += 24 * HOUR + 1000;
+    expect((await user.site.verifyLegacy()).status).toBe(200);
+    const finalize = await user.site.post('/legacy/link/finalize');
+    expect(finalize.status).toBe(303);
+    const approved = await approveAtWarifu(user, String(finalize.location), '/initial-link');
+
+    // 割符の最終の承認の後、企業が確定する前に、旧会員の側の認証世代が上がる。
+    const memberId = (await mine())[0]?.memberId ?? '';
+    await demo.store.transaction((state) => {
+      const member = state.legacyMembers.get(memberId);
+      if (member !== undefined) member.authEpoch += 1;
+    });
+    const done = await user.site.openCallback(String(approved.back));
+    expect(done.callback.location).toBe('/legacy?n=failed');
+    expect((await mine()).map((a) => a.state)).toEqual(['not_linked']);
+    const after = await demo.store.read((state) => ({
+      member: state.legacyMembers.get(memberId),
+      account: state.accounts.get(accountKey ?? ''),
+    }));
+    expect(after.member?.closed).toBe(false);
+    expect(after.member?.linkedAccountKey).toBeNull();
+    expect(after.account?.legacyMemberId).toBeNull();
+    // 割符の正本も not_linked で終わっている（企業の結果の報告が届いた）。
+    await user.approval.approvalLogin();
+    const items = (await user.approval.get('/api/initial-link-items')).json.items as {
+      state: string;
+    }[];
+    expect(items.map((i) => i.state)).toEqual(['not_linked']);
+    // 同じ旧会員で、新しい申請を出せる（新しい認証世代で）。
+    expect((await startLink(user)).callback.location).toBe('/legacy?n=link_waiting');
+    expect((await mine()).map((a) => a.state)).toEqual(['not_linked', 'pending_notice']);
+  });
 });

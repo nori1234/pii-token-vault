@@ -372,7 +372,7 @@ export function registerLegacyRoutes(
     const outcome = await warifu.readInitialLink(login, pending as PendingAuthorization);
     if (outcome.stage !== 'finalize' || ref === null) return '/legacy?n=failed';
     // 紐付け、旧パスキーの確かめを閉じること、認証世代の更新を、まとめて確定する（O-86 の手順8、RP-30・RP-31）。
-    const linked = await store.transaction((state) => {
+    const decided = await store.transaction((state) => {
       const attempt = state.linkAttempts.get(ref);
       const member = attempt === undefined ? undefined : state.legacyMembers.get(attempt.memberId);
       const stored = state.accounts.get(account.key);
@@ -389,6 +389,13 @@ export function registerLegacyRoutes(
       ) {
         return undefined;
       }
+      // 確定の時点で、認証世代が、申請のときと同じかを確かめる（確定の前の確かめの後に、旧会員の側で認証器の追加や
+      // 削除、回復があったかもしれない）。違えば紐付けない。割符の正本は、最終の承認の後（approved）は期限で
+      // 終わらないので、not_linked を報告して終わらせる（ADR 0028 の O-88・O-91）。
+      if (member.authEpoch !== attempt.authEpoch) {
+        attempt.state = 'not_linked';
+        return { initialLinkId: attempt.initialLinkId, result: 'not_linked' as const };
+      }
       stored.legacyMemberId = member.memberId;
       member.linkedAccountKey = account.key;
       member.closed = true;
@@ -397,11 +404,11 @@ export function registerLegacyRoutes(
       for (const s of state.sessions.values()) {
         if (s.legacy?.memberId === member.memberId) s.legacy = null;
       }
-      return attempt.initialLinkId;
+      return { initialLinkId: attempt.initialLinkId, result: 'linked' as const };
     });
-    if (linked === undefined) return '/legacy?n=failed';
-    await report(linked, 'linked');
-    return '/?n=link_done';
+    if (decided === undefined) return '/legacy?n=failed';
+    await report(decided.initialLinkId, decided.result);
+    return decided.result === 'linked' ? '/?n=link_done' : '/legacy?n=failed';
   });
 
   // ---- 取消（旧会員の側。旧パスキーで確かめた人だけ） ----
