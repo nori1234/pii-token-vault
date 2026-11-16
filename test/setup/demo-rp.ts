@@ -141,6 +141,8 @@ export async function startDemoRp(
     readonly tenantIndex: number;
     readonly now: () => Date;
     readonly initialLink?: boolean;
+    /** demo-rp から割符への通信に、障害を差し込む（テスト用。既定は、そのまま割符に渡す）。 */
+    readonly wrapSend?: (send: Send) => Send;
   },
 ): Promise<DemoRp> {
   const tenant = world.company.tenants[input.tenantIndex];
@@ -166,7 +168,9 @@ export async function startDemoRp(
     desk: { name: 'デモ証券 お客さま窓口', staff: '担当 A' },
     staffKey: STAFF_KEY,
     demoSeed: true,
-    send: worldSend(world),
+    send: input.wrapSend === undefined ? worldSend(world) : input.wrapSend(worldSend(world)),
+    // 結果の報告の送信待ちは、テストが flushReports で送る（自分では回さない）。
+    reportIntervalMs: 0,
     now: input.now,
     // テストの idp は、ID トークンを実際の時計で出す。
     oidcNow: () => new Date(),

@@ -6,6 +6,8 @@
 //    その人は申請を取り消せる（盗まれた旧パスキーで、他人の割符のアカウントに結び付けられるのを、持ち主が止められる）。
 // 4. 待機の後、旧パスキーをもう一度確かめて2つ目の証跡を出し、割符の最終の承認（紐付けの承認の JWT）を受ける。
 // 5. 紐付けと、旧パスキーの確かめを閉じること（RP-31）と、認証世代の更新を、1つのトランザクションで確定させる。
+// 6. 結果（linked、not_linked、cancelled）の報告は、確定と同じトランザクションで送信待ちに残し、割符が 204 を
+//    返すまで送り直す（O-91。割符の正本は、最終の承認の後と取消の受理の後は、期限では終わらず、報告で終わる）。
 //
 // 申請ID、会員参照、移行専用ID は、サーバーのメモリにだけ置き、ログ、URL、画面に出さない（O-87）。
 // メールや SMS のリンクやコードでは、承認も取消もさせない。
@@ -26,7 +28,7 @@ import {
   verifyLegacyRegistration,
 } from './legacy.ts';
 import { esc, postButton } from './pages.ts';
-import type { DemoState, LinkAttempt, Session } from './state.ts';
+import type { DemoState, LinkAttempt, PendingReport, Session } from './state.ts';
 
 const WAITING_EVENT = 'urn:warifu:secevent:initial-link-waiting';
 const CANCELLATION_EVENT = 'urn:warifu:secevent:initial-link-cancellation';
@@ -36,6 +38,27 @@ const OPEN_STATES: ReadonlySet<string> = new Set([
   'waiting',
   'final_proof_submitted',
 ]);
+
+/** 結果の報告を送り直す間隔（届かなかった回数ごとに倍にし、1時間で止める）。 */
+const REPORT_RETRY = Object.freeze({ firstMs: 30_000, maxMs: 3600_000 });
+/**
+ * 送り直せば届きうる失敗か（割符に届かない、5xx、応答の喪失、応答の形の違い、レート制限の 429）。ほかの 4xx は、
+ * 送り直しても答えが変わらない。429 を送り直すのは、割符の SET の送信待ちと同じ扱い（spec 02 の SET の受け口）。
+ */
+function retryable(error: RpKitError): boolean {
+  return (
+    error.code === 'unavailable' ||
+    error.code === 'invalid_response' ||
+    (error.code === 'rejected' && error.reason === 'rate_limited')
+  );
+}
+
+/** 結果の報告の送信待ちを1回送った結果（件数）。 */
+export interface ReportFlush {
+  readonly sent: number;
+  readonly retry: number;
+  readonly held: number;
+}
 
 function openAttemptOf(state: DemoState, memberId: string): LinkAttempt | undefined {
   return [...state.linkAttempts.values()].find(
@@ -47,7 +70,7 @@ export function registerLegacyRoutes(
   ctx: Ctx,
   company: CompanyApiClient,
   initialLink: { readonly profileVersion: number },
-): void {
+): { readonly flushReports: () => Promise<ReportFlush> } {
   const { app, config, store, warifu, nowMs } = ctx;
   const rp: LegacyRp = {
     rpId: new URL(config.origin).hostname,
@@ -71,13 +94,76 @@ export function registerLegacyRoutes(
     authEpoch: attempt.authEpoch,
   });
 
-  /** 結果の報告。届かなくても、企業の側の状態は変えない（割符の側は、期限で終わる）。 */
-  async function report(initialLinkId: string, result: 'linked' | 'cancelled' | 'not_linked') {
-    try {
-      await company.initialLink.report({ initialLinkId, result });
-    } catch (error) {
-      if (!(error instanceof RpKitError)) throw error;
+  /**
+   * 結果の報告を、送信待ちに残す（確定や取消の適用と同じ transaction の中で呼ぶ。ADR 0028 の O-91）。
+   * 割符の正本は、approved と cancel_requested では期限で終わらないので、報告が届かないと、正本が開いたまま残り、
+   * その利用者の次の申請が断られ続ける。送信待ちは、割符が 204 を返すまで消さない。
+   */
+  function enqueueReport(
+    state: DemoState,
+    initialLinkId: string,
+    result: PendingReport['result'],
+  ): void {
+    if (state.pendingReports.has(initialLinkId)) return;
+    const now = nowMs();
+    state.pendingReports.set(initialLinkId, {
+      initialLinkId,
+      result,
+      createdAt: now,
+      failures: 0,
+      nextAt: now,
+      held: false,
+    });
+  }
+
+  /**
+   * 送ってよい時刻になった報告を、1件ずつ送る。204 なら消す（同じ報告の再送も 204）。届かなければ、間隔をあけて
+   * 送り直す（レート制限の 429 も）。ほかの 4xx で断られたら、送り直しても答えが変わらないので、保留にして企業が
+   * 調べる。
+   */
+  async function flushOnce(): Promise<ReportFlush> {
+    const now = nowMs();
+    const due = await store.read((state) =>
+      [...state.pendingReports.values()].filter((r) => !r.held && r.nextAt <= now),
+    );
+    const counts = { sent: 0, retry: 0, held: 0 };
+    for (const report of due) {
+      let outcome: keyof typeof counts;
+      try {
+        await company.initialLink.report({
+          initialLinkId: report.initialLinkId,
+          result: report.result,
+        });
+        outcome = 'sent';
+      } catch (error) {
+        if (!(error instanceof RpKitError)) throw error;
+        outcome = retryable(error) ? 'retry' : 'held';
+      }
+      counts[outcome] += 1;
+      await store.transaction((state) => {
+        const stored = state.pendingReports.get(report.initialLinkId);
+        if (stored === undefined) return;
+        if (outcome === 'sent') {
+          state.pendingReports.delete(report.initialLinkId);
+        } else if (outcome === 'held') {
+          stored.held = true;
+        } else {
+          stored.failures += 1;
+          stored.nextAt =
+            nowMs() +
+            Math.min(REPORT_RETRY.firstMs * 2 ** (stored.failures - 1), REPORT_RETRY.maxMs);
+        }
+      });
     }
+    return counts;
+  }
+
+  /** 送信待ちを送る。同時に呼ばれても、1回ずつ順に動かす（同じ報告を、並べて送らない）。 */
+  let flushing: Promise<unknown> = Promise.resolve();
+  function flushReports(): Promise<ReportFlush> {
+    const next = flushing.then(flushOnce, flushOnce);
+    flushing = next.catch(() => undefined);
+    return next;
   }
 
   /** 割符の正本で終わっている状態（企業の側の申請も閉じる）。 */
@@ -394,21 +480,24 @@ export function registerLegacyRoutes(
       // 終わらないので、not_linked を報告して終わらせる（ADR 0028 の O-88・O-91）。
       if (member.authEpoch !== attempt.authEpoch) {
         attempt.state = 'not_linked';
-        return { initialLinkId: attempt.initialLinkId, result: 'not_linked' as const };
+        enqueueReport(state, attempt.initialLinkId, 'not_linked');
+        return 'not_linked' as const;
       }
       stored.legacyMemberId = member.memberId;
       member.linkedAccountKey = account.key;
       member.closed = true;
       member.authEpoch += 1;
       attempt.state = 'linked';
+      enqueueReport(state, attempt.initialLinkId, 'linked');
       for (const s of state.sessions.values()) {
         if (s.legacy?.memberId === member.memberId) s.legacy = null;
       }
-      return { initialLinkId: attempt.initialLinkId, result: 'linked' as const };
+      return 'linked' as const;
     });
     if (decided === undefined) return '/legacy?n=failed';
-    await report(decided.initialLinkId, decided.result);
-    return decided.result === 'linked' ? '/?n=link_done' : '/legacy?n=failed';
+    // 報告は、送信待ちから送る。届かなくても、確定は戻さない（送信待ちに残り、後で送り直す）。
+    await flushReports();
+    return decided === 'linked' ? '/?n=link_done' : '/legacy?n=failed';
   });
 
   // ---- 取消（旧会員の側。旧パスキーで確かめた人だけ） ----
@@ -458,8 +547,12 @@ export function registerLegacyRoutes(
       }
       if (!OPEN_STATES.has(attempt.state)) return false;
       attempt.state = 'cancelled';
+      enqueueReport(state, attempt.initialLinkId, 'cancelled');
       return true;
     });
-    if (cancelled) await report(id, 'cancelled');
+    // SET には、届かなくても 202 を返す（取消の適用と報告の送信待ちは、もう残してある）。
+    if (cancelled) await flushReports();
   });
+
+  return { flushReports };
 }

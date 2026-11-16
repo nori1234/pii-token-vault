@@ -4,6 +4,9 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { DemoRp } from '../../packages/demo-rp/src/app.ts';
+import { sql } from '../../packages/warifu-core/src/db/sql.ts';
+import { userIdOf } from '../setup/approvals.ts';
+import { serviceDb } from '../setup/db.ts';
 import {
   approveAtWarifu,
   DEMO_ORIGIN_A,
@@ -25,6 +28,14 @@ const now = () => new Date(clock);
 let demoSkew = 0;
 let world: DeskWorld;
 let demo: DemoRp;
+/** demo-rp から割符への結果の報告（/v1/initial-link/results）に差し込む障害。 */
+const reportFault = {
+  /**
+   * unavailable：割符に届かない。lost：割符は受け取って処理したが、応答が失われる。reject：割符が 409 で断る。
+   * rate_limited：割符がレート制限の 429 で断る（reject と rate_limited は、割符には届けない）。
+   */
+  mode: 'none' as 'none' | 'unavailable' | 'lost' | 'reject' | 'rate_limited',
+};
 
 beforeAll(async () => {
   world = await startDeskWorld({
@@ -40,6 +51,28 @@ beforeAll(async () => {
     tenantIndex: 0,
     now: () => new Date(clock + demoSkew),
     initialLink: true,
+    wrapSend: (send) => async (request) => {
+      if (reportFault.mode === 'none' || !request.url.endsWith('/v1/initial-link/results')) {
+        return send(request);
+      }
+      if (reportFault.mode === 'reject') {
+        return {
+          status: 409,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ error: 'conflict' }),
+        };
+      }
+      if (reportFault.mode === 'rate_limited') {
+        // company-api のレート制限の応答と同じ形（packages/company-api/src/app.ts の limited）。
+        return {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '60' },
+          body: JSON.stringify({ error: 'rate_limited' }),
+        };
+      }
+      if (reportFault.mode === 'lost') await send(request);
+      throw new Error('通信の障害（テストで差し込んだ）');
+    },
   });
 });
 
@@ -80,6 +113,50 @@ async function startLink(user: DemoUser) {
 
 const attemptStates = () =>
   demo.store.read((state) => [...state.linkAttempts.values()].map((a) => a.state));
+
+/** demo-rp の結果の報告の送信待ち（結果、届かなかった回数、保留）。 */
+const pendingReports = () =>
+  demo.store.read((state) =>
+    [...state.pendingReports.values()].map((r) => [r.result, r.failures, r.held]),
+  );
+
+/** 申請から、割符の最終の承認まで進め、企業への戻りの URL を返す（企業の確定の前で止める）。 */
+async function untilFinalApproval(user: DemoUser): Promise<string> {
+  expect((await user.site.seedLegacy()).status).toBe(200);
+  expect((await startLink(user)).callback.location).toBe('/legacy?n=link_waiting');
+  await deliverSets();
+  clock += 24 * HOUR + 1000;
+  expect((await user.site.verifyLegacy()).status).toBe(200);
+  const finalize = await user.site.post('/legacy/link/finalize');
+  expect(finalize.status).toBe(303);
+  const approved = await approveAtWarifu(user, String(finalize.location), '/initial-link');
+  return String(approved.back);
+}
+
+/** 割符の受信箱の、この利用者の初回紐付けの項目の状態（割符の正本の状態から決まる）。 */
+async function warifuStates(user: DemoUser): Promise<string[]> {
+  await user.approval.approvalLogin();
+  const items = (await user.approval.get('/api/initial-link-items')).json.items as {
+    state: string;
+  }[];
+  return items.map((i) => i.state);
+}
+
+/** 割符に残った、この利用者の紐付け済みの記録の件数。 */
+async function linkRecords(user: DemoUser): Promise<number> {
+  const tenant = world.company.tenants[0];
+  if (tenant === undefined) throw new Error('準備に失敗した');
+  const userId = userIdOf(user.browser.authenticator);
+  const db = await serviceDb('company-api');
+  try {
+    const rows = await db.withTenant(tenant.tenantId, (tx) =>
+      tx.query(sql`SELECT user_id FROM company_api.initial_link_records WHERE user_id = ${userId}`),
+    );
+    return rows.length;
+  } finally {
+    await db.close();
+  }
+}
 
 describe('テスト9：demo-rp の旧会員の引き継ぎと窓口（ADR 0028）', () => {
   it('旧パスキーの確かめ、割符の承認、待機、最終の確かめを経て引き継ぎ、その後は旧パスキーを受け付けない', async () => {
@@ -438,5 +515,147 @@ describe('テスト9：demo-rp の旧会員の引き継ぎと窓口（ADR 0028�
     // 同じ旧会員で、新しい申請を出せる（新しい認証世代で）。
     expect((await startLink(user)).callback.location).toBe('/legacy?n=link_waiting');
     expect((await mine()).map((a) => a.state)).toEqual(['not_linked', 'pending_notice']);
+  });
+
+  it('確定の報告（linked）が届かないか、応答が失われても、送信待ちに残し、割符が 204 を返すまで送り直す', async () => {
+    // 攻撃者が持っている情報：なし（障害。企業から割符への結果の報告が届かない。または、割符は受け取ったが応答が失われる）
+    // 試す経路：割符の最終の承認の後、報告が届かない状態で確定し、送信待ちを送る（まだ届かない）。通信が戻ってから送る。
+    //           別の利用者で、報告の応答だけが失われる状態で確定し、送信待ちを送る
+    // 期待する結果：企業の側は確定し（linked）、報告は送信待ちに残る。届くまで、割符の正本は approved のまま（受信箱は
+    //               finalizing）。送り直しは、間隔をあけてから行う。通信が戻ると、送り直しが 204 で、正本は linked に
+    //               なり、送信待ちは空になる。応答が失われた報告の送り直しも 204 で、割符の紐付け済みの記録は1件だけ
+    // plan 11章：テスト9（ADR 0028 の O-91。オーナーのレビュー、2026-11-16）
+    const user = await newUser();
+    const back = await untilFinalApproval(user);
+    reportFault.mode = 'unavailable';
+    expect((await user.site.openCallback(back)).callback.location).toBe('/?n=link_done');
+    expect(await pendingReports()).toEqual([['linked', 1, false]]);
+    expect(await warifuStates(user)).toEqual(['finalizing']);
+    // 次に送ってよい時刻（30秒後）の前は、送らない。時刻が来ても、届かなければ残り、次の間隔は倍になる。
+    expect(await demo.flushReports()).toEqual({ sent: 0, retry: 0, held: 0 });
+    clock += 30_000;
+    expect(await demo.flushReports()).toEqual({ sent: 0, retry: 1, held: 0 });
+    expect(await pendingReports()).toEqual([['linked', 2, false]]);
+    reportFault.mode = 'none';
+    clock += 30_000;
+    expect(await demo.flushReports()).toEqual({ sent: 0, retry: 0, held: 0 });
+    clock += 30_000;
+    expect(await demo.flushReports()).toEqual({ sent: 1, retry: 0, held: 0 });
+    expect(await pendingReports()).toEqual([]);
+    expect(await warifuStates(user)).toEqual(['linked']);
+    expect(await linkRecords(user)).toBe(1);
+
+    // 応答の喪失：割符は linked にしたが、企業には届いたかが分からない。送り直しも 204 で、記録は増えない。
+    const other = await newUser();
+    const back2 = await untilFinalApproval(other);
+    reportFault.mode = 'lost';
+    expect((await other.site.openCallback(back2)).callback.location).toBe('/?n=link_done');
+    expect(await pendingReports()).toEqual([['linked', 1, false]]);
+    expect(await warifuStates(other)).toEqual(['linked']);
+    reportFault.mode = 'none';
+    clock += 30_000;
+    expect(await demo.flushReports()).toEqual({ sent: 1, retry: 0, held: 0 });
+    expect(await pendingReports()).toEqual([]);
+    expect(await linkRecords(other)).toBe(1);
+  });
+
+  it('取消の報告（cancelled）と、紐付けなかった報告（not_linked）も、届くまで送り直し、届いた後に申請し直せる', async () => {
+    // 攻撃者が持っている情報：盗んだ旧パスキー（取消は、本人が割符の受信箱から行う）
+    // 試す経路：(1) 待機中に本人が割符で取り消し、企業が取消の SET を受けたとき、報告が届かない。(2) 最終の承認の後に
+    //           旧会員の側の認証世代が変わり、企業が not_linked にしたとき、報告が届かない。通信が戻ってから送る
+    // 期待する結果：SET の受け口は 202 を返し、企業の側は取消を適用する。報告は送信待ちに残り、割符の正本は
+    //               cancel_requested（not_linked のときは approved）のまま。通信が戻ると、送り直しで正本が
+    //               cancelled と not_linked で終わり、同じ割符のアカウントで新しい申請を出せる
+    // plan 11章：テスト9（ADR 0028 の O-90・O-91。オーナーのレビュー、2026-11-16）
+    const user = await newUser();
+    expect((await user.site.seedLegacy()).status).toBe(200);
+    expect((await startLink(user)).callback.location).toBe('/legacy?n=link_waiting');
+    await deliverSets();
+    await user.approval.approvalLogin();
+    const [item] = (await user.approval.get('/api/initial-link-items')).json.items as {
+      id: string;
+    }[];
+    const started = await user.approval.post('/api/initial-link-items/cancel/options', {
+      id: item?.id,
+    });
+    const response = user.approval.authenticator.get(started.json.options as never, undefined, {
+      origin: user.approval.origin,
+    });
+    const cancelled = await user.approval.post('/api/initial-link-items/cancel/verify', {
+      ceremonyId: started.json.ceremonyId,
+      response,
+    });
+    expect(cancelled.json).toEqual({ ok: true, state: 'cancel_requested' });
+    reportFault.mode = 'unavailable';
+    // 取消の SET の受け口は、報告が届かなくても 202（deliverSets が確かめる）。
+    await deliverSets();
+    expect(await pendingReports()).toEqual([['cancelled', 1, false]]);
+    expect(await warifuStates(user)).toEqual(['cancel_requested']);
+    reportFault.mode = 'none';
+    clock += 30_000;
+    expect(await demo.flushReports()).toEqual({ sent: 1, retry: 0, held: 0 });
+    expect(await warifuStates(user)).toEqual(['cancelled']);
+    // 割符の正本が終わったので、同じ割符のアカウントで新しい申請を出せる。
+    expect((await startLink(user)).callback.location).toBe('/legacy?n=link_waiting');
+
+    const other = await newUser();
+    const back = await untilFinalApproval(other);
+    const accountKey = await demo.store.read(
+      (state) => state.sessions.get([...other.site.cookies.values()][0] ?? '')?.accountKey,
+    );
+    await demo.store.transaction((state) => {
+      const attempt = [...state.linkAttempts.values()].find((a) => a.accountKey === accountKey);
+      const member = state.legacyMembers.get(attempt?.memberId ?? '');
+      if (member !== undefined) member.authEpoch += 1;
+    });
+    reportFault.mode = 'unavailable';
+    expect((await other.site.openCallback(back)).callback.location).toBe('/legacy?n=failed');
+    expect(await pendingReports()).toEqual([['not_linked', 1, false]]);
+    expect(await warifuStates(other)).toEqual(['finalizing']);
+    reportFault.mode = 'none';
+    clock += 30_000;
+    expect(await demo.flushReports()).toEqual({ sent: 1, retry: 0, held: 0 });
+    expect(await warifuStates(other)).toEqual(['not_linked']);
+    expect((await startLink(other)).callback.location).toBe('/legacy?n=link_waiting');
+    expect(await pendingReports()).toEqual([]);
+  });
+
+  it('割符がレート制限（429）で断った報告は、保留にせず、間隔をあけて送り直す', async () => {
+    // 攻撃者が持っている情報：なし（割符のレート制限。company-api の 429（rate_limited）を返す割符を模す）
+    // 試す経路：確定の報告を、割符が 429 で断る。時刻を進めて送信待ちを送る（まだ 429）。制限が解けてから送る
+    // 期待する結果：企業の側は確定し（linked）、報告は保留にならず、送信待ちに残る。間隔をあけて送り直し、制限が
+    //               解けると 204 で、割符の正本は linked になる（429 を保留にすると、正本が approved のまま残り、
+    //               その利用者の次の申請が断られ続ける）
+    // plan 11章：テスト9（ADR 0028 の O-91）
+    const user = await newUser();
+    const back = await untilFinalApproval(user);
+    reportFault.mode = 'rate_limited';
+    expect((await user.site.openCallback(back)).callback.location).toBe('/?n=link_done');
+    expect(await pendingReports()).toEqual([['linked', 1, false]]);
+    clock += 30_000;
+    expect(await demo.flushReports()).toEqual({ sent: 0, retry: 1, held: 0 });
+    expect(await pendingReports()).toEqual([['linked', 2, false]]);
+    reportFault.mode = 'none';
+    clock += 60_000;
+    expect(await demo.flushReports()).toEqual({ sent: 1, retry: 0, held: 0 });
+    expect(await pendingReports()).toEqual([]);
+    expect(await warifuStates(user)).toEqual(['linked']);
+  });
+
+  it('割符が 429 以外の 4xx で断った報告は、送り直しても変わらないので、保留にして送り直さない', async () => {
+    // 攻撃者が持っている情報：なし（企業の記録と割符の正本の食い違い。409 を返す割符を模す）
+    // 試す経路：確定の報告を、割符が 409 で断る。その後、時刻を進めて送信待ちを送る
+    // 期待する結果：企業の側の確定は戻さない。報告は保留になり（held）、自動では送り直さない（企業が調べる）
+    // plan 11章：テスト9（ADR 0028 の O-91）
+    const user = await newUser();
+    const back = await untilFinalApproval(user);
+    reportFault.mode = 'reject';
+    expect((await user.site.openCallback(back)).callback.location).toBe('/?n=link_done');
+    expect(await pendingReports()).toEqual([['linked', 0, true]]);
+    reportFault.mode = 'none';
+    clock += 3600_000;
+    expect(await demo.flushReports()).toEqual({ sent: 0, retry: 0, held: 0 });
+    expect(await pendingReports()).toEqual([['linked', 0, true]]);
+    expect(await warifuStates(user)).toEqual(['finalizing']);
   });
 });

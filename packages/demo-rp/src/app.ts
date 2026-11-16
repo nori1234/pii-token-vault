@@ -24,7 +24,7 @@ import {
 } from '@pii-token-vault/rp-kit';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { registerDeskRoutes } from './desk-routes.ts';
-import { registerLegacyRoutes } from './legacy-routes.ts';
+import { type ReportFlush, registerLegacyRoutes } from './legacy-routes.ts';
 import { cspOf, esc, type PageInput, page, postButton } from './pages.ts';
 import {
   completePayoutChange,
@@ -68,6 +68,11 @@ export interface DemoRpConfig {
   readonly staffKey?: string;
   /** デモ用の旧会員を、画面から用意できるようにする。 */
   readonly demoSeed?: boolean;
+  /**
+   * 初回紐付けの結果の報告の送信待ちを見る間隔（ミリ秒。既定30秒）。0 なら自分では回さない（テストが flushReports を
+   * 呼ぶ）。
+   */
+  readonly reportIntervalMs?: number;
   /** 既定は transport.ts（設定のオリジンにだけつなぐ）。テストは、割符を立てた補助の関数を渡す。 */
   readonly send?: Send;
   readonly now?: () => Date;
@@ -126,6 +131,8 @@ export interface DemoRp {
   readonly routes: readonly string[];
   /** 受け取って確かめた SET の記録（jti、発行の時刻、受け取った時刻、イベントの種類だけ。中身は残さない）。 */
   readonly setLog: readonly { jti: string; iat: number; receivedAt: number; events: string[] }[];
+  /** 初回紐付けの結果の報告の送信待ちを、いま1回送る（旧会員の引き継ぎがなければ、何もしない）。 */
+  flushReports(): Promise<ReportFlush>;
   listen(port: number): Promise<string>;
   close(): Promise<void>;
 }
@@ -590,20 +597,34 @@ export async function createDemoRp(config: DemoRpConfig): Promise<DemoRp> {
   });
 
   if (config.desk !== undefined) registerDeskRoutes(ctx);
-  if (config.company === 'securities' && config.initialLink !== undefined && company !== null) {
-    registerLegacyRoutes(ctx, company, config.initialLink);
-  }
+  const legacy =
+    config.company === 'securities' && config.initialLink !== undefined && company !== null
+      ? registerLegacyRoutes(ctx, company, config.initialLink)
+      : undefined;
+  const flushReports = async (): Promise<ReportFlush> =>
+    legacy === undefined ? { sent: 0, retry: 0, held: 0 } : legacy.flushReports();
+  // 結果の報告の送信待ちを、決まった間隔で送り直す（届くまで。ADR 0028 の O-91）。
+  const reportIntervalMs = config.reportIntervalMs ?? 30_000;
+  const reportTimer =
+    legacy !== undefined && reportIntervalMs > 0
+      ? setInterval(() => {
+          flushReports().catch(() => undefined);
+        }, reportIntervalMs)
+      : undefined;
+  reportTimer?.unref();
 
   return {
     app,
     store,
     routes,
     setLog,
+    flushReports,
     async listen(port) {
       await app.listen({ port, host: 'localhost' });
       return config.origin;
     },
     async close() {
+      clearInterval(reportTimer);
       await app.close();
     },
   };

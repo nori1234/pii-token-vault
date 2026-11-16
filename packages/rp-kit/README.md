@@ -123,6 +123,7 @@ const approval = await warifu.verifyOperationApproval(login, pending, {
 
 - 窓口の操作別承認：`pushDesk` と `verifyDeskApproval`。用途 `desk` の承認は、照会と軽い手続きだけに使います。高リスクの操作の根拠にはしません。
 - 既存会員の初回紐付け：`pushInitialLink` と `readInitialLink`、`createCompanyApiClient` の `initialLink`（`prepare`、`status`、`submitProof`、`cancel`、`report`）。流れは [ADR 0028](../../docs/adr/0028-migration-details.md) にあります。
+- 初回紐付けの結果の報告（`initialLink.report`）は、自社の確定や取消の適用と同じトランザクションで送信待ちに残し、`report` が成功する（割符が `204` を返す）まで送り直してください。同じ報告の再送も成功します。割符の申請は、最終の承認の後と取消の受理の後は、報告が届くまで終わらず、その利用者の次の申請を受け付けません。`rejected` のうち、`reason` が `rate_limited`（`429`。レート制限）のものは、間をあけて送り直してください。ほかの `rejected`（4xx）は、送り直しても変わらないので、自社の記録と割符の食い違いとして調べてください。参照実装は `packages/demo-rp/src/legacy-routes.ts` です。
 
 ### SET の受け口
 

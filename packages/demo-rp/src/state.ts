@@ -103,6 +103,26 @@ export interface LinkAttempt {
   noticeAt: number | null;
 }
 
+/**
+ * 初回紐付けの結果の報告の送信待ち（ADR 0028 の O-91）。企業の側の確定（linked、not_linked、cancelled）と同じ
+ * transaction で残し、割符が 204 を返すまで送り直す（同じ報告の再送は 204）。割符の正本は、最終の承認の後
+ * （approved）と、取消の受理の後（cancel_requested）は、期限では終わらず、この報告で終わる。
+ */
+export interface PendingReport {
+  readonly initialLinkId: string;
+  readonly result: 'linked' | 'not_linked' | 'cancelled';
+  readonly createdAt: number;
+  /** 届かなかった回数。 */
+  failures: number;
+  /** 次に送ってよい時刻。 */
+  nextAt: number;
+  /**
+   * 割符が 4xx で断った（送り直しても、答えは変わらない。409 は、企業の記録と割符の正本が食い違っている）。
+   * 自動では送り直さず、企業が調べる（デモには、解く手段を作っていない）。レート制限の 429 は、保留にせず送り直す。
+   */
+  held: boolean;
+}
+
 export interface Session {
   readonly sessionId: string;
   accountKey: string | null;
@@ -125,6 +145,8 @@ export interface DemoState {
   orders: Map<string, Order>;
   legacyMembers: Map<string, LegacyMember>;
   linkAttempts: Map<string, LinkAttempt>;
+  /** 結果の報告の送信待ち（移行専用ID ごと）。 */
+  pendingReports: Map<string, PendingReport>;
   /** 受け取った SET の jti（重複を捨てる）。 */
   seenSetJtis: Set<string>;
   /** 受付番号の入力の時刻（利用者ごと。試行の上限のため。plan 2章のレート制限）。 */
@@ -140,6 +162,7 @@ export function emptyState(): DemoState {
     orders: new Map(),
     legacyMembers: new Map(),
     linkAttempts: new Map(),
+    pendingReports: new Map(),
     seenSetJtis: new Set(),
     deskAttempts: new Map(),
   };
