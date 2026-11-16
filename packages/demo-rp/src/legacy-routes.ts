@@ -41,8 +41,17 @@ const OPEN_STATES: ReadonlySet<string> = new Set([
 
 /** 結果の報告を送り直す間隔（届かなかった回数ごとに倍にし、1時間で止める）。 */
 const REPORT_RETRY = Object.freeze({ firstMs: 30_000, maxMs: 3600_000 });
-/** 送り直せば届きうる失敗（割符に届かない、5xx、応答の喪失、応答の形の違い）。ほかは、送り直しても変わらない。 */
-const RETRYABLE: ReadonlySet<string> = new Set(['unavailable', 'invalid_response']);
+/**
+ * 送り直せば届きうる失敗か（割符に届かない、5xx、応答の喪失、応答の形の違い、レート制限の 429）。ほかの 4xx は、
+ * 送り直しても答えが変わらない。429 を送り直すのは、割符の SET の送信待ちと同じ扱い（spec 02 の SET の受け口）。
+ */
+function retryable(error: RpKitError): boolean {
+  return (
+    error.code === 'unavailable' ||
+    error.code === 'invalid_response' ||
+    (error.code === 'rejected' && error.reason === 'rate_limited')
+  );
+}
 
 /** 結果の報告の送信待ちを1回送った結果（件数）。 */
 export interface ReportFlush {
@@ -109,7 +118,8 @@ export function registerLegacyRoutes(
 
   /**
    * 送ってよい時刻になった報告を、1件ずつ送る。204 なら消す（同じ報告の再送も 204）。届かなければ、間隔をあけて
-   * 送り直す。4xx で断られたら、送り直しても答えが変わらないので、保留にして企業が調べる。
+   * 送り直す（レート制限の 429 も）。ほかの 4xx で断られたら、送り直しても答えが変わらないので、保留にして企業が
+   * 調べる。
    */
   async function flushOnce(): Promise<ReportFlush> {
     const now = nowMs();
@@ -127,7 +137,7 @@ export function registerLegacyRoutes(
         outcome = 'sent';
       } catch (error) {
         if (!(error instanceof RpKitError)) throw error;
-        outcome = RETRYABLE.has(error.code) ? 'retry' : 'held';
+        outcome = retryable(error) ? 'retry' : 'held';
       }
       counts[outcome] += 1;
       await store.transaction((state) => {

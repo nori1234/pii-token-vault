@@ -31,10 +31,10 @@ let demo: DemoRp;
 /** demo-rp から割符への結果の報告（/v1/initial-link/results）に差し込む障害。 */
 const reportFault = {
   /**
-   * unavailable：割符に届かない。lost：割符は受け取って処理したが、応答が失われる。reject：割符が 409 で断る
-   * （割符には届けない）。
+   * unavailable：割符に届かない。lost：割符は受け取って処理したが、応答が失われる。reject：割符が 409 で断る。
+   * rate_limited：割符がレート制限の 429 で断る（reject と rate_limited は、割符には届けない）。
    */
-  mode: 'none' as 'none' | 'unavailable' | 'lost' | 'reject',
+  mode: 'none' as 'none' | 'unavailable' | 'lost' | 'reject' | 'rate_limited',
 };
 
 beforeAll(async () => {
@@ -60,6 +60,14 @@ beforeAll(async () => {
           status: 409,
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ error: 'conflict' }),
+        };
+      }
+      if (reportFault.mode === 'rate_limited') {
+        // company-api のレート制限の応答と同じ形（packages/company-api/src/app.ts の limited）。
+        return {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '60' },
+          body: JSON.stringify({ error: 'rate_limited' }),
         };
       }
       if (reportFault.mode === 'lost') await send(request);
@@ -612,7 +620,29 @@ describe('テスト9：demo-rp の旧会員の引き継ぎと窓口（ADR 0028�
     expect(await pendingReports()).toEqual([]);
   });
 
-  it('割符が 4xx で断った報告は、送り直しても変わらないので、保留にして送り直さない', async () => {
+  it('割符がレート制限（429）で断った報告は、保留にせず、間隔をあけて送り直す', async () => {
+    // 攻撃者が持っている情報：なし（割符のレート制限。company-api の 429（rate_limited）を返す割符を模す）
+    // 試す経路：確定の報告を、割符が 429 で断る。時刻を進めて送信待ちを送る（まだ 429）。制限が解けてから送る
+    // 期待する結果：企業の側は確定し（linked）、報告は保留にならず、送信待ちに残る。間隔をあけて送り直し、制限が
+    //               解けると 204 で、割符の正本は linked になる（429 を保留にすると、正本が approved のまま残り、
+    //               その利用者の次の申請が断られ続ける）
+    // plan 11章：テスト9（ADR 0028 の O-91）
+    const user = await newUser();
+    const back = await untilFinalApproval(user);
+    reportFault.mode = 'rate_limited';
+    expect((await user.site.openCallback(back)).callback.location).toBe('/?n=link_done');
+    expect(await pendingReports()).toEqual([['linked', 1, false]]);
+    clock += 30_000;
+    expect(await demo.flushReports()).toEqual({ sent: 0, retry: 1, held: 0 });
+    expect(await pendingReports()).toEqual([['linked', 2, false]]);
+    reportFault.mode = 'none';
+    clock += 60_000;
+    expect(await demo.flushReports()).toEqual({ sent: 1, retry: 0, held: 0 });
+    expect(await pendingReports()).toEqual([]);
+    expect(await warifuStates(user)).toEqual(['linked']);
+  });
+
+  it('割符が 429 以外の 4xx で断った報告は、送り直しても変わらないので、保留にして送り直さない', async () => {
     // 攻撃者が持っている情報：なし（企業の記録と割符の正本の食い違い。409 を返す割符を模す）
     // 試す経路：確定の報告を、割符が 409 で断る。その後、時刻を進めて送信待ちを送る
     // 期待する結果：企業の側の確定は戻さない。報告は保留になり（held）、自動では送り直さない（企業が調べる）
