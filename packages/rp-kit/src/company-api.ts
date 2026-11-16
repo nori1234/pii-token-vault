@@ -98,18 +98,29 @@ export interface CompanyApiClient {
   verifySet(body: string): Promise<VerifiedSet>;
 }
 
+/** SET の受け口の失敗の応答（spec 02 の7章）。 */
+export type SetRefusal =
+  | {
+      readonly status: 400;
+      readonly body: {
+        readonly err: 'invalid_request';
+        readonly warifu_reason?: 'set_too_old' | 'iat_in_future';
+      };
+    }
+  | { readonly status: 503; readonly body: null };
+
 /**
- * SET の受け口が、検証の失敗に返す応答（RFC 8935 の形。spec 02 の7章）。割符は、warifu_reason が set_too_old なら
- * 新しい jti と iat で送り直し、それ以外は保留にする。description は付けない（割符は読まない）。
+ * SET の受け口が、verifySet の失敗に返す応答（spec 02 の7章）。
+ * - SET を確かめて通らなかった（verification_failed）：400 と RFC 8935 の形。割符は、warifu_reason が set_too_old なら
+ *   新しい jti と iat で送り直し、それ以外は保留にする。description は付けない（割符は読まない）。
+ * - SET を確かめられなかった（割符の公開鍵を取れない、応答の形が違う、そのほかの例外）：503。割符は、時間をおいて
+ *   送り直す。400 を返すと、受け口が一時的に割符へつながらなかっただけで、SET が保留になる。
  */
-export function setRefusalOf(error: unknown): {
-  readonly status: 400;
-  readonly body: {
-    readonly err: 'invalid_request';
-    readonly warifu_reason?: 'set_too_old' | 'iat_in_future';
-  };
-} {
-  const reason = error instanceof RpKitError ? error.reason : undefined;
+export function setRefusalOf(error: unknown): SetRefusal {
+  if (!(error instanceof RpKitError) || error.code !== 'verification_failed') {
+    return { status: 503, body: null };
+  }
+  const reason = error.reason;
   return {
     status: 400,
     body:

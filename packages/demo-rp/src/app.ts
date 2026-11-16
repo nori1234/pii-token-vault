@@ -544,11 +544,13 @@ export async function createDemoRp(config: DemoRpConfig): Promise<DemoRp> {
     try {
       set = await company.verifySet(String(request.body));
     } catch (error) {
-      if (!(error instanceof RpKitError)) throw error;
-      // RFC 8935 の失敗の形に、割符が決めた理由（set_too_old、iat_in_future）を添える。割符は、古いと言われた SET を
-      // 新しい jti と iat で送り直す（spec 02 の7章）。連絡先での再確認には逃がさない（RP-52）。
+      // SET を確かめて通らなければ、RFC 8935 の失敗の形に、割符が決めた理由（set_too_old、iat_in_future）を添える。
+      // 割符は、古いと言われた SET を新しい jti と iat で送り直す。割符の公開鍵を取れないなど、確かめられなかったときは
+      // 503 にして、割符に送り直させる（spec 02 の7章）。連絡先での再確認には逃がさない（RP-52）。
       const refusal = setRefusalOf(error);
-      return reply.code(refusal.status).send(refusal.body);
+      return refusal.body === null
+        ? reply.code(refusal.status).send()
+        : reply.code(refusal.status).send(refusal.body);
     }
     const seen = await store.read((state) => state.seenSetJtis.has(set.jti));
     if (!seen) {
