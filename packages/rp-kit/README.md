@@ -59,7 +59,7 @@ const warifu = await createWarifuClient({
 // 1. 認可の要求を始める。pending は、企業のサーバーのセッションに置く（ブラウザに渡さない）。
 const { url, pending } = await warifu.authorize();
 // 2. 利用者を url に移らせる。
-// 3. redirect_uri に戻ってきたら、state が pending.state と同じことを確かめてから、finish を呼ぶ。
+// 3. redirect_uri に戻ってきたら、戻りの URL と、セッションに置いた pending で finish を呼ぶ（state、nonce、PKCE は SDK が確かめる）。
 const login = await warifu.finish(callbackUrl, pending);
 // 4. 自前のセッションを作る。アカウントは (login.iss, login.sub) の組だけで決める。
 ```
@@ -76,7 +76,7 @@ const { url, pending } = await warifu.pushOperation({
   action: 'payout_destination.change',
   requestId,
   sub: session.sub,
-  content: { bank_code: '9991', branch_code: '001', account_last4: '1234' },
+  content: { bankCode: '9991', branchCode: '001', accountLast4: '1234' },
 });
 // 利用者が割符の画面で承認して戻ってきたら：
 const login = await warifu.finish(callbackUrl, pending);
@@ -118,11 +118,12 @@ try {
   const set = await companyApi.verifySet(body);
   // jti の重複は、自分の記録で確かめる。処理できたら 202 を返す。
 } catch (error) {
-  const refusal = setRefusalOf(error); // 400 と、割符の決めた理由（set_too_old か iat_in_future）
+  const refusal = setRefusalOf(error); // refusal.status と refusal.body で応答する
 }
 ```
 
-受け取ったと言えるのは、`202` を返したときだけです。
+- 受け取ったと言えるのは、`202` を返したときだけです。
+- `setRefusalOf` は、SET を確かめて通らなかったときは `400`（古ければ `set_too_old`、先の時刻なら `iat_in_future` の理由を添える）を返します。割符の公開鍵を取れないなど、確かめられなかったときは `503`（本文なし）を返し、割符に送り直させます。
 
 ### 承認の JWT を一度だけにする
 
