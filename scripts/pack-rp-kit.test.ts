@@ -1,13 +1,19 @@
 // rp-kit を公開用にまとめるスクリプト（scripts/pack-rp-kit.ts）の検査。
 // まとめたものを、別のプロセスの Node で（.ts を動かさずに）読み込めること、テストや変換の前の .ts を入れないこと、
-// 公開用の package.json が private を外し、変換したファイルを指していることを確かめる。公開はしない。
+// 公開用の package.json が private を外し、変換したファイルを指していること、README のリンクが npm のページでも
+// 開けることを確かめる。公開はしない。
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { type PackedRpKit, packRpKit, rewriteDeclarationImports } from './pack-rp-kit.ts';
+import {
+  type PackedRpKit,
+  packRpKit,
+  rewriteDeclarationImports,
+  rewriteReadmeLinks,
+} from './pack-rp-kit.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let work = '';
@@ -97,6 +103,39 @@ describe('rp-kit の公開の準備（plan 10章「公開の順番」）', () =>
       runConformanceKit: 'function',
       outcome: 'pass',
     });
+  });
+
+  it('README の相対のリンクは、GitHub の main の URL に書き換え、どれもリポジトリにあるファイルを指す', () => {
+    const repo = 'https://github.com/nori1234/pii-token-vault/blob/main/';
+    const readme = readFileSync(join(packed.dir, 'README.md'), 'utf8');
+    const targets = [...readme.matchAll(/\]\(([^)\s]+)\)/g)].map((match) => match[1] ?? '');
+    expect(targets.length).toBeGreaterThan(0);
+    for (const target of targets) {
+      // 相対のリンクを残さない（npm のページで、どこを基準に開くかが決まらない）。
+      expect(target).toMatch(/^(https:\/\/|#)/);
+      if (!target.startsWith(repo)) continue;
+      expect(existsSync(join(ROOT, target.slice(repo.length).replace(/#.*$/, '')))).toBe(true);
+    }
+    // リンクの先のほかは、リポジトリの README のまま。
+    const source = readFileSync(join(ROOT, 'packages', 'rp-kit', 'README.md'), 'utf8');
+    const withoutTargets = (markdown: string): string => markdown.replace(/\]\([^)\s]+\)/g, ']()');
+    expect(withoutTargets(readme)).toBe(withoutTargets(source));
+  });
+
+  it('README のリンクの書き換えは、URL とページの中の位置を変えず、リポジトリの外を指すリンクを断る', () => {
+    const repository = { type: 'git', url: 'git+https://github.com/o/r.git', directory: 'pkgs/p' };
+    expect(
+      rewriteReadmeLinks(
+        '[a](../../docs/x.md#s) [b](./y.md) [c](https://e.example/z) [d](#k)',
+        repository,
+      ),
+    ).toBe(
+      '[a](https://github.com/o/r/blob/main/docs/x.md#s) [b](https://github.com/o/r/blob/main/pkgs/p/y.md) [c](https://e.example/z) [d](#k)',
+    );
+    expect(() => rewriteReadmeLinks('[a](../../../x.md)', repository)).toThrow();
+    expect(() =>
+      rewriteReadmeLinks('[a](x.md)', { url: 'git+https://gitlab.example/o/r.git' }),
+    ).toThrow();
   });
 
   it('空でない出力先には書かない', () => {

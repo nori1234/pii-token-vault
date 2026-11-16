@@ -6,6 +6,7 @@
 // - packages/rp-kit/tsconfig.build.json で、src を JavaScript（.js）と型定義（.d.ts）に変換する。
 // - 型定義の中の相対 import（'./x.ts'）を、'./x.js' に書き換える（tsc は、型定義の中の拡張子を書き換えない）。
 // - 公開用の package.json を作る（private を外し、exports を変換したファイルに向ける）。README と LICENSE を入れる。
+// - README の相対のリンク（../../docs/… など）は、npm のページでも開けるように、GitHub の main の URL に書き換える。
 // - テスト、tsconfig、変換の前の .ts は入れない。
 //
 // このスクリプトは、公開（npm publish）をしない。ネットワークにもつながない。出力先のディレクトリを作るだけである。
@@ -29,11 +30,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGE_DIR = join(ROOT, 'packages', 'rp-kit');
-/** 公開するものに入れる、変換の結果以外のファイル。 */
-const EXTRA_FILES = Object.freeze([
-  { from: join(PACKAGE_DIR, 'README.md'), to: 'README.md' },
-  { from: join(ROOT, 'LICENSE'), to: 'LICENSE' },
-]);
+/** 公開するものに、そのまま入れるファイル（README は、リンクを書き換えて入れる）。 */
+const EXTRA_FILES = Object.freeze([{ from: join(ROOT, 'LICENSE'), to: 'LICENSE' }]);
 
 export interface PackedRpKit {
   readonly dir: string;
@@ -55,6 +53,41 @@ function listFiles(dir: string, base = dir): string[] {
 /** 型定義の中の相対 import の拡張子を、.ts から .js に書き換える。 */
 export function rewriteDeclarationImports(source: string): string {
   return source.replace(/(from\s+['"])(\.{1,2}\/[^'"]+)\.ts(['"])/g, '$1$2.js$3');
+}
+
+/**
+ * README の相対のリンク（[…](../../docs/x.md) など）を、GitHub の main の URL に書き換える。
+ * npm のページでは、相対のリンクが、パッケージのディレクトリ（packages/rp-kit）を基準に開くとは限らないため。
+ * スキーム付きの URL（https: など）、ページの中の位置（#）、ルートからのパス（/）は変えない。
+ * リポジトリの外を指すリンクは、壊れたリンクを公開しないように、失敗にする。
+ */
+export function rewriteReadmeLinks(markdown: string, repository: unknown): string {
+  const { root, dir } = readmeLinkBase(repository);
+  return markdown.replace(/\]\(([^)\s]+)\)/g, (link, target: string) => {
+    if (/^(?:[a-z][a-z\d+.-]*:|#|\/)/i.test(target)) return link;
+    const url = new URL(target, dir).href;
+    if (!url.startsWith(root)) {
+      throw new Error('README の相対のリンクが、リポジトリの外を指している');
+    }
+    return `](${url})`;
+  });
+}
+
+/** package.json の repository（GitHub の URL と、パッケージのディレクトリ）から、リンクの基準を作る。 */
+function readmeLinkBase(repository: unknown): { readonly root: string; readonly dir: string } {
+  const { url, directory } = (repository ?? {}) as {
+    readonly url?: unknown;
+    readonly directory?: unknown;
+  };
+  const match =
+    typeof url === 'string'
+      ? /^git\+https:\/\/github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?$/.exec(url)
+      : null;
+  if (match === null || typeof directory !== 'string' || directory === '') {
+    throw new Error('package.json の repository の形が違う（GitHub の URL と directory が要る）');
+  }
+  const root = `https://github.com/${match[1]}/${match[2]}/blob/main/`;
+  return { root, dir: new URL(directory.endsWith('/') ? directory : `${directory}/`, root).href };
 }
 
 /** 公開用の package.json（リポジトリの中の package.json から作る）。 */
@@ -106,6 +139,10 @@ export function packRpKit(outDir?: string): PackedRpKit {
   >;
   const manifest = publishManifest(source);
   writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  writeFileSync(
+    join(dir, 'README.md'),
+    rewriteReadmeLinks(readFileSync(join(PACKAGE_DIR, 'README.md'), 'utf8'), source.repository),
+  );
   for (const { from, to } of EXTRA_FILES) copyFileSync(from, join(dir, to));
   return {
     dir,
