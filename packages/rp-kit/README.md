@@ -19,10 +19,16 @@ SDK は、自分ではどこにもつなぎません。送る先は、設定で�
 
 ### 通信の関数
 
-企業が書くのは、この関数だけです。リダイレクトに従わない作りにしてください。
+企業が書くのは、この関数だけです。次の2つを守ってください。
+
+- リダイレクトに従わない作りにする。
+- 応答の本文は、読みながら大きさを数え、上限（256 KiB）を超えたところで読むのをやめる。`response.text()` は、本文を全部読み込みます。SDK も大きすぎる応答を失敗にしますが、確かめるのはこの関数が返った後なので、読み込みは止められません。
 
 ```ts
 import type { Send } from '@pii-token-vault/rp-kit';
+
+/** 応答の本文の上限（バイト）。 */
+const MAX_RESPONSE_BYTES = 256 * 1024;
 
 const send: Send = async (request) => {
   const response = await fetch(request.url, {
@@ -35,9 +41,28 @@ const send: Send = async (request) => {
   return {
     status: response.status,
     headers: { 'content-type': response.headers.get('content-type') ?? '' },
-    body: await response.text(),
+    body: await readLimited(response),
   };
 };
+
+/** 本文を、上限のバイト数まで読む。超えたら、残りを読まずに失敗にする（SDK は unavailable として扱う）。 */
+async function readLimited(response: Response): Promise<string> {
+  if (response.body === null) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new Error('応答が大きすぎる');
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
 ```
 
 参照実装は、リポジトリの `packages/demo-rp/src/transport.ts` です（宛先を設定のオリジンの完全一致に限り、応答を上限までしか読みません）。
@@ -209,4 +234,4 @@ npm publish
 ```
 
 - `scripts/pack-rp-kit.test.ts`（`npm test` に入っています）が、まとめたものを、別のプロセスの Node で読み込めることを確かめています。
-- `packages/rp-kit/test/readme.test.ts`（`npm test` に入っています）が、この README の `ts` のコードの例を、SDK の型で確かめています。例を変えたら、`npm test` で確かめてください。
+- `packages/rp-kit/test/readme.test.ts`（`npm test` に入っています）が、この README の `ts` のコードの例を、SDK の型で確かめています。通信の関数の例は、そのまま動かして、大きな応答を上限で読むのをやめることも確かめています。例を変えたら、`npm test` で確かめてください。
