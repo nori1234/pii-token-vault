@@ -93,6 +93,15 @@ export interface Ctx {
   nowMs(): number;
   sessionOf(request: FastifyRequest, reply: FastifyReply): Promise<Session>;
   updateSession(sessionId: string, change: (session: Session) => void): Promise<void>;
+  /**
+   * 権限が変わるとき（窓口担当者として開くなど）に、セッションの ID を作り直してから変える（前の ID は使えなくなる。
+   * 前もって知られた ID を、ブラウザに入れられていても、その ID には権限が付かない）。
+   */
+  renewSession(
+    reply: FastifyReply,
+    session: Session,
+    change: (session: Session) => void,
+  ): Promise<void>;
   accountOf(session: Session): Promise<Account | undefined>;
   html(reply: FastifyReply, input: Omit<PageInput, 'company'>): FastifyReply;
   go(reply: FastifyReply, path: string, notice?: string): FastifyReply;
@@ -240,6 +249,17 @@ export async function createDemoRp(config: DemoRpConfig): Promise<DemoRp> {
         const session = state.sessions.get(sessionId);
         if (session !== undefined) change(session);
       });
+    },
+    async renewSession(reply, session, change) {
+      const sessionId = newRandomId();
+      await store.transaction((state) => {
+        const current = state.sessions.get(session.sessionId) ?? session;
+        state.sessions.delete(session.sessionId);
+        const renewed: Session = { ...current, sessionId };
+        change(renewed);
+        state.sessions.set(sessionId, renewed);
+      });
+      setCookie(reply, sessionId);
     },
     async accountOf(session) {
       const key = session.accountKey;
