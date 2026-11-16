@@ -155,4 +155,110 @@ describe('rp-kit の SET の検証（spec 02 の7章）', () => {
     await expect(client.verifySet(await signedSet(clock.now))).resolves.toBeDefined();
     expect(clock.fetches).toBe(2);
   });
+
+  it('鍵を取りに行っている途中に、知らない kid の SET が同時に届いても、割符へ取りに行くのは1回', async () => {
+    // 攻撃者が持っている情報：企業の SET の受け口の URL（公開の入口）
+    // 試す経路：企業のサーバーが割符へ鍵を取りに行っている途中（最初の取得、または30秒たった後の取り直し）に、
+    //           自分の鍵で署名し、割符にない kid を付けた SET を、同時に20件送る
+    // 期待する結果：どれも 400 と err だけ。割符へ取りに行くのは、それぞれの時点で1回だけ（同時の要求で回数を増やせない）
+    // plan 11章：テスト12（RP-50）
+    const gated = await gatedSdk();
+    const forged = () =>
+      signedSet(gated.clock.now, { key: otherKey.privateKey, kid: 'unknown' }).then((jwt) =>
+        refusalOf(gated.client.verifySet(jwt)),
+      );
+    const plain = { status: 400, body: { err: 'invalid_request' } };
+    for (const [step, expected] of [
+      ['最初の取得', 1],
+      ['30秒たった後の取り直し', 2],
+    ] as const) {
+      gated.hold();
+      const results = Promise.all(Array.from({ length: 20 }, forged));
+      await settle();
+      expect(gated.fetches(), step).toBe(expected);
+      gated.release();
+      for (const result of await results) expect(result).toEqual(plain);
+      expect(gated.fetches(), step).toBe(expected);
+      gated.clock.now += 31;
+    }
+    // 正しい SET は、その後も受け取れる。
+    await expect(gated.client.verifySet(await signedSet(gated.clock.now))).resolves.toBeDefined();
+  });
+
+  it('鍵の取得に失敗したら、30秒の間は、続けて取りに行かない（その間の SET には 503 を返す）', async () => {
+    // 攻撃者が持っている情報：企業の SET の受け口の URL（公開の入口）。割符が一時的に鍵を返せない
+    // 試す経路：鍵の取得が失敗している間と、その直後に、SET を同時と続けて送る
+    // 期待する結果：失敗の後の30秒は、取りに行かず 503（割符が後で送り直す）。30秒たてば1回だけ取り直し、受け取れる
+    // plan 11章：テスト12（RP-50）
+    const gated = await gatedSdk();
+    const unavailable = { status: 503, body: null };
+    gated.fail(true);
+    gated.hold();
+    const set = await signedSet(gated.clock.now);
+    const first = Promise.all(
+      Array.from({ length: 20 }, () => refusalOf(gated.client.verifySet(set))),
+    );
+    await settle();
+    gated.release();
+    for (const result of await first) expect(result).toEqual(unavailable);
+    expect(gated.fetches()).toBe(1);
+    for (let i = 0; i < 5; i += 1) {
+      gated.clock.now += 5;
+      expect(await refusalOf(gated.client.verifySet(await signedSet(gated.clock.now)))).toEqual(
+        unavailable,
+      );
+    }
+    expect(gated.fetches()).toBe(1);
+    gated.fail(false);
+    gated.clock.now += 6;
+    await expect(gated.client.verifySet(await signedSet(gated.clock.now))).resolves.toBeDefined();
+    expect(gated.fetches()).toBe(2);
+  });
 });
+
+/** 割符の鍵の応答を、テストが止めたり、失敗させたりできる SDK。 */
+async function gatedSdk() {
+  const clock = { now: NOW };
+  let fetches = 0;
+  let failing = false;
+  let gate: Promise<void> = Promise.resolve();
+  let open: () => void = () => {};
+  const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const jwks = {
+    keys: [{ ...(await exportJWK(setKey.publicKey)), kid: 'set', alg: 'ES256', use: 'sig' }],
+  };
+  const client = await createCompanyApiClient({
+    origin: ORIGIN,
+    clientId: 'api-client',
+    tenantId: TENANT,
+    privateKey: (await exportJWK(privateKey)) as JWK,
+    kid: 'k1',
+    now: () => new Date(clock.now * 1000),
+    send: async (request) => {
+      if (request.url !== `${ORIGIN}/jwks`) throw new Error('予期しない宛先');
+      fetches += 1;
+      await gate;
+      return failing
+        ? { status: 503, headers: {}, body: '' }
+        : { status: 200, headers: {}, body: JSON.stringify(jwks) };
+    },
+  });
+  return {
+    clock,
+    client,
+    fetches: () => fetches,
+    fail: (value: boolean) => {
+      failing = value;
+    },
+    /** 次の取得の応答を、release まで止める。 */
+    hold: () => {
+      gate = new Promise((resolve) => {
+        open = resolve;
+      });
+    },
+    release: () => open(),
+  };
+}
+
+/** 同時に始めた要求が、止めた取得の手前まで進むのを待つ。 */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
