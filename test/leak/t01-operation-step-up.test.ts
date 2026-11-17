@@ -228,4 +228,50 @@ describe('テスト1：高リスクの操作の step-up（ADR 0030）', () => {
       ),
     ).toBe('verification_failed');
   });
+
+  it('拒否は、uid を持つ者だけができ、知らない uid と終わった申請には同じ 400 を返し、拒否の後は企業に何も渡らない', async () => {
+    // 攻撃者が持っている情報：別の利用者（U1）のアカウントと、承認用のオリジン。被害者（U2）の uid は持たない（uid は、
+    //                         U2 のブラウザの URL の # の後ろにだけあり、サーバーには送られず、ログにも残らない）
+    // 試す経路：U1 が、知らない uid と形の違う uid で、出金先の変更の申請を拒否する。U2 は自分の uid で「心当たりが
+    //           ない」で拒否する。その後で、同じ uid で読む・もう一度拒否する・承認を始める
+    // 期待する結果：知らない uid と形の違う uid は、どちらも同じ 400。U2 の拒否の後の finish は access_denied で、
+    //               認可コードを出さない。拒否の後の読み取り、2回目の拒否、承認の開始は、どれも同じ 400
+    // plan 11章：テスト6（利用者 U1 は U2 のものに触れない。M10 の横断の BOLA）、テスト1
+    const victim = await connectedUser(world, client(0));
+    const attacker = await connectedUser(world, client(0));
+    const pushed = await warifu.pushOperation({
+      action: 'payout_destination.change',
+      requestId: newRequestId(),
+      sub: victim.sub,
+      content: CONTENT,
+    });
+    const arrived = await victim.browser.follow(pushed.url);
+    expect(arrived.external?.pathname).toBe('/operation');
+    const uid = String(arrived.external?.hash.slice(1));
+    const failed = [400, { error: 'failed' }];
+
+    for (const guess of [uid.replace(/.$/, (c) => (c === 'A' ? 'B' : 'A')), 'not-a-uid']) {
+      const declined = await attacker.approval.post('/api/operation/decline', {
+        uid: guess,
+        reason: 'unrecognized',
+      });
+      expect([declined.status, declined.json]).toEqual(failed);
+    }
+
+    const declined = await victim.approval.post('/api/operation/decline', {
+      uid,
+      reason: 'unrecognized',
+    });
+    expect(declined.status).toBe(200);
+    const finished = await victim.browser.follow(String(declined.json.redirectTo));
+    expect(finished.external?.searchParams.get('error')).toBe('access_denied');
+    expect(finished.external?.searchParams.get('code')).toBeNull();
+
+    const after = [
+      await victim.approval.post('/api/operation/view', { uid }),
+      await victim.approval.post('/api/operation/decline', { uid, reason: 'denied' }),
+      await victim.approval.post('/api/operation/approve/options', { uid }),
+    ];
+    expect(after.map((r) => [r.status, r.json])).toEqual([failed, failed, failed]);
+  });
 });

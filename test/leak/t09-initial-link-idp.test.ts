@@ -424,6 +424,59 @@ describe('テスト9：初回紐付け（idp。ADR 0028）', () => {
     expect([started.status, started.json]).toEqual([400, { error: 'failed' }]);
   });
 
+  it('承認の画面の中身と拒否は、uid を持つ者だけが扱え、知らない uid と終わった申請には同じ 400 を返す', async () => {
+    // 攻撃者が持っている情報：別の利用者（U1）のアカウントと、承認用のオリジン。被害者（U2）の uid は持たない（uid は、
+    //                         U2 のブラウザの URL の # の後ろにだけあり、サーバーには送られず、ログにも残らない）
+    // 試す経路：U1 が、知らない uid と形の違う uid で、申請の中身を読み、拒否する。U2 は自分の uid で中身を読み、
+    //           「心当たりがない」で拒否する。その後で、同じ uid で読む・もう一度拒否する・承認を始める
+    // 期待する結果：知らない uid と形の違う uid は、どちらも同じ 400（申請の有無を区別しない）。U2 は中身を読め、拒否の
+    //               後の finish は access_denied で、認可コードを出さない。拒否の後の読み取り、2回目の拒否、承認の開始は、
+    //               どれも同じ 400
+    // plan 11章：テスト6（利用者 U1 は U2 のものに触れない。M10 の横断の BOLA）
+    const victim = await connectedUser(world, client(0));
+    const attacker = await connectedUser(world, client(0));
+    const { id } = await preparedWithProof();
+    const par = await pushRequest(world.t, client(0), [
+      detailOf('initial_link.approve', id, victim.sub),
+    ]);
+    const params = new URLSearchParams({
+      client_id: client(0).clientId,
+      request_uri: String(par.requestUri),
+    });
+    const arrived = await victim.browser.follow(`/oidc/auth?${params}`);
+    expect(arrived.external?.pathname).toBe('/initial-link');
+    const uid = String(arrived.external?.hash.slice(1));
+    const failed = [400, { error: 'failed' }];
+
+    for (const guess of [uid.replace(/.$/, (c) => (c === 'A' ? 'B' : 'A')), 'not-a-uid']) {
+      const view = await attacker.approval.post('/api/initial-link/view', { uid: guess });
+      expect([view.status, view.json]).toEqual(failed);
+      const declined = await attacker.approval.post('/api/initial-link/decline', {
+        uid: guess,
+        reason: 'unrecognized',
+      });
+      expect([declined.status, declined.json]).toEqual(failed);
+    }
+
+    const view = await victim.approval.post('/api/initial-link/view', { uid });
+    expect(view.status).toBe(200);
+    const declined = await victim.approval.post('/api/initial-link/decline', {
+      uid,
+      reason: 'unrecognized',
+    });
+    expect(declined.status).toBe(200);
+    const finished = await victim.browser.follow(String(declined.json.redirectTo));
+    expect(finished.external?.searchParams.get('error')).toBe('access_denied');
+    expect(finished.external?.searchParams.get('code')).toBeNull();
+
+    const after = [
+      await victim.approval.post('/api/initial-link/view', { uid }),
+      await victim.approval.post('/api/initial-link/decline', { uid, reason: 'denied' }),
+      await victim.approval.post('/api/initial-link/approve/options', { uid }),
+    ];
+    expect(after.map((r) => [r.status, r.json])).toEqual([failed, failed, failed]);
+  });
+
   it('警告文 I は、DESIGN.md 3章の1文と同じで、ログインと初回紐付けの承認の画面の両方で使う', () => {
     // 攻撃者が持っている情報：なし（固定の文言が、文書と画面で食い違わないことを確かめる）
     // 試す経路：DESIGN.md 3章の警告文 I の文と、public/app.js の文を比べる

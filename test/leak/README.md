@@ -180,6 +180,10 @@ M10 で、横断のテストを足した（テスト7。DB を丸ごと取り出
 | `t07-contacts-leak` | テスト7（本物のアドレス、別名、返信用のアドレス、ID トークンとアクセストークン、確認コード、Message-ID、件名と本文を、登録・宛先確認・企業への接続・配送・返信の中継の後の DB（全スキーマ）と、idp と relay のログに残さない。検索の補助が、どの形の値も見つけること） |
 | `t07-approvals-leak` | テスト7（企業を rp-kit の SDK で書き、通信の関数を包んで集めた値（PAR の `request_uri`、client assertion、認可コード、`code_verifier`、ID トークン、アクセストークン、承認の JWT）と、出金先の変更の申請ID・変更ID を、承認・使い回し・承認しなかった申請・認可コードの再送の後の DB（全スキーマ）と、idp・company-api・sender のログに残さない） |
 | `t07-initial-link-leak` | テスト7（企業を rp-kit の SDK で書き、idp と company-api の通信の関数を包んで集めた値（移行証跡の JWT、移行専用ID、申請ID、会員参照、client assertion、company-api のトークン、認可コード、ID トークン、最終の承認の JWT）と待機の SET を、紐付けの完了と、承認しなかった申請の後の DB（全スキーマ）と、idp・company-api・sender のログに残さない） |
+| `x-route-coverage` | M10 の横断（idp の API のルートが、どれも、ルート一覧のテストのほかに、少なくとも1つのテストか補助から呼ばれていること。呼ばれないルートには、BOLA や漏えいの検査が届かないため。文字として現れないルートは、通すテストを書いて残す） |
+| `x-bola-routes` | テスト6（利用者どうしの BOLA。ログアウトは自分のセッションだけを消し、セッションがなくても同じ応答。ログインの途中の取りやめは、そのブラウザのインタラクションだけを終わらせる） |
+
+M10 で、どのテストも呼んでいなかったルートを呼ぶテストを足した。承認の画面の中身と拒否（初回紐付けの view と decline、出金先の変更の decline）は、`uid` を持つ者だけが扱え、知らない `uid` と終わった申請には同じ 400 を返し、拒否の後は企業に何も渡らないことを、`t09-initial-link-idp` と `t01-operation-step-up` で確かめる。
 
 単体の検査は、`packages/rp-kit/test`（SDK）と `packages/demo-rp/test`（出金先の変更の参照実装、通信の1ファイル）にある。
 
