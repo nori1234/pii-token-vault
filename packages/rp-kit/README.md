@@ -6,6 +6,8 @@
 - npm のパッケージ名は `@pii-token-vault/rp-kit` です（公開の手順は、下の「メンテナー向け」に書いています）。
 - 接続要件の正本は、リポジトリの [`docs/spec/02-rp-requirements.md`](../../docs/spec/02-rp-requirements.md) です。この README と食い違ったら、仕様を正とします。設計の判断は [ADR 0029](../../docs/adr/0029-company-side-code-boundary.md) と [ADR 0030](../../docs/adr/0030-high-risk-step-up.md) にあります。
 
+> **English summary**: `@pii-token-vault/rp-kit` is the server-side SDK and self-check conformance kit for companies (relying parties) that connect to **Warifu**, an open design and proof of concept that aims to let companies stop relying on customers' contact details and personal attributes for identity verification. **It is a proof of concept: do not use it in production or with real personal data.** The SDK builds and verifies what a company exchanges with Warifu (private_key_jwt client assertions, PKCE, pushed authorization requests, ID tokens, transaction-bound approvals, and Security Event Tokens). It never opens network connections itself: you pass in a function that sends one request, requests go only to the Warifu origins you configure, and it does not follow redirects or URLs found in responses. The conformance kit, with a mock OP that you run locally, lets a company check its own integration against the connection requirements; passing it does not mean that Warifu has verified the company. Requires Node.js 22.18 or later (ESM only). No Warifu service is operated anywhere. Documentation is in Japanese; the connection requirements are in [docs/spec/02-rp-requirements.md](../../docs/spec/02-rp-requirements.md). Licensed under MIT.
+
 ## SDK が受け持つこと、企業が受け持つこと
 
 | | 受け持つこと |

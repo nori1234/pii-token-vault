@@ -52,6 +52,12 @@ describe('rp-kit の公開の準備（plan 10章「公開の順番」）', () =>
     expect(Object.keys(manifest.dependencies)).toEqual(['jose']);
     expect(manifest.devDependencies).toBeUndefined();
     expect(manifest.scripts).toBeUndefined();
+    // npm のページから、リポジトリの README とイシューに行ける。
+    expect(manifest.homepage).toBe(
+      'https://github.com/nori1234/pii-token-vault/tree/main/packages/rp-kit#readme',
+    );
+    expect(manifest.bugs).toEqual({ url: 'https://github.com/nori1234/pii-token-vault/issues' });
+    expect(manifest.keywords).toContain('warifu');
   });
 
   it('型定義と JavaScript の中の相対 import は、.js を指す', () => {
