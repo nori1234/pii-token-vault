@@ -51,7 +51,7 @@ M5 で、company-api と送信サービスのテストを足した（ADR 0022）
 | `t11-sender-ssrf` | テスト11（公開でないアドレスの拒否、URL の形、内部を指す名前、DNS rebinding、リダイレクト、証明書の名前、内部を指す MX と null MX、ログに宛先を出さない） |
 | `x-company-api-tenant` | テスト6（A社のトークンでB社に触れない、トークンと client assertion の書き換えが同じ 401、緊急停止、レート制限、境界の外で行が見えない、参加の状態の列がない） |
 | `x-company-api-routes` | テスト6（company-api のルート一覧、知らないパスと違う Host の固定の本文） |
-| `x-company-api-set` | SET の署名、aud、jti、events、同じ jti での送り直しと諦め、ログと DB に SET を残さない |
+| `x-company-api-set` | SET の署名、aud、jti、events、同じ jti での送り直しと諦め、ログと DB に SET を残さない（M10 で、DB を丸ごと取り出したもの（pg_dump）から、テナントのトークンと送った検証の SET を探す検査を足した。テスト7） |
 | `x-sender-internal-api` | 送信サービスの内部 API（呼び出し元ごとの資格情報と口、パスとメソッド、本文の形、名前解決の口、ソケットの権限） |
 | `x-relay-sender` | relay から送信サービスを通った配送、内部を指す MX への配送を止めること、名前解決の口 |
 
