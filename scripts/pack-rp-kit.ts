@@ -56,21 +56,35 @@ export function rewriteDeclarationImports(source: string): string {
 }
 
 /**
+ * README の中で、前から順に、コードブロック（同じ長さの ``` で閉じるまで）、インラインのコード、リンクの先
+ * （](…) の中）のどれかに当たる。リンクの先だけが、2つ目の組（target）に入る。
+ */
+const README_LINK_PATTERN =
+  /^[ \t]*(`{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$|`[^`\n]*`|\]\(([^)\s]+)\)/gm;
+
+/**
  * README の相対のリンク（[…](../../docs/x.md) など）を、GitHub の main の URL に書き換える。
  * npm のページでは、相対のリンクが、パッケージのディレクトリ（packages/rp-kit）を基準に開くとは限らないため。
  * スキーム付きの URL（https: など）、ページの中の位置（#）、ルートからのパス（/）は変えない。
+ * コードブロック（```）とインラインのコード（`…`）の中は、リンクではないので変えない（コードの例の
+ * `handlers[name](request)` のような書き方を、URL に書き換えないため）。
  * リポジトリの外を指すリンクは、壊れたリンクを公開しないように、失敗にする。
  */
 export function rewriteReadmeLinks(markdown: string, repository: unknown): string {
   const { root, dir } = readmeLinkBase(repository);
-  return markdown.replace(/\]\(([^)\s]+)\)/g, (link, target: string) => {
-    if (/^(?:[a-z][a-z\d+.-]*:|#|\/)/i.test(target)) return link;
-    const url = new URL(target, dir).href;
-    if (!url.startsWith(root)) {
-      throw new Error('README の相対のリンクが、リポジトリの外を指している');
-    }
-    return `](${url})`;
-  });
+  return markdown.replace(
+    README_LINK_PATTERN,
+    (match, _fence: string | undefined, target: string | undefined) => {
+      // コードブロックとインラインのコードは、そのまま返す。
+      if (target === undefined) return match;
+      if (/^(?:[a-z][a-z\d+.-]*:|#|\/)/i.test(target)) return match;
+      const url = new URL(target, dir).href;
+      if (!url.startsWith(root)) {
+        throw new Error('README の相対のリンクが、リポジトリの外を指している');
+      }
+      return `](${url})`;
+    },
+  );
 }
 
 /** package.json の repository（GitHub の URL と、パッケージのディレクトリ）から、リンクの基準を作る。 */

@@ -138,6 +138,28 @@ describe('rp-kit の公開の準備（plan 10章「公開の順番」）', () =>
     ).toThrow();
   });
 
+  it('README のリンクの書き換えは、コードブロックとインラインのコードの中を変えない', () => {
+    const repository = { type: 'git', url: 'git+https://github.com/o/r.git', directory: 'pkgs/p' };
+    // コードの例の `](…)` は、リンクではない。リンクの文字にコードがあっても、リンクの先は書き換える。
+    const markdown = [
+      '```ts',
+      'handlers[name](request);',
+      '```',
+      '`table[i](x)` [`code`](./y.md)',
+      '````md',
+      '```',
+      '[nested](./z.md)',
+      '```',
+      '````',
+      '[after](./w.md)',
+    ].join('\n');
+    expect(rewriteReadmeLinks(markdown, repository)).toBe(
+      markdown
+        .replace('(./y.md)', '(https://github.com/o/r/blob/main/pkgs/p/y.md)')
+        .replace('(./w.md)', '(https://github.com/o/r/blob/main/pkgs/p/w.md)'),
+    );
+  });
+
   it('空でない出力先には書かない', () => {
     expect(() => packRpKit(packed.dir)).toThrow();
   });

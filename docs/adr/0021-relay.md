@@ -125,6 +125,7 @@ M4（イシュー #6）で、relay を作る。plan 10章の範囲は、送信�
 ### 依存
 
 - `mailauth` 7.3.1 と `smtp-server` 3.20.2 を relay の依存に足した。mailauth 7.3.1 が固定する `nodemailer` 10.1.0 と `undici` 8.11.2 には既知の脆弱性があるので、ルートの overrides で `nodemailer` 10.1.7 と `undici` 8.12.3 にした（`npm audit` は0件）。テストの送信側は、nodemailer を使わず、生の SMTP の会話（`test/setup/relay.ts`）にした（RCPT の応答と所要時間をそのまま見るため）。plan 9章の「nodemailer（テストの送信側）」は、送信サービス（M5）の依存に回す。
+- mailauth 7.3.1 が固定する `fast-xml-parser` 5.11.2 は、GHSA-474x-hrwr-fgx4（low。閉じていない stop node のタグを読むときに、二乗の時間がかかる）の範囲にある。ルートの overrides で、修正の入った 5.12.0 にした（2026-11-17。依存の `is-unsafe` も 2.0.3 になる。どちらも公開から7日を過ぎた版）。mailauth が fast-xml-parser を使うのは BIMI の SVG の検査だけで、relay は BIMI を使わない（`disableBimi`）ので、その処理はもともと通らない。`joi` も、同じく mailauth の固定を overrides で上書きしている（GHSA-4528-x5fx-h6hg のため 18.3.1。#55）。
 
 ## 採らなかった案
 
