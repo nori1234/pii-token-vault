@@ -441,13 +441,15 @@ describe('テスト9：初回紐付け（idp。ADR 0028）', () => {
     expect(appJs.match(/responsibilityNote\(\)/g)?.length).toBe(3);
   });
 
-  it('idp の監査に失敗した承認は、finish で企業に渡さず、最終の承認はもう一度の承認で渡す', async () => {
+  it('idp の監査に失敗した承認は、正本にも記録させず、finish で企業に渡さず、もう一度の承認で渡す', async () => {
     // 攻撃者が持っている情報：なし（障害。承認の後の、idp の監査の書き込みだけが失敗する）
     // 試す経路：最初の承認と最終の承認のそれぞれで、idp の監査を1回だけ失敗させ、そのまま finish に進む。
-    //           最終の承認は、その後にもう一度承認する
+    //           どちらも、その後にもう一度承認する
     // 期待する結果：監査に失敗した承認の verify は 500。その後の finish は access_denied で、認可コードを出さない
-    //               （状態も、紐付けの承認の JWT も、企業に渡らない）。もう一度の最終の承認では、監査が残り、JWT が渡る
-    // plan 11章：テスト9、ADR 0028 の O-102（オーナーのレビュー、2026-11-16）
+    //               （状態も、紐付けの承認の JWT も、企業に渡らない）。正本（company-api）にも記録されないので、
+    //               もう一度の最初の承認がそのまま通る（記録されていれば、2回目は断られる）。もう一度の承認では、
+    //               どちらも監査が残り、最終の承認では JWT が渡る。idp の監査だけが欠けた承認は、どこにも残らない
+    // plan 11章：テスト9、ADR 0028 の O-102（オーナーのレビュー、2026-11-16・17）
     const user = await connectedUser(world, client(0));
     const userId = parseWarifuUserId(userIdOf(user.browser.authenticator));
     const { id, memberRef } = await preparedWithProof();
@@ -462,7 +464,17 @@ describe('テスト9：初回紐付け（idp。ADR 0028）', () => {
     expect(await finishAfterFailure(user, first.uid)).toEqual(['access_denied', null]);
     expect(await approvalAudits(userId)).toEqual([]);
 
-    // 最初の承認は、正本には記録されている。待機の SET の後、企業の側の流れは進む。
+    // 正本には記録されていないので、もう一度の最初の承認が通り、今度は監査が残る。
+    const again = await approveFlow(
+      user,
+      client(0),
+      detailOf('initial_link.approve', id, user.sub),
+    );
+    expect(again.approve?.status).toBe(200);
+    expect(again.authorizationDetails?.[0]?.state).toBe('pending_notice');
+    expect(await approvalAudits(userId)).toEqual(['initial']);
+
+    // 待機の SET の後、企業の側の流れは進む。
     clock += 61_000;
     await world.company.api.deliverDue();
     clock += 24 * HOUR + 1000;
@@ -484,7 +496,7 @@ describe('テスト9：初回紐付け（idp。ADR 0028）', () => {
     );
     expect(failed.approve?.status).toBe(500);
     expect(await finishAfterFailure(user, failed.uid)).toEqual(['access_denied', null]);
-    expect(await approvalAudits(userId)).toEqual([]);
+    expect(await approvalAudits(userId)).toEqual(['initial']);
 
     const retried = await approveFlow(
       user,
@@ -493,7 +505,7 @@ describe('テスト9：初回紐付け（idp。ADR 0028）', () => {
     );
     expect(retried.approve?.status).toBe(200);
     expect(typeof retried.authorizationDetails?.[0]?.approval).toBe('string');
-    expect(await approvalAudits(userId)).toEqual(['final']);
+    expect(await approvalAudits(userId)).toEqual(['initial', 'final']);
     expect(auditFault.failNextAudits).toBe(0);
   });
 });

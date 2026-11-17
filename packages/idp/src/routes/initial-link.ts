@@ -361,10 +361,14 @@ export function registerInitialLinkRoutes(ctx: RouteContext): void {
     });
   });
 
-  /** 最初の承認：受信箱の項目を先に記録してから、正本に承認を記録させる（O-103）。 */
+  /**
+   * 最初の承認：受信箱の項目を先に記録してから、正本に承認を記録させる（O-103）。audit は、承認できる申請と
+   * 確かめた後、正本に記録させる前に呼ぶ（監査に失敗したら、正本にも受信箱にも残さない。O-102）。
+   */
   async function approveInitial(
     handoff: InitialLinkHandoff,
     userId: WarifuUserId,
+    audit: () => Promise<void>,
   ): Promise<
     { readonly status: number; readonly body: object } | { readonly state: InitialLinkState }
   > {
@@ -378,6 +382,7 @@ export function registerInitialLinkRoutes(ctx: RouteContext): void {
       initialLinkId: detail.identifier,
     });
     if (!checked.ok) return { status: 409, body: FAILED };
+    await audit();
     const item = await insertApprovingInitialLinkItem(repo, userId, tenantId);
     let recorded: Awaited<ReturnType<typeof desk.initialLinkApprove>>;
     try {
@@ -400,10 +405,14 @@ export function registerInitialLinkRoutes(ctx: RouteContext): void {
     return { state: recorded.state };
   }
 
-  /** 最終の承認：自分の項目を引き、正本に確かめさせて、移行専用ID を受け取る（O-86 の手順7）。 */
+  /**
+   * 最終の承認：自分の項目を引き、正本に確かめさせて、移行専用ID を受け取る（O-86 の手順7）。audit は、正本に
+   * 確かめさせる前に呼ぶ（監査に失敗したら、正本に最終の承認を記録させない。O-102）。
+   */
   async function approveFinal(
     handoff: InitialLinkHandoff,
     userId: WarifuUserId,
+    audit: () => Promise<void>,
   ): Promise<
     { readonly status: number; readonly body: object } | { readonly initialLinkId: string }
   > {
@@ -412,6 +421,8 @@ export function registerInitialLinkRoutes(ctx: RouteContext): void {
     const items = (await listInitialLinkItems(repo, userId, handoff.tenantId)).filter(
       (item) => item.state === 'approved',
     );
+    if (items.length === 0) return { status: 409, body: FAILED };
+    await audit();
     for (const item of items) {
       let finalized: Awaited<ReturnType<typeof desk.initialLinkFinalize>>;
       try {
@@ -483,9 +494,15 @@ export function registerInitialLinkRoutes(ctx: RouteContext): void {
       if (await isRecoveryRestricted(repo, userId)) return reply.code(409).send(RESTRICTED);
       const final = detail.action === 'initial_link.finalize';
       const approvedAt = ctx.nowMs();
+      // 監査は、正本（company-api）に記録させる前に残す。監査に失敗したら、正本にも記録させず、承認を企業に渡さない
+      // （監査のない承認を、正本にも引き継ぎにも残さない。ADR 0028 の O-102）。正本が断ったときや、正本に届かな
+      // かったときは、監査だけが残る（利用者がパスキーで承認したことの記録。正本に反映されたかは、company-api の側の
+      // 記録で分かる）。
+      const audit = () =>
+        auditInitialLinkApproved(repo, userId, tenantId, final ? 'final' : 'initial');
       let approval: NonNullable<InitialLinkHandoff['approval']>;
       if (final) {
-        const done = await approveFinal(handoff, userId);
+        const done = await approveFinal(handoff, userId, audit);
         if (!('initialLinkId' in done)) return reply.code(done.status).send(done.body);
         const jwt = await signInitialLinkApproval(keys, {
           issuer: ctx.issuer,
@@ -497,7 +514,7 @@ export function registerInitialLinkRoutes(ctx: RouteContext): void {
         });
         approval = { userId, approvedAt, jwt };
       } else {
-        const done = await approveInitial(handoff, userId);
+        const done = await approveInitial(handoff, userId, audit);
         if (!('state' in done)) {
           if (done.status === 409) {
             await saveInitialLinkHandoff(store, { ...handoff, state: 'declined' }, ctx.nowMs());
@@ -506,10 +523,6 @@ export function registerInitialLinkRoutes(ctx: RouteContext): void {
         }
         approval = { userId, approvedAt, state: done.state };
       }
-      // 監査を先に残す。監査に失敗したら、承認を引き継ぎに入れない（監査のない承認を、finish で企業に渡さない）。
-      // 引き継ぎは pending のままなので、最終の承認は、利用者がもう一度承認すれば出る（正本は、approved の申請の
-      // 確かめに、同じ結果を返す）。
-      await auditInitialLinkApproved(repo, userId, tenantId, final ? 'final' : 'initial');
       await saveInitialLinkHandoff(store, { ...handoff, state: 'approved', approval }, approvedAt);
       request.log.info({ event: 'idp.initial_link_approved', stage: final ? 'final' : 'initial' });
       return { redirectTo: finishUrl(uid) };
