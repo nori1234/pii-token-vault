@@ -199,6 +199,9 @@ export async function startTestSender(table: DnsTable, fixture: TlsFixture): Pro
     authOptional: true,
     disabledCommands: ['STARTTLS', 'AUTH'],
     logger: false,
+    // 接続してきたアドレスを、システムのリゾルバで逆引きしない（smtp-server の既定は dns.reverse。外へのつなぎの
+    // 見張り（test/setup/egress.ts）が見つけた。relay の SMTP の受け口も同じ設定）。
+    disableReverseLookup: true,
     onData(stream, session, callback) {
       const chunks: Buffer[] = [];
       stream.on('data', (chunk: Buffer) => chunks.push(chunk));
