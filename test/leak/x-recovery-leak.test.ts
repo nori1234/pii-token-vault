@@ -1,6 +1,7 @@
 // 回復の値を平文で残さない（不変条件4、plan 11章 テスト7の一部、ADR 0027 の O-73・O-74・O-76・O-83）。
 // 回復コード（作成、作り直し、成立の後の新しいコード）、招待コード、結び付けのコード、協力者の表示名を、通常・失敗・
 // 期限切れ・取消の経路に通し、DB の行（idp の境界で読める回復の表、パスキー、受信箱、監査ログ）と idp のログを検索する。
+// 最後に、DB を丸ごと取り出したもの（pg_dump。全スキーマ）も、値の形を変えて検索する（テスト7）。
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parseRecoveryCode } from '../../packages/idp/src/recovery.ts';
@@ -8,6 +9,7 @@ import { sql } from '../../packages/warifu-core/src/db/sql.ts';
 import type { TenantId, WarifuUserId } from '../../packages/warifu-core/src/ids.ts';
 import { newApprover } from '../setup/approvals.ts';
 import { serviceDb } from '../setup/db.ts';
+import { dumpWorkerDatabase, leaksIn } from '../setup/dump.ts';
 import { startTestIdp, type TestIdp } from '../setup/idp.ts';
 import {
   bindingCodeOf,
@@ -178,5 +180,11 @@ describe('漏えい：回復の値を平文で残さない（不変条件4）', 
       );
     }
     expect(logs).toContain('idp.recovery_completed');
+
+    // DB を丸ごと読める立場（pg_dump、ATK-06）：境界を通さずに全スキーマの行を取り出し、16進や base64 の形でも探す。
+    const dump = await dumpWorkerDatabase();
+    // 取り出したものが、この利用者の行を実際に含んでいることを先に確かめる（利用者 ID は秘密ではなく、平文で残る）。
+    expect(leaksIn({ dump }, [owner.userId])).toEqual(['0:dump']);
+    expect(leaksIn({ dump, logs }, needles)).toEqual([]);
   });
 });

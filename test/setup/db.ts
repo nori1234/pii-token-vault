@@ -2,7 +2,8 @@
 // - serviceDb、relayDb：アプリと同じ境界（withTenant、withWarifuUser）を通る接続。
 // - rawRoleClient：境界を設定しない、アプリのロールの生の接続。盗んだ資格情報や SQL インジェクションを模す。
 //   権限はアプリのロールと同じで、不変条件8の例外ではない。
-// テストは、ブートストラップのロールで DB の中身を読み書きしない。
+// テストは、ブートストラップのロールで DB の中身を読み書きしない（例外は、不変条件8の「pg_dump による漏えいテスト」
+// だけで、`test/setup/dump.ts` が読むだけを行う）。
 
 import pg from 'pg';
 import { createDb } from '../../packages/warifu-core/src/db/boundary.ts';

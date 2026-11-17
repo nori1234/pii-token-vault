@@ -1,7 +1,7 @@
 // 窓口の値を平文で残さない（不変条件4、plan 11章 テスト7の一部、ADR 0026 の O-64。仕様案 v0.7 の D-25）。
 // 申請ID、変更ID、取消要求ID、操作ごとの承認の JWT、PAR の request_uri、取消の SET を、通常・拒否・失敗・再送の
 // 経路に通し、DB の行（idp と company-api の境界で読めるすべての窓口の表と監査ログ）と、idp・company-api・sender の
-// ログを検索する。
+// ログを検索する。最後に、DB を丸ごと取り出したもの（pg_dump。全スキーマ）も、値の形を変えて検索する（テスト7）。
 
 import { decodeJwt } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -20,6 +20,7 @@ import {
   pushRequest,
   startDeskWorld,
 } from '../setup/desk.ts';
+import { dumpWorkerDatabase, leaksIn } from '../setup/dump.ts';
 
 let world: DeskWorld;
 let clock = Date.now();
@@ -200,5 +201,11 @@ describe('漏えい：窓口の値を平文で残さない（不変条件4）', 
       expect([needle.slice(0, 12), rows.includes(needle)]).toEqual([needle.slice(0, 12), false]);
       expect([needle.slice(0, 12), logs.includes(needle)]).toEqual([needle.slice(0, 12), false]);
     }
+
+    // DB を丸ごと読める立場（pg_dump、ATK-06）：境界を通さずに全スキーマの行を取り出し、16進や base64 の形でも探す。
+    const dump = await dumpWorkerDatabase();
+    // 取り出したものが、この利用者の行を実際に含んでいることを先に確かめる（利用者 ID は秘密ではなく、平文で残る）。
+    expect(leaksIn({ dump }, [userIdOf(user.browser.authenticator)])).toEqual(['0:dump']);
+    expect(leaksIn({ dump, logs }, needles)).toEqual([]);
   });
 });

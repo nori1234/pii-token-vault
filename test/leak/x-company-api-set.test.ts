@@ -1,11 +1,13 @@
 // 企業に送る SET（RFC 8417、RFC 8935、RP-50・51、ADR 0022）。company-api → sender → 企業の受け口までを通す。
 // 送る宛先の検査は sender（t11-sender-ssrf）。ここでは、SET の中身、送り直し、緊急停止、ログと DB に残すものを見る。
+// 最後に、DB を丸ごと取り出したもの（pg_dump。全スキーマ）も、値の形を変えて検索する（テスト7）。
 
 import { createLocalJWKSet, jwtVerify } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from '../../packages/warifu-core/src/db/sql.ts';
 import { startTestCompanyApi, type TestCompanyApi } from '../setup/company-api.ts';
 import { serviceDb } from '../setup/db.ts';
+import { dumpWorkerDatabase, leaksIn } from '../setup/dump.ts';
 import {
   makeTlsFixture,
   PUBLIC_V4,
@@ -191,5 +193,35 @@ describe('漏えい：企業に送る SET（RP-50、RP-51）', () => {
     } finally {
       await db.close();
     }
+  });
+
+  it('DB を丸ごと取り出しても、ログにも、テナントのトークンと送った検証の SET がない', async () => {
+    // 攻撃者が持っている情報：割符の DB を丸ごと読める立場（pg_dump、ATK-06）と、company-api と sender のログを
+    //                         読める立場
+    // 試す経路：テナントのトークンを取り、検証の SET を頼んで送らせる。その後で、DB を丸ごと取り出し、ログと合わせて探す
+    // 期待する結果：テナントのトークンも、送った SET も、DB にもログにも出ない（送信待ちには jti と state だけが残る）
+    // plan 11章：テスト7
+    const [a] = api.tenants;
+    if (a === undefined) throw new Error('準備に失敗した');
+    const token = await api.accessToken(a);
+    const before = sender.requests.length;
+    const res = await api.request({
+      path: '/v1/events/verification',
+      token,
+      json: { state: 'dump' },
+    });
+    expect(res.status).toBe(202);
+    expect(await api.api.deliverDue()).toMatchObject({ delivered: 1 });
+    const sets = sender.requests.slice(before).map((r) => r.body);
+    expect(sets).toHaveLength(1);
+    const dump = await dumpWorkerDatabase();
+    // 取り出したものが、このテナントの行を実際に含んでいることを先に確かめる（テナント ID は秘密ではない）。
+    expect(leaksIn({ dump }, [a.tenantId])).toEqual(['0:dump']);
+    expect(
+      leaksIn({ dump, company: api.logs.join('\n'), sender: sender.logs.join('\n') }, [
+        token,
+        ...sets,
+      ]),
+    ).toEqual([]);
   });
 });
