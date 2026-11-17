@@ -22,6 +22,7 @@ import { MemoryOutbox } from '../../packages/idp/src/mailer.ts';
 import { type KeysvcProcess, startKeysvc } from '../../scripts/keysvc-up.ts';
 import { applyDatabaseAcl, migrate } from '../../scripts/migrate.ts';
 import { type PgCluster, startCluster } from '../../scripts/pg-up.ts';
+import { installEgressGuard, takeEgressAttempts, uninstallEgressGuard } from '../setup/egress.ts';
 
 type PrivateKey = Awaited<ReturnType<typeof generateKeyPair>>['privateKey'];
 
@@ -69,6 +70,8 @@ async function freePort(): Promise<number> {
 }
 
 test.beforeAll(async () => {
+  // 外へのつなぎの見張り（Vitest の setupFiles と同じもの。test/setup/egress.ts）。afterAll で0件を確かめる。
+  installEgressGuard();
   cluster = await startCluster();
   const admin = new pg.Client({
     host: cluster.host,
@@ -144,7 +147,15 @@ test.afterAll(async () => {
   await idp?.close();
   await keysvc?.stop();
   await cluster?.stop();
+  expectNoEgress();
 });
+
+/** 見張りが止めたつなぎと名前解決が0件であることを確かめて、見張りを外す。 */
+function expectNoEgress(): void {
+  const attempts = takeEgressAttempts();
+  uninstallEgressGuard();
+  expect(attempts).toEqual([]);
+}
 
 async function addVirtualAuthenticator(
   page: Page,
