@@ -1,6 +1,6 @@
 # ADR 0031：rp-kit の npm への公開を、GitHub Actions のワークフローで行う
 
-- 状態：決定（2026-11-18 に、オーナーが GitHub Actions で公開する案を選んだ。細目は、この PR のレビューで確かめる）
+- 状態：決定（2026-11-18 に、オーナーが GitHub Actions で公開する案を選んだ。細目は、この PR のレビューで確かめる）。O-118 は、2026-11-19 の追記のとおり、trusted publishing と staged publishing に切り替えた
 - 日付：2026-11-18
 
 ## 状況
@@ -37,6 +37,7 @@ rp-kit（`@pii-token-vault/rp-kit`）は、M9 の後に npm に公開すると�
 - npm の trusted publishing（GitHub Actions の OIDC で公開する。トークンを使わない）に切り替える。npm の側で、パッケージの設定に、このリポジトリ、ワークフロー（`publish-rp-kit.yml`）、environment（`npm-publish`）を登録する。trusted publishing は、パッケージが npm に既にあることが前提なので、初回だけはトークンを使う。
 - 切り替えたら、`NPM_TOKEN` を GitHub から消し、npm でトークンを取り消す。ワークフローからトークンの手順を外す PR を出す（trusted publishing には npm CLI 11.5.1 以上が要るので、その PR で publish のジョブの npm の版も決める）。
 - 切り替えた後は、npm のパッケージの設定で、トークンでの公開を許さない形にする（オーナーが決める）。
+- → 下の追記（2026-11-19）のとおり切り替えた。
 
 ## 理由
 
@@ -59,7 +60,33 @@ rp-kit（`@pii-token-vault/rp-kit`）は、M9 の後に npm に公開すると�
 
 ## 変えたもの
 
-- `.github/workflows/publish-rp-kit.yml` を足した。
+- `.github/workflows/publish-rp-kit.yml` を足した（2026-11-19 の追記で、publish のジョブを、trusted publishing での `npm stage publish` にした）。
 - `scripts/pack-rp-kit.ts`：公開用の `package.json` に `files` を足した（テストも足した）。
 - `packages/rp-kit/README.md` の「メンテナー向け」：公開の手順を、このワークフローにした。
 - plan 10章「公開の順番」：公開の作業を、このワークフローで行うと書いた。
+
+## 追記（2026-11-19）：trusted publishing と staged publishing に切り替えた（O-118）
+
+0.1.0 を公開した後（2026-11-18）、オーナーが npm の設定を次のとおりにした。npm CLI 12.2.3 の `npm stage` の説明（Best Practices）が勧める3つ（2要素認証を飛ばせるトークンを消す、パッケージでトークンからの公開を禁じる、trusted publishing には `npm stage publish` だけを許す）と同じ形である。
+
+- trusted publishing：GitHub Actions（`nori1234/pii-token-vault`、`publish-rp-kit.yml`、environment `npm-publish`）を登録した。Allowed actions は `npm stage publish` だけにし、`npm publish` と `npm dist-tag` は許さない。
+- Publishing access：「Require two-factor authentication and disallow bypass 2fa tokens」にした。
+
+これに合わせて、ワークフローを次のとおりにした（2026-11-19 にオーナーが、0.1.1 を出して、仮置きから承認までの流れを確かめる案を選んだ）。
+
+- publish のジョブは、`npm stage publish`（staged publishing）だけを実行する。仮置きした版は、まだ誰も入れられない。npm にログインしたメンテナーが、2段階認証をして `npm stage approve <stage-id>` を実行したときに公開される。
+- npm には trusted publishing でつなぐ。`NPM_TOKEN` を読む手順を外し、setup-node に `registry-url` を渡さない（トークンを読む `.npmrc` を作らない）。
+- `npm stage` は、Node 22 に付いてくる npm（10.x）にはないので、publish のジョブで npm を 12.2.3 に固定して入れる（`--ignore-scripts`）。npm 12.2.3 は Node `^22.22.2` を求め、`node-version: 22` で入る版（22.23.x）は、これを満たす。
+- 仮置きの ID は、ジョブの Summary に出す。
+
+理由：
+
+- GitHub Actions のジョブは、公開まではできない。GitHub のメンテナーのアカウントやワークフローが乗っ取られても、npm で2段階認証をした承認がなければ、版は公開されない。GitHub の environment の承認と、npm の2段階認証の、2つの別々の確認を通す。
+- 公開できるトークンを、どこにも置かずに済む。
+
+残るリスク（上の「残るリスク」に足す）：
+
+- 承認には、メンテナーが手元で npm にログインする必要がある（`npm stage approve`。npm の Web の画面で承認できるかは、まだ確かめていない）。手元のログインのセッションは、そのパソコンに残る。
+- npm のアカウントが乗っ取られ、2段階認証も破られると、公開されうる。これは、staged publishing でも防げない。
+- 仮置きした版は、同じ版の番号を使う。承認も取りやめもせずに残すと、その版の番号では公開できない。
+- 承認の前に中身を確かめるのは、メンテナーの手順（`npm stage view` と `npm stage download`）に任せる。
