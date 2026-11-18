@@ -92,10 +92,15 @@ jobs:
             echo "::error::パッケージ名が違う（${name}）"
             exit 1
           fi
-          # 同じ版は二度と公開できない。公開済みなら、ここで止める（パッケージが無いときは 404 で空になる）。
-          published=$(npm view "${name}@${version}" version 2>/dev/null || true)
-          if [ -n "$published" ]; then
+          # 同じ版は二度と公開できない。公開済みなら、ここで止める。npm view は、パッケージか版が無いときだけ
+          # E404 で終わる。それ以外の失敗（レジストリの障害など）では、公開済みかどうか分からないので止める。
+          view_err="$RUNNER_TEMP/npm-view.err"
+          if npm view "${name}@${version}" version 2>"$view_err"; then
             echo "::error::${name}@${version} は公開済み。packages/rp-kit/package.json の version を上げる"
+            exit 1
+          elif ! grep -q 'code E404' "$view_err"; then
+            cat "$view_err"
+            echo "::error::${name}@${version} が公開済みかを、npm のレジストリで確かめられなかった"
             exit 1
           fi
           tarball=$(npm pack --ignore-scripts --json --pack-destination "$dist" | jq -r '.[0].filename')

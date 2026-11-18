@@ -236,7 +236,7 @@ npm run pack:rp-kit -- <出力先のディレクトリ>
 
 - `main` 以外で起動したとき。
 - そのコミットで、CI（lint・typecheck・test と e2e）が通っていないとき。
-- その版が、もう公開してあるとき。
+- その版が、もう公開してあるとき。公開済みかを確かめられないとき（レジストリの障害など）も止まります。
 - まとめた tarball を空のプロジェクトに入れて、パッケージ名（`@pii-token-vault/rp-kit` と `@pii-token-vault/rp-kit/kit`）で読み込めないとき。
 - 企業に届く依存（`dependencies`）に、既知の脆弱性があるとき（`npm audit --omit=dev`。重さによらず止める）。
 
