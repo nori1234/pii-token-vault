@@ -3,17 +3,18 @@
 割符（Warifu）に接続する企業のための SDK と、適合テストキットです。企業のサーバー（Node 22.18 以上）で動かします。
 
 - これは PoC です。本番では使わないでください。
-- npm のパッケージ名は `@pii-token-vault/rp-kit` です（公開の手順は、下の「メンテナー向け」に書いています）。
+- npm に `@pii-token-vault/rp-kit` として公開しています。版ごとの変更は [リリース情報](../../CHANGELOG.md) にあります（公開の手順は、下の「メンテナー向け」に書いています）。
 - 接続要件の正本は、リポジトリの [`docs/spec/02-rp-requirements.md`](../../docs/spec/02-rp-requirements.md) です。この README と食い違ったら、仕様を正とします。設計の判断は [ADR 0029](../../docs/adr/0029-company-side-code-boundary.md) と [ADR 0030](../../docs/adr/0030-high-risk-step-up.md) にあります。
 
 > **English summary**: `@pii-token-vault/rp-kit` is the server-side SDK and self-check conformance kit for companies (relying parties) that connect to **Warifu**, an open design and proof of concept that aims to let companies stop relying on customers' contact details and personal attributes for identity verification. **It is a proof of concept: do not use it in production or with real personal data.** The SDK builds and verifies what a company exchanges with Warifu (private_key_jwt client assertions, PKCE, pushed authorization requests, ID tokens, transaction-bound approvals, and Security Event Tokens). It never opens network connections itself: you pass in a function that sends one request, requests go only to the Warifu origins you configure, and it does not follow redirects or URLs found in responses. The conformance kit, with a mock OP that you run locally, lets a company check its own integration against the connection requirements; passing it does not mean that Warifu has verified the company. Requires Node.js 22.18 or later (ESM only). No Warifu service is operated anywhere. Documentation is in Japanese; the connection requirements are in [docs/spec/02-rp-requirements.md](../../docs/spec/02-rp-requirements.md). Licensed under MIT.
 
 ## 手元で模擬 OP を試す
 
-Node.js 22.18 以上と npm を使います。このリポジトリを取得し、ルートで次を実行してください。模擬 OP はプロセス内で動くので、この例に企業のアカウントや割符のサーバーは要りません。
+Node.js 22.18 以上と npm を使います。空のディレクトリで次を実行してください。模擬 OP はプロセス内で動くので、この例に企業のアカウントや割符のサーバーは要りません。
 
 ```sh
-npm ci --ignore-scripts
+npm init -y > /dev/null
+npm install --ignore-scripts @pii-token-vault/rp-kit
 node --input-type=module <<'JS'
 import { createMockOp } from '@pii-token-vault/rp-kit/kit';
 const op = await createMockOp({ clientId: 'demo', redirectUri: 'http://localhost/callback' });
@@ -21,7 +22,7 @@ console.log(op.origin);
 JS
 ```
 
-`https://mock-op.rp-kit.invalid` が表示されれば、キットを読み込めています。自社のテストに組み込むときは [適合テストキット](#適合テストキット) の例で `mockOp.send` を SDK に渡します。配布する版の内容は [リリース情報](../../CHANGELOG.md) で確認できます。
+`https://mock-op.rp-kit.invalid` が表示されれば、キットを読み込めています。このリポジトリの中で試すときは、最初の2行の代わりに、ルートで `npm ci --ignore-scripts` を実行します。自社のテストに組み込むときは [適合テストキット](#適合テストキット) の例で `mockOp.send` を SDK に渡します。配布する版の内容は [リリース情報](../../CHANGELOG.md) で確認できます。
 
 ## SDK が受け持つこと、企業が受け持つこと
 
