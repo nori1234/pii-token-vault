@@ -223,6 +223,7 @@ npm run pack:rp-kit -- <出力先のディレクトリ>
 - 出力先に、変換した `.js` と `.d.ts`、公開用の `package.json`、README、LICENSE が入ります。テストと、変換の前の `.ts` は入りません。公開用の `package.json` の `files` には、このファイルだけを並べます（出力先にほかのファイルが紛れても、npm は入れません）。
 - README の相対のリンク（`../../docs/…` など）は、npm のページでも開けるように、GitHub の `main` の URL に書き換えて入れます。コードブロックとインラインのコードの中は、書き換えません。
 - このコマンドは、公開をしません。公開は、下の GitHub Actions のワークフローで行います。
+- 依存（`jose`）の版は、ぴったり固定しています。公開のときに検査した版を届けるためです。依存にセキュリティの修正が出たら、依存の版を上げて、新しい版の rp-kit を出します（[ADR 0031](../../docs/adr/0031-rp-kit-publish-workflow.md)）。
 - 版は `packages/rp-kit/package.json` の `version` です（同じ版は、二度と公開できません）。公開の範囲は public です（まとめた `package.json` の `publishConfig`）。
 
 公開は、GitHub Actions のワークフロー「rp-kit を npm に公開」（`.github/workflows/publish-rp-kit.yml`）で行います。手元やクラウド環境に、npm のトークンを置かないためです（[ADR 0031](../../docs/adr/0031-rp-kit-publish-workflow.md)）。
