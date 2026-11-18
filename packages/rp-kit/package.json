@@ -32,6 +32,6 @@
     "./kit": "./src/kit/index.ts"
   },
   "dependencies": {
-    "jose": "6.2.14"
+    "jose": "6.2.17"
   }
 }
