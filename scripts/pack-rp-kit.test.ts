@@ -49,6 +49,8 @@ describe('rp-kit の公開の準備（plan 10章「公開の順番」）', () =>
       '.': { types: './index.d.ts', default: './index.js' },
       './kit': { types: './kit/index.d.ts', default: './kit/index.js' },
     });
+    // files には、出力先にあるファイル（package.json のほか）だけが並ぶ。npm は、これにないファイルを入れない。
+    expect(manifest.files).toEqual(packed.files.filter((file) => file !== 'package.json'));
     expect(Object.keys(manifest.dependencies)).toEqual(['jose']);
     expect(manifest.devDependencies).toBeUndefined();
     expect(manifest.scripts).toBeUndefined();

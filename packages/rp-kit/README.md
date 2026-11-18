@@ -220,21 +220,32 @@ const report = await runConformanceKit({ hooks, mockOp, participation: { mode: '
 npm run pack:rp-kit -- <出力先のディレクトリ>
 ```
 
-- 出力先に、変換した `.js` と `.d.ts`、公開用の `package.json`、README、LICENSE が入ります。テストと、変換の前の `.ts` は入りません。
+- 出力先に、変換した `.js` と `.d.ts`、公開用の `package.json`、README、LICENSE が入ります。テストと、変換の前の `.ts` は入りません。公開用の `package.json` の `files` には、このファイルだけを並べます（出力先にほかのファイルが紛れても、npm は入れません）。
 - README の相対のリンク（`../../docs/…` など）は、npm のページでも開けるように、GitHub の `main` の URL に書き換えて入れます。コードブロックとインラインのコードの中は、書き換えません。
-- このコマンドは、公開をしません。中身を確かめた後、メンテナーが出力先で `npm publish` を実行します。
+- このコマンドは、公開をしません。公開は、下の GitHub Actions のワークフローで行います。
+- 依存（`jose`）の版は、ぴったり固定しています。公開のときに検査した版を届けるためです。依存にセキュリティの修正が出たら、依存の版を上げて、新しい版の rp-kit を出します（[ADR 0031](../../docs/adr/0031-rp-kit-publish-workflow.md)）。
 - 版は `packages/rp-kit/package.json` の `version` です（同じ版は、二度と公開できません）。公開の範囲は public です（まとめた `package.json` の `publishConfig`）。
-- 公開する人の npm のアカウントが、npm の組織 `pii-token-vault`（スコープ `@pii-token-vault`）で、公開の権限を持っている必要があります。
 
-公開の手順（`main` で）：
+公開は、GitHub Actions のワークフロー「rp-kit を npm に公開」（`.github/workflows/publish-rp-kit.yml`）で行います。手元やクラウド環境に、npm のトークンを置かないためです（[ADR 0031](../../docs/adr/0031-rp-kit-publish-workflow.md)）。
 
-```
-npm ci
-npm run pack:rp-kit -- ../rp-kit-publish
-cd ../rp-kit-publish
-npm publish --dry-run   # 入るファイルと版を確かめる
-npm publish
-```
+1. `packages/rp-kit/package.json` の `version` を上げる PR を出し、`main` にマージします。そのコミットで CI が通るのを待ちます。
+2. Actions の画面で、このワークフローを `main` で起動します（Run workflow）。既定の `dry_run` のままだと、まとめて中身を確かめるだけで、公開しません。ログで、入るファイルと版を確かめます。
+3. `dry_run` を外して起動し直します。公開のジョブは、environment `npm-publish` の承認を待つので、承認すると、provenance を付けて公開します。
+4. `npm view @pii-token-vault/rp-kit@<版> version` で、公開されたことを確かめます。
+
+ワークフローは、次のときに止まります。
+
+- `main` 以外で起動したとき。
+- そのコミットで、CI（lint・typecheck・test と e2e）が通っていないとき。
+- その版が、もう公開してあるとき。公開済みかを確かめられないとき（レジストリの障害など）も止まります。
+- まとめた tarball を空のプロジェクトに入れて、パッケージ名（`@pii-token-vault/rp-kit` と `@pii-token-vault/rp-kit/kit`）で読み込めないとき。
+- 企業に届く依存（`dependencies`）に、既知の脆弱性があるとき（`npm audit --omit=dev`。重さによらず止める）。
+
+最初に一度だけ、オーナーが次を設定します。
+
+- GitHub：Settings → Environments で `npm-publish` を作り、使えるブランチを `main` だけにし、承認する人（Required reviewers）にメンテナーを入れます（メンテナーが1人のときは、自分で承認できるように、Prevent self-review はオフのままにします）。
+- 初回の公開（0.1.0）だけは、npm のトークンを使います。npm の組織 `pii-token-vault`（スコープ `@pii-token-vault`）で公開の権限を持つアカウントで、Granular Access Token を作ります（範囲は `@pii-token-vault` の読み書き、有効期限はいちばん短く。アカウントで2要素認証を使っているときは、Bypass two-factor authentication をオンにする）。それを、environment `npm-publish` の secret `NPM_TOKEN` に入れます。
+- 初回の公開の後は、npm のパッケージの設定で trusted publishing（このリポジトリ、`publish-rp-kit.yml`、environment `npm-publish`）を登録し、`NPM_TOKEN` を消して、npm でトークンを取り消します（ADR 0031 の O-118）。
 
 - `scripts/pack-rp-kit.test.ts`（`npm test` に入っています）が、まとめたものを、別のプロセスの Node で読み込めることを確かめています。
 - `packages/rp-kit/test/readme.test.ts`（`npm test` に入っています）が、この README の `ts` のコードの例を、SDK の型で確かめています。通信の関数の例は、そのまま動かして、大きな応答を上限で読むのをやめることも確かめています。例を変えたら、`npm test` で確かめてください。
