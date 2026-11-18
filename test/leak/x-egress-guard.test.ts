@@ -5,7 +5,12 @@
 // ループバックと Unix ソケットへのつなぎは止めないことを確かめる。
 
 import dgram from 'node:dgram';
-import dns, { lookup as namedLookup, resolveMx as namedResolveMx } from 'node:dns';
+import dns, {
+  lookup as namedLookup,
+  lookupService as namedLookupService,
+  resolveMx as namedResolveMx,
+} from 'node:dns';
+import { lookupService as namedPromisesLookupService } from 'node:dns/promises';
 import { readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import {
@@ -168,6 +173,42 @@ describe('M10：外へのつなぎの見張り（SSRF の横断）', () => {
       ['dns', NAME, 'dns.lookup'],
       ['dns', NAME, 'dns.lookup'],
       ['dns', NAME, 'dns.promises.lookup'],
+    ]);
+  });
+
+  it('dns.lookupService（getnameinfo）の逆引きも、ループバックのほかは OS に渡さずに止めて、アドレスだけを記録する', async () => {
+    // 攻撃者が持っている情報：なし（見張りの自己検査。dns.lookupService は、dns.lookup とも c-ares の問い合わせとも
+    //                         別の入口なので、別に見張る）
+    // 試す経路：コールバックの dns.lookupService（名前付きの import を含む）と、dns.promises.lookupService
+    //           （node:dns/promises の名前付きの import を含む）で、文書用のアドレス（IPv4、IPv6）を逆引きする。
+    //           IP アドレスでない引数を渡す。127.0.0.1 を逆引きする
+    // 期待する結果：文書用のアドレスは、OS に渡る前に見張りの誤りで止まり（OS の結果の ENOTFOUND などにならない）、
+    //               アドレスと入口が記録に残る。IP アドレスでない引数は、元の関数が ERR_INVALID_ARG_VALUE で断る
+    //               （つながないので記録しない）。127.0.0.1 は止めず、記録もしない
+    // plan 11章：テスト11（M10 の SSRF の横断）
+    const reverse = (fn: typeof dns.lookupService, address: string) =>
+      new Promise((resolve, reject) => {
+        fn(address, 80, (error, hostname) => (error ? reject(error) : resolve(hostname)));
+      });
+    expect(await settle(reverse(dns.lookupService, TEST_NET))).toBe('blocked');
+    expect(await settle(reverse(namedLookupService, TEST_NET6))).toBe('blocked');
+    expect(await settle(dns.promises.lookupService(TEST_NET, 80))).toBe('blocked');
+    expect(await settle(namedPromisesLookupService(TEST_NET6, 80))).toBe('blocked');
+    let invalid: unknown;
+    try {
+      dns.lookupService(NAME, 80, () => {});
+    } catch (error) {
+      invalid = error;
+    }
+    expect((invalid as { code?: unknown } | undefined)?.code).toBe('ERR_INVALID_ARG_VALUE');
+    expect(await settle(dns.promises.lookupService('127.0.0.1', 80))).not.toBe('blocked');
+    expect(
+      takeEgressAttempts().map(({ kind, destination, via }) => [kind, destination, via]),
+    ).toEqual([
+      ['dns', TEST_NET, 'dns.lookupService'],
+      ['dns', TEST_NET6, 'dns.lookupService'],
+      ['dns', TEST_NET, 'dns.promises.lookupService'],
+      ['dns', TEST_NET6, 'dns.promises.lookupService'],
     ]);
   });
 
