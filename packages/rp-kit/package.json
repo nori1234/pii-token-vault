@@ -1,6 +1,6 @@
 {
   "name": "@pii-token-vault/rp-kit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "割符（Warifu）に接続する企業向けの SDK と適合テストキット（PoC）。SDK and conformance kit for companies connecting to Warifu (proof of concept; not for production)",
   "keywords": [

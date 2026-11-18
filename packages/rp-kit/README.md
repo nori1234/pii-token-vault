@@ -242,26 +242,28 @@ npm run pack:rp-kit -- <出力先のディレクトリ>
 - 依存（`jose`）の版は、ぴったり固定しています。公開のときに検査した版を届けるためです。依存にセキュリティの修正が出たら、依存の版を上げて、新しい版の rp-kit を出します（[ADR 0031](../../docs/adr/0031-rp-kit-publish-workflow.md)）。
 - 版は `packages/rp-kit/package.json` の `version` です（同じ版は、二度と公開できません）。公開の範囲は public です（まとめた `package.json` の `publishConfig`）。
 
-公開は、GitHub Actions のワークフロー「rp-kit を npm に公開」（`.github/workflows/publish-rp-kit.yml`）で行います。手元やクラウド環境に、npm のトークンを置かないためです（[ADR 0031](../../docs/adr/0031-rp-kit-publish-workflow.md)）。
+公開は、GitHub Actions のワークフロー「rp-kit を npm に公開」（`.github/workflows/publish-rp-kit.yml`）で版を仮置きし（staged publishing）、メンテナーが npm で2段階認証をして承認する、の2段で行います。ワークフローは、npm のトークンを使わずに、trusted publishing（GitHub Actions の OIDC）で npm につなぎます。手元やクラウド環境、GitHub に、公開できるトークンを置かないためです（[ADR 0031](../../docs/adr/0031-rp-kit-publish-workflow.md)）。
 
-1. 初回は `packages/rp-kit/package.json` に設定済みの `0.1.0` を使います。2回目以降は新しい版を設定し、変更内容を [リリース情報](../../CHANGELOG.md) に記録して `main` に取り込みます。対象コミットで CI が通るのを待ちます。
-2. Actions の画面で、このワークフローを `main` で起動します（Run workflow）。既定の `dry_run` のままだと、まとめて中身を確かめるだけで、公開しません。ログで、入るファイルと版を確かめます。
-3. `dry_run` を外して起動し直します。公開のジョブは、environment `npm-publish` の承認を待つので、承認すると、provenance を付けて公開します。
-4. `npm view @pii-token-vault/rp-kit@<版> version --registry=https://registry.npmjs.org` で対象の版が返ったら、リリース情報に公開日と npm の版別ページへのリンクを記録します。
+1. `packages/rp-kit/package.json` の `version` を新しい版にし、`packages/demo-rp/package.json` の依存の指定と、`package-lock.json` の2か所（demo-rp の依存と、`packages/rp-kit` の版）も同じ版にそろえます（そろえないと、`npm ci` が、リポジトリの中ではなく npm の公開済みの版を取りに行きます）。変更内容を [リリース情報](../../CHANGELOG.md) に記録して `main` に取り込み、対象コミットで CI が通るのを待ちます。
+2. Actions の画面で、このワークフローを `main` で起動します（Run workflow）。既定の `dry_run` のままだと、まとめて中身を確かめるだけで、npm には何も送りません。ログで、入るファイルと版を確かめます。
+3. `dry_run` を外して起動し直します。仮置きのジョブは、environment `npm-publish` の承認を待つので、承認すると、provenance を付けて npm に仮置きします。仮置きした版は、まだ誰も入れられません。ジョブの Summary に、仮置きの ID（stage ID）が出ます。
+4. npm にログインしたメンテナーが、`npm stage` に対応した npm（ワークフローと同じ 12.2.3 など）で、`npm stage approve <stage-id>` を実行します。2段階認証を求められ、済ませると公開されます。中身を見てから承認するときは `npm stage view <stage-id>` や `npm stage download <stage-id>`、取りやめるときは `npm stage reject <stage-id>` を使います。
+5. `npm view @pii-token-vault/rp-kit@<版> version --registry=https://registry.npmjs.org` で対象の版が返ったら、リリース情報に公開日と npm の版別ページへのリンクを記録します。
 
 ワークフローは、次のときに止まります。
 
 - `main` 以外で起動したとき。
 - そのコミットで、CI（lint・typecheck・test と e2e）が通っていないとき。
-- その版が、もう公開してあるとき。公開済みかを確かめられないとき（レジストリの障害など）も止まります。
+- その版が、もう公開してあるとき。公開済みかを確かめられないとき（レジストリの障害など）も止まります。同じ版を仮置きしたまま（承認も取りやめもしていない）のときは、仮置きの段で止まります。
+- trusted publishing の接続（このリポジトリ、`publish-rp-kit.yml`、environment `npm-publish`）が、npm に登録したものと合わないとき（仮置きの段で止まり、npm には何も出ません）。
 - まとめた tarball を空のプロジェクトに入れて、パッケージ名（`@pii-token-vault/rp-kit` と `@pii-token-vault/rp-kit/kit`）で読み込めないとき。
 - 企業に届く依存（`dependencies`）に、既知の脆弱性があるとき（`npm audit --omit=dev`。重さによらず止める）。
 
 最初に一度だけ、オーナーが次を設定します。
 
 - GitHub：Settings → Environments で `npm-publish` を作り、使えるブランチを `main` だけにし、承認する人（Required reviewers）にメンテナーを入れます（メンテナーが1人のときは、自分で承認できるように、Prevent self-review はオフのままにします）。
-- 初回の公開（0.1.0）だけは、npm のトークンを使います。npm の組織 `pii-token-vault`（スコープ `@pii-token-vault`）で公開の権限を持つアカウントで、Granular Access Token を作ります（範囲は `@pii-token-vault` の読み書き、有効期限はいちばん短く。アカウントで2要素認証を使っているときは、Bypass two-factor authentication をオンにする）。それを、environment `npm-publish` の secret `NPM_TOKEN` に入れます。
-- 初回の公開の後は、npm のパッケージの設定で trusted publishing（このリポジトリ、`publish-rp-kit.yml`、environment `npm-publish`）を登録し、`NPM_TOKEN` を消して、npm でトークンを取り消します（ADR 0031 の O-118）。
+- npm：パッケージの Settings で、trusted publishing に GitHub Actions（`nori1234` / `pii-token-vault`、ワークフローは `publish-rp-kit.yml`、environment は `npm-publish`）を登録します。Allowed actions は、`npm stage publish` だけにします（Allow npm publish と Allow npm dist-tag はオフ）。Publishing access は「Require two-factor authentication and disallow bypass 2fa tokens」にします。承認するメンテナーのアカウントでは、2要素認証を有効にします。
+- 初回の公開（0.1.0。2026-11-18）だけは、trusted publishing を登録する前だったので、environment の secret に置いた npm のトークンで公開しました。いまのワークフローは、このトークンを使いません。npm でトークンを取り消し、environment の secret `NPM_TOKEN` も消します（ADR 0031 の追記）。
 
 - `scripts/pack-rp-kit.test.ts`（`npm test` に入っています）が、まとめたものを、別のプロセスの Node で読み込めることを確かめています。
 - `packages/rp-kit/test/readme.test.ts`（`npm test` に入っています）が、この README の `ts` のコードの例を、SDK の型で確かめています。通信の関数の例は、そのまま動かして、大きな応答を上限で読むのをやめることも確かめています。例を変えたら、`npm test` で確かめてください。

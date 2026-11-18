@@ -6,11 +6,15 @@
 #   - pack は、npm ci（--ignore-scripts）と npm run pack:rp-kit で tarball を作る。秘密の値を持たない。
 #     作った tarball を空のプロジェクトに入れ、パッケージ名で読み込めることと、企業に届く依存（dependencies）に
 #     既知の脆弱性がないこと（npm audit --omit=dev）を確かめる。CI の npm ci は --no-audit なので、ここで確かめる。
-#   - publish は、pack が作った tarball を受け取って、npm publish だけを実行する。依存を入れず、リポジトリの
-#     コードも動かさない。npm のトークン（NPM_TOKEN）は、GitHub の environment「npm-publish」の secret に置き、
-#     公開の手順にだけ渡す。environment の保護の規則で、main だけと、メンテナーの承認を求める。
+#   - publish は、pack が作った tarball を受け取って、npm stage publish だけを実行する（staged publishing）。
+#     依存を入れず、リポジトリのコードも動かさない。environment「npm-publish」の保護の規則で、main だけと、
+#     メンテナーの承認を求める。
+# - npm には、trusted publishing（GitHub Actions の OIDC）でつなぐ。npm のトークンは使わない。npm の側では、
+#   このワークフロー（publish-rp-kit.yml）と environment（npm-publish）からの npm stage publish だけを許し、
+#   npm publish と npm dist-tag は許さない（ADR 0031 の追記）。
+# - 仮置きした版は、まだ誰も入れられない。npm にログインしたメンテナーが、2段階認証をして
+#   npm stage approve <stage-id> を実行したときに公開される。
 # - provenance を付ける（npm のページで、どのコミットとワークフローから作ったかを確かめられる）。
-# - 初回の公開の後は、npm の trusted publishing（OIDC。トークンなし）に切り替えて、NPM_TOKEN を消す（ADR 0031）。
 # - 公開のワークフローでは、依存のキャッシュを使わない。
 # - アクションは、コミットの SHA で固定する（末尾のコメントは、その SHA の版）。
 
@@ -140,7 +144,7 @@ jobs:
           retention-days: 7
 
   publish:
-    name: npm に公開する
+    name: npm に仮置きする
     needs: pack
     if: ${{ github.ref == 'refs/heads/main' && !inputs.dry_run }}
     runs-on: ubuntu-24.04
@@ -154,20 +158,36 @@ jobs:
           name: rp-kit-tarball
           path: dist
 
+      # registry-url は渡さない。渡すと、トークンを読む .npmrc を作るため。npm の既定のレジストリ
+      # （registry.npmjs.org）に、trusted publishing（OIDC）でつなぐ。
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
 
-      - name: 公開する（provenance 付き）
+      - name: npm を、staged publishing に対応した版にする
+        # npm stage は、Node 22 に付いてくる npm（10.x）にはない。版はぴったり固定する。
+        run: |
+          npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
+          if [ "$(npm --version)" != "12.2.3" ]; then
+            echo "::error::npm の版が 12.2.3 ではない（$(npm --version)）"
+            exit 1
+          fi
+
+      - name: 仮置きする（trusted publishing。provenance 付き。まだ公開しない）
+        # trusted publishing の接続が npm の登録と合わないと、トークンを得られずに、ここで止まる（何も出ない）。
         working-directory: dist
         env:
           TARBALL: ${{ needs.pack.outputs.tarball }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo '::error::environment「npm-publish」に、secret の NPM_TOKEN がない'
-            exit 1
-          fi
-          npm publish --provenance --access public --ignore-scripts "./${TARBALL}"
-          echo "${TARBALL} を公開した。" >> "$GITHUB_STEP_SUMMARY"
+          set -o pipefail
+          out="$RUNNER_TEMP/npm-stage.out"
+          npm stage publish --provenance --access public --ignore-scripts "./${TARBALL}" | tee "$out"
+          staged=$(grep -E '^\+ .*\(staged' "$out" || true)
+          {
+            echo "${TARBALL} を npm に仮置きした。まだ公開していない（誰も入れられない）。"
+            echo
+            echo "\`${staged}\`"
+            echo
+            echo '公開するには、npm にログインしたメンテナーが、2段階認証をして `npm stage approve <stage-id>` を実行する。'
+            echo '取りやめるときは `npm stage reject <stage-id>`。手順は packages/rp-kit/README.md の「メンテナー向け」。'
+          } >> "$GITHUB_STEP_SUMMARY"
