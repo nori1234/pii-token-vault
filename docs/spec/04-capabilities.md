@@ -56,7 +56,7 @@
 | sign（operation_approval）、public_keys（operation_approval）：高リスクの操作の承認の署名（ES256。窓口と初回紐付けの鍵とは別） | ○ | — | — | M9（ADR 0030 の O-114） |
 
 - sender、rp-kit、demo-rp は、鍵サービスの資格情報を持たない。表にない (サービス, 操作, 対象) は、すべて 403（理由によらず同じ本文とヘッダー）。表の本体は `packages/keysvc/src/acl.ts` の1か所に置く（ADR 0013）。
-- MAC の鍵は用途ごとに独立させる（KMS の鍵ごとのポリシーに写せるようにするため）。用途は使うマイルストーンで足す。M3 で、idp だけの用途として `pairwise_sub`、`oidc_storage_id`、`email_verify_code` を足した（ADR 0018）。M4 で、relay だけの用途として `relay_replay`、`relay_thread`、`message_id` を足した（ADR 0021）。M6 で、idp だけの用途として `approval_challenge` を足した（ADR 0023）。M7 で、company-api だけの用途として `desk_id`（外に出す ID の導出）と `desk_lookup`（照合用の索引）を足した（ADR 0026）。M8 で、idp だけの用途として `recovery_code`（回復コードの照合）を足した（ADR 0027）。協力者の招待コードと、協力者の承認の結び付けのコードは、DB に置かず、idp のメモリの保存先（鍵は `oidc_storage_id` の MAC）に10分だけ置くので、新しい用途は足していない。見込みは、初回紐付け用の用途（下記の追加案）。
+- MAC の鍵は用途ごとに独立させる（KMS の鍵ごとのポリシーに写せるようにするため）。用途は使うマイルストーンで足す。M3 で、idp だけの用途として `pairwise_sub`、`oidc_storage_id`、`email_verify_code` を足した（ADR 0018）。M4 で、relay だけの用途として `relay_replay`、`relay_thread`、`message_id` を足した（ADR 0021）。M6 で、idp だけの用途として `approval_challenge` を足した（ADR 0023）。M7 で、company-api だけの用途として `desk_id`（外に出す ID の導出）と `desk_lookup`（照合用の索引）を足した（ADR 0026）。M8 で、idp だけの用途として `recovery_code`（回復コードの照合）を足した（ADR 0027）。協力者の招待コードと、協力者の承認の結び付けのコードは、DB に置かず、idp のメモリの保存先（鍵は `oidc_storage_id` の MAC）に10分だけ置くので、新しい用途は足していない。M9 で、company-api だけの用途として `initial_link_public_id`（移行専用ID の導出）と `initial_link_lookup`（照合用の索引）を足した。この2つは版を持つ（ADR 0028 の O-86・O-87）。
 - 暗号化は鍵サービスの中で直接 AES-256-GCM にかけ（エンベロープにしない）、暗号文を文脈（`contact` は `{ field: 'email', user_id }`、`relay_queue` は `{ queue_item_id }`。返信用のアドレスの行の ID を使う）に結び付ける（ADR 0013）。
 
 - warifu-core は資格情報を持たない。組み込まれたサービスの資格情報で、鍵サービスを呼ぶ。
@@ -69,9 +69,9 @@
   - 本番で KMS へつなぐ経路。P1 の AWS アダプタで決める。
   - 導出鍵の入れ替えの手順（旧鍵での照合を一定期間残す、企業に SET で知らせる）。P1（ADR 0005）。
 
-### 2.1 窓口と初回移行に追加する能力の設計案
+### 2.1 窓口と初回移行の能力の経緯（ADR 0019・0020 の設計案）
 
-下表は**追加する能力の案**であり、現行ACLで使える操作ではない。各用途は別鍵とし、tenant・用途・鍵の版を結び付ける。入力・出力はログへ出さず、許可外の呼び出しは403にする（ADR 0019・0020、テスト8）。
+下表は、ADR 0019・0020 のときの**設計案**で、現行の ACL ではない。確定した能力は、上の表にある。各用途は別鍵とし、tenant・用途・鍵の版を結び付ける。入力・出力はログへ出さず、許可外の呼び出しは403にする（ADR 0019・0020、テスト8）。
 
 窓口の分は、M7 で次のように確定した（ADR 0026。上の能力の表）。初回移行の分（`initial_link_*`、sign の `initial_link`）は、M9 で、上の能力の表のとおりに確定した（ADR 0028）。高リスクの操作の承認の鍵 `operation_approval` も、M9 で足した（ADR 0030）。
 
@@ -90,7 +90,7 @@
 | mac（desk_subject_lookup） | ○ | — | — | idp内で承認済み企業別主体と利用者の対応をテナント別に照合 |
 | sign（desk_approval、initial_link） | ○ | — | — | 本人の操作別承認と初回移行の最終承認を用途別に署名 |
 
-用途名・keyId・鍵の版・失効条件はM7・M9の実装前にADR 0013・0014と合わせて確定する。sender・rp-kit・demo-rpに割符の鍵サービス資格情報を渡さず、relay以外へのdecryptは追加しない。外部IDとして使うMACの出力は原値として保護し、照合用索引とは用途と鍵を分ける。
+用途名と keyId は、M7（ADR 0026）と M9（ADR 0028、ADR 0030）で確定した（上の表）。鍵の版は、初回移行の MAC の2つの用途だけが持つ（ADR 0028 の O-86・O-87）。入れ替えの手順と周期は、上の「未定」の CAP-07 のとおり。sender・rp-kit・demo-rpに割符の鍵サービス資格情報を渡さず、relay以外へのdecryptは追加しない。外部IDとして使うMACの出力は原値として保護し、照合用索引とは用途と鍵を分ける。
 
 ## 3. DB
 
@@ -126,15 +126,15 @@
 - 未定：
   - 保存期間（CAP-19）。監査ログは、P0 では消さない（ADR 0016）。いま期限が決まっているのは、配送ログ（30日）、リプレイの判定の記録（署名を受け付ける間と1時間）、返信用のアドレス（30日。どれも ADR 0021）、端末の受信箱（承認待ちは期限の30日後、知らせは90日後。ADR 0023）、窓口の作成の記録（正本と idp の項目。終端から7日。終端でないものは消さない。ADR 0026）だけ。受付番号は企業側で管理し、割符へ渡さない。oidc-provider の保存物と PWA のセッションは、メモリの中で期限（ADR 0018 の表）が過ぎたら消える。回復の記録、退会した利用者や接続をやめた企業のデータの保存期間と消し方は、その保存物を作るマイルストーンで決めて、ADR に記録する。別名の照合用の HMAC は、P0 では消さない（ADR 0018）。退会の流れ（保存物の消し方、別名の廃番、企業への知らせ）は P1 で扱う（plan 10章）。plan 8章）。
   - 運用で集計が要るときの扱い（CAP-18）。P1 の本番の運用の手順で決める。
-  - 参加の状態（ADR 0010）：M5 で、テナントの登録を配備のときの静的な設定にし、参加の状態、移行中の期限、割符が確かめた入り口はそこに持たせた（DB の列はない。ADR 0022）。M9 の実装が済むまでは、完全な参加、期限なし、確かめた入り口は空だけを受け付ける。
-    - **静的な設定**（DB にはない）：参加の状態、移行中の期限、割符が確かめた入り口（`verifiedEntries`。空のまま）、`participationRevision`。どのルートからも書き換えられない。変えるのは、運営者が設定を直して配備し直すことだけである（ADR 0028 の O-95）。
-    - **企業の報告**：入り口ごとの結果、確かめた日、棚卸しの日は、運営者が接続の契約の記録として残し、割符の DB には置かない。報告を受けるルートも作らない。利用者の画面にも出さない（ADR 0028 の O-94・O-95・O-105）。
-    - 管理 API も、8章の新しい例外も作らない。
-  - 初回紐付けの正本は `company_api.initial_links`（`withTenant`）、利用者の索引は `idp.initial_link_items`（`withWarifuUser`）に置き、署名の鍵 `initial_link`（idp）と、版を持つ MAC の用途 `initial_link_public_id`・`initial_link_lookup`（company-api）を足す（ADR 0028 の O-86・O-87）。
+- 参加の状態（ADR 0010）：M5 で、テナントの登録を配備のときの静的な設定にし、参加の状態、移行中の期限、割符が確かめた入り口はそこに持たせた（DB の列はない。ADR 0022）。M9 で、移行中の参加（`migrating`）と期限を受け付けるようにし、`participationRevision` を足した。割符が確かめた入り口は、空だけを受け付ける（ADR 0028 の O-95。[02 の 14章](02-rp-requirements.md#14-移行中の参加)）。
+  - **静的な設定**（DB にはない）：参加の状態、移行中の期限、割符が確かめた入り口（`verifiedEntries`。空のまま）、`participationRevision`。どのルートからも書き換えられない。変えるのは、運営者が設定を直して配備し直すことだけである（ADR 0028 の O-95）。
+  - **企業の報告**：入り口ごとの結果、確かめた日、棚卸しの日は、運営者が接続の契約の記録として残し、割符の DB には置かない。報告を受けるルートも作らない。利用者の画面にも出さない（ADR 0028 の O-94・O-95・O-105）。
+  - 管理 API も、8章の新しい例外も作らない。
+- 初回紐付けの正本は `company_api.initial_links`（`withTenant`）、利用者の索引は `idp.initial_link_items`（`withWarifuUser`）に置き、署名の鍵 `initial_link`（idp）と、版を持つ MAC の用途 `initial_link_public_id`・`initial_link_lookup`（company-api）を足した（M9。ADR 0028 の O-86・O-87）。
 
-### 窓口・初回移行の保存先（将来の設計案）
+### 窓口・初回移行の保存先（経緯）
 
-窓口の分は M7 で作った（上の表の `idp.desk_items` と `company_api.desk_changes`、idp から company-api への内部 API。ADR 0026）。初回移行の分も、M9 で作った（`company_api.initial_links`、`company_api.initial_link_records`、`company_api.initial_link_proof_jtis`、`idp.initial_link_items`、送信待ちの2つの種類。マイグレーション 0010。idp から company-api への内部 API に5つの操作を足した。ADR 0028）。次は、その元になった ADR 0020 の提案である。窓口・初回移行の申請状態の正本を company-api の `company_api` スキーマに置き、HMAC 索引とテナント境界で扱う。idp は本人の承認・チャレンジと受信箱を利用者境界で扱う。両サービスは認証済み内部経路で必要最小限の状態を連携する。表・列ごとの GRANT、内部経路の認証、鍵と ACL は M7・M9 の実装前に決定し、テスト6・8を更新する。新たなテナント横断や復号の例外は作らない。詳細は[仕様案 §2.5.1](../proposals/desk-and-initial-binding-v0.7.md#251-申請の保存先db境界鍵の能力案)を参照する。
+窓口の分は M7 で作った（上の表の `idp.desk_items` と `company_api.desk_changes`、idp から company-api への内部 API。ADR 0026）。初回移行の分も、M9 で作った（`company_api.initial_links`、`company_api.initial_link_records`、`company_api.initial_link_proof_jtis`、`idp.initial_link_items`、送信待ちの2つの種類。マイグレーション 0010。idp から company-api への内部 API に5つの操作を足した。ADR 0028）。次は、その元になった ADR 0020 の提案である。窓口・初回移行の申請状態の正本を company-api の `company_api` スキーマに置き、HMAC 索引とテナント境界で扱う。idp は本人の承認・チャレンジと受信箱を利用者境界で扱う。両サービスは認証済み内部経路で必要最小限の状態を連携する。表・列ごとの GRANT、内部経路の認証、鍵と ACL は、M7・M9 の実装で決め（上の表と2章の表。提案から名前を変えた鍵の用途は 2.1 にある）、テスト6・8 に足した。新たなテナント横断や復号の例外は作らない。詳細は[仕様案 §2.5.1](../proposals/desk-and-initial-binding-v0.7.md#251-申請の保存先db境界鍵の能力案)を参照する。
 
 ## 4. 外向きの通信
 
