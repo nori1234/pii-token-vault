@@ -38,7 +38,7 @@
   - 捨てスパイクの型と関数：`SpikeVault`、`SpikeVaultOptions`、`buildSpikeVault` → `SpikeWarifu`、`SpikeWarifuOptions`、`buildSpikeWarifu`
   - acr の URN は、すでに `urn:warifu:acr:*` を使っているので変えない。
 - 変えないもの：
-  - npm のパッケージのスコープは、旧名の `@pii-token-vault/*` のままにする。npm で組織 `warifu` を作れず、作れた組織 `pii-token-vault` に合わせた（オーナーが案 A を選んだ）。どのパッケージもまだ private で、npm に出すのは M9 の後。スコープの名前は動作に影響しない。
+  - npm のパッケージのスコープは、旧名の `@pii-token-vault/*` のままにする。npm で組織 `warifu` を作れず、作れた組織 `pii-token-vault` に合わせた（オーナーが案 A を選んだ）。どのパッケージもまだ private で、npm に出すのは M9 の後。（2026-11-18 に、`@pii-token-vault/rp-kit` の 0.1.0 を npm に公開した。ほかのパッケージは private のまま。[ADR 0031](0031-rp-kit-publish-workflow.md)）スコープの名前は動作に影響しない。
 - コード上の名前（GitHub のリポジトリ `nori1234/pii-token-vault`、npm のスコープ `@pii-token-vault`、ルートのパッケージ名 `pii-token-vault`）は、`pii-token-vault` にそろえる（2026-10-21 にオーナーが決めた。リポジトリの名前は、一時 `warifu` に変えたあと、戻した）。
 
 ## 結果
