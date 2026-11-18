@@ -2,7 +2,21 @@
   "name": "@pii-token-vault/rp-kit",
   "version": "0.1.0",
   "private": true,
-  "description": "企業向け SDK と適合テスト",
+  "description": "割符（Warifu）に接続する企業向けの SDK と適合テストキット（PoC）。SDK and conformance kit for companies connecting to Warifu (proof of concept; not for production)",
+  "keywords": [
+    "warifu",
+    "openid-connect",
+    "oidc",
+    "passkey",
+    "relying-party",
+    "pairwise-subject",
+    "security-event-token",
+    "conformance"
+  ],
+  "homepage": "https://github.com/nori1234/pii-token-vault/tree/main/packages/rp-kit#readme",
+  "bugs": {
+    "url": "https://github.com/nori1234/pii-token-vault/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
