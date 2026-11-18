@@ -1,6 +1,6 @@
 # 03. 脅威モデル
 
-> 状態：M1 時点の骨子（M10 で確定）。正は [docs/plan.md](../plan.md)（Context、1-2、2章、3章、4章、8章、9章、10章、11章）。
+> 状態：M10 で確定作業中の草案。正は [docs/plan.md](../plan.md)（Context、1-2、2章、3章、4章、8章、9章、10章、11章）。
 > 出典：[CLAUDE.md](../../CLAUDE.md) の不変条件、[ADR 0001](../adr/0001-affirmative-list.md)〜[ADR 0005](../adr/0005-alias-derivation.md)、[ADR 0006](../adr/0006-ciba-spike-findings.md)、[ADR 0010](../adr/0010-staged-participation.md)、[ADR 0013](../adr/0013-local-key-service.md)〜[ADR 0017](../adr/0017-log-allowlist.md)、[DESIGN.md](../../DESIGN.md)、[docs/standards.md](../standards.md)。
 > この脅威モデルは、外部のレビュー（登録セキスペ。イシュー #18）にかける（plan 12章）。
 

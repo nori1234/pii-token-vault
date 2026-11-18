@@ -1,6 +1,6 @@
 # 01. 原則と肯定リスト
 
-> 状態：M1 時点の骨子（M10 で確定）。正は [docs/plan.md](../plan.md) の 1章。
+> 状態：M10 で確定作業中の草案。正は [docs/plan.md](../plan.md) の 1章。
 > 出典：plan 1章・4章・7章、[ADR 0001](../adr/0001-affirmative-list.md)、[ADR 0003](../adr/0003-recovery-without-contacts.md)、[ADR 0004](../adr/0004-hold-phone-relay.md)、[ADR 0005](../adr/0005-alias-derivation.md)、[ADR 0010](../adr/0010-staged-participation.md)、[CLAUDE.md](../../CLAUDE.md) の不変条件1・2・10・11、[DESIGN.md](../../DESIGN.md)、[docs/standards.md](../standards.md)。
 
 ## 1. 3つの原則

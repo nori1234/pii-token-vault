@@ -5,7 +5,7 @@
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 > [!WARNING]
-> **本番では使わないでください。** PoC の実装の途中です（M9：企業向け SDK、適合テスト、デモまで）。本物の連絡先や個人情報を入れないでください。
+> **本番では使わないでください。** 検証用の PoC です。本物の連絡先や個人情報を入れないでください。
 >
 > 割符という名前のサービスは、どこでも運用していません。接続している企業もありません。割符を名乗って連絡先やコードを求める連絡は、このプロジェクトとは関係がありません。
 >
@@ -13,9 +13,16 @@
 
 企業が利用者の本物の連絡先を本人確認に使わず、持たずに済む状態をつくる基盤「割符」の PoC と、設計の仕様書です。
 
-名前の「割符」は、1枚の札を2つに割り、両方の片割れを突き合わせて相手を確かめる昔の道具から取りました。連絡先ではなく、手元にある片割れ（パスキー）で本人を確かめる、という考え方を表しています。npm のパッケージ名は `@pii-token-vault/*` です（npm にはまだ何も出していません）。ほかのスコープ（`@warifu` など）や、スコープのない `warifu` などのパッケージ、同じ名前のほかのプロジェクト、秘密分散の「電子割符」の製品とは関係がありません。
+名前の「割符」は、1枚の札を2つに割り、両方の片割れを突き合わせて相手を確かめる昔の道具から取りました。連絡先ではなく、手元にある片割れ（パスキー）で本人を確かめる、という考え方を表しています。企業向け SDK と適合テストキットのパッケージ名は `@pii-token-vault/rp-kit` です。ほかのスコープ（`@warifu` など）や、スコープのない `warifu` などのパッケージ、同じ名前のほかのプロジェクト、秘密分散の「電子割符」の製品とは関係がありません。
 
-> **English summary**: **Warifu** (割符, a Japanese tally split in two whose halves are matched to confirm the other party) is an open design and early-stage proof of concept for a service that aims to let companies stop relying on customers' email addresses, phone numbers, postal addresses, and other personal attributes for identity verification. **It is not production-ready: do not use it in production or with real personal data.** Companies connected to Warifu may base identification and approval only on Warifu-issued ID token claims (`iss`, `sub`, `acr`, `auth_time`), transaction-bound step-up approvals (desk approvals are limited to inquiries and low-risk requests), and verified eligible legacy passkeys or FIDO2 credentials solely for initial account linking; users sign in to Warifu with passkeys. Instead of real email addresses, companies receive per-company email aliases and pairwise subject IDs. In P0 this covers email only, and only what a company receives after a customer's account is linked; real addresses a company already holds remain unless it deletes them. Phone numbers (pending legal review) and postal addresses are not yet covered, and correlation across companies through name and delivery address is not prevented. The project is designed so that merely knowing, or being able to receive, leaked contact details or attributes is not enough to pass identity verification at Warifu or at companies that meet its connection requirements. It does not prevent leaks; known residual risks are listed in [docs/plan.md section 1-2](docs/plan.md#1-2-主張できる範囲と残るリスク). No Warifu service is operated anywhere and no company is connected; the project is not affiliated with or endorsed by any organization it cites. Statements about Japanese law are the project's working assumptions pending legal review, not legal advice, and most of the cited standards and advisories have been checked against their original text, but a few that could not be fetched have been checked only against search excerpts. The npm package names use the `@pii-token-vault` scope; nothing has been published to npm yet. Documentation is in Japanese. Licensed under MIT.
+**接続を試したい企業の方へ**　Node.js 22.18 以上で、手元の模擬 OP を使ってログインの連携を試せます。SDK の使い方と企業側が実装する箇所は [rp-kit の手引き](packages/rp-kit/README.md)、版ごとの変更と配布状況の確認方法は [リリース情報](CHANGELOG.md) にあります。
+
+<details>
+<summary>English summary</summary>
+
+**Warifu** (割符, a Japanese tally split in two whose halves are matched to confirm the other party) is an open design and early-stage proof of concept for a service that aims to let companies stop relying on customers' email addresses, phone numbers, postal addresses, and other personal attributes for identity verification. **It is not production-ready: do not use it in production or with real personal data.** Companies connected to Warifu may base identification and approval only on Warifu-issued ID token claims (`iss`, `sub`, `acr`, `auth_time`), transaction-bound step-up approvals (desk approvals are limited to inquiries and low-risk requests), and verified eligible legacy passkeys or FIDO2 credentials solely for initial account linking; users sign in to Warifu with passkeys. Instead of real email addresses, companies receive per-company email aliases and pairwise subject IDs. In P0 this covers email only, and only what a company receives after a customer's account is linked; real addresses a company already holds remain unless it deletes them. Phone numbers (pending legal review) and postal addresses are not yet covered, and correlation across companies through name and delivery address is not prevented. The project is designed so that merely knowing, or being able to receive, leaked contact details or attributes is not enough to pass identity verification at Warifu or at companies that meet its connection requirements. It does not prevent leaks; known residual risks are listed in [docs/plan.md section 1-2](docs/plan.md#1-2-主張できる範囲と残るリスク). No Warifu service is operated anywhere and no company is connected; the project is not affiliated with or endorsed by any organization it cites. Statements about Japanese law are the project's working assumptions pending legal review, not legal advice, and most of the cited standards and advisories have been checked against their original text, but a few that could not be fetched have been checked only against search excerpts. The company SDK and conformance kit use the package name `@pii-token-vault/rp-kit`. See the [release notes](CHANGELOG.md) for version information. Documentation is in Japanese. Licensed under MIT.
+
+</details>
 
 ## 目次
 
@@ -49,7 +56,7 @@
 
 ## いまの状態とロードマップ
 
-設計の文書がそろい、PoC の実装は M9（企業向け SDK、適合テスト、デモ）まで終えました。M10 の横断テスト（DB とログの漏えいの検索、SSRF、利用者どうしの BOLA）も足しました。いまは M10 の残り（仕様書の確定）を進めています。各マイルストーンはイシューで管理しています。
+設計の文書がそろい、PoC の実装は M9（企業向け SDK、適合テスト、デモ）まで終えました。M10 の横断テスト（DB とログの漏えいの検索、SSRF、利用者どうしの BOLA）も足しました。いまは M10 の残り（仕様書の確定）を進めています。M10 の確定作業は [イシュー #12](https://github.com/nori1234/pii-token-vault/issues/12) で管理しています。
 
 | マイルストーン | 内容 | ゲート | 状態 |
 |---|---|---|---|
@@ -71,6 +78,8 @@
 
 | ファイル | 内容 |
 |---|---|
+| [packages/rp-kit/README.md](packages/rp-kit/README.md) | 企業で SDK を試す手順、模擬 OP、適合テストの使い方 |
+| [CHANGELOG.md](CHANGELOG.md) | 企業向けパッケージのリリース情報 |
 | [docs/plan.md](docs/plan.md) | 実装計画（原則、設計、法規制、マイルストーン、受け入れ基準） |
 | [docs/architecture.md](docs/architecture.md) | 割符の構成（サービスと、利用者・企業・rp-kit とのつながり）の見取り図 |
 | [DESIGN.md](DESIGN.md) | 画面と文言の規則、デザイントークン |
