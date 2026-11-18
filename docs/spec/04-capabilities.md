@@ -1,6 +1,6 @@
 # 04. サービスと能力の対応表
 
-> 状態：M1 時点の骨子（M10 で確定）。正は [docs/plan.md](../plan.md) の 8章（能力の表）、2章、9章。
+> 状態：M10 で確定作業中の草案。正は [docs/plan.md](../plan.md) の 8章（能力の表）、2章、9章。
 > 出典：[CLAUDE.md](../../CLAUDE.md) の不変条件2・3・4・7・8・9・10 と「配置」、[ADR 0005](../adr/0005-alias-derivation.md)、[ADR 0006](../adr/0006-ciba-spike-findings.md)、[ADR 0010](../adr/0010-staged-participation.md)、[ADR 0013](../adr/0013-local-key-service.md)〜[ADR 0017](../adr/0017-log-allowlist.md)、[ADR 0021](../adr/0021-relay.md)、[ADR 0022](../adr/0022-company-api-sender.md)。
 
 ## 0. 読み方

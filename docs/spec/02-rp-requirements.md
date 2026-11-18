@@ -1,6 +1,6 @@
 # 02. 接続要件（企業が守ること）
 
-> 状態：M1 時点の骨子（M10 で確定）。正は [docs/plan.md](../plan.md) の 3章（とくに 3-3）。
+> 状態：M10 で確定作業中の草案。正は [docs/plan.md](../plan.md) の 3章（とくに 3-3）。
 > 出典：plan 1-1・2・3・5・6・8・9章、[ADR 0001](../adr/0001-affirmative-list.md)、[ADR 0010](../adr/0010-staged-participation.md)、[DESIGN.md](../../DESIGN.md) 2章、[CLAUDE.md](../../CLAUDE.md) の不変条件1・5・6・7・9。
 > 接続要件を変えたら、適合テストも同じ PR で直す（CLAUDE.md「進め方」）。
 

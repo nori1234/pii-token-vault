@@ -1,6 +1,6 @@
-# 割符の仕様書（骨子）
+# 割符の仕様書（草案）
 
-> 状態：M1 時点の骨子。M10 で確定する（plan 10章）。正は [docs/plan.md](../plan.md)。
+> 状態：M10 で確定作業中の草案（[イシュー #12](https://github.com/nori1234/pii-token-vault/issues/12)）。正は [docs/plan.md](../plan.md)。
 > この仕様書は、plan、[CLAUDE.md](../../CLAUDE.md) の不変条件、[docs/adr/](../adr/)、[DESIGN.md](../../DESIGN.md)、[docs/standards.md](../standards.md) から、要件を引き出して並べ直したもの。ここで新しい設計判断はしない。
 
 ## 目的

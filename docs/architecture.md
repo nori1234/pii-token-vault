@@ -1,6 +1,6 @@
 # 割符の構成
 
-割符は、割符が運営するサービスです。企業が自社のシステムに組み込むライブラリは rp-kit だけで、ほかのサービスは割符の側で動きます。この文書は全体の見取り図で、正は [plan](plan.md)、[CLAUDE.md](../CLAUDE.md) の不変条件、[ADR](adr/) です。PoC の構成で、本番で使うことは想定していません。
+企業は [rp-kit](../packages/rp-kit/README.md) を自社のシステムに組み込みます。認証、メール中継、企業向け API は割符側のサービスが受け持つ設計です。この文書は全体の見取り図で、正は [plan](plan.md)、[CLAUDE.md](../CLAUDE.md) の不変条件、[ADR](adr/) です。PoC の構成で、本番で使うことは想定していません。
 
 ```mermaid
 flowchart LR
