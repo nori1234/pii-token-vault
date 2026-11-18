@@ -20,6 +20,8 @@ rp-kit（`@pii-token-vault/rp-kit`）は、M9 の後に npm に公開すると�
 - 公開するのは、そのコミットで CI（lint・typecheck・test と e2e）が通ったものだけ。ワークフローの最初に、GitHub の API で、そのコミットの check run を確かめる（GitHub Actions が付けたものに限る）。
 - まとめるジョブ（pack）と、公開するジョブ（publish）を分ける。
   - pack は、`npm ci --ignore-scripts` と `npm run pack:rp-kit` と `npm pack` で tarball を作り、`npm publish --dry-run` で中身を確かめる。秘密の値を持たない。同じ版が公開済みなら、ここで止める。
+  - pack は、作った tarball を空のプロジェクトに入れ（`--ignore-scripts`）、パッケージ名で SDK と `/kit` を読み込めることと、企業に届く依存に既知の脆弱性がないこと（`npm audit --omit=dev`。重さによらず止める）を確かめる。CI の `npm ci` は `--no-audit` なので、CI が通っただけでは、監査の結果は分からない（2026-11-18 のレビュー）。
+  - 公開用の `package.json` の `files` に、変換したファイルと README、LICENSE だけを並べる。出力先にほかのファイルが紛れても、npm は入れない。
   - publish は、pack が作った tarball を受け取って、`npm publish` だけを実行する。依存を入れず、リポジトリのコードも動かさない。
 - npm のトークン（`NPM_TOKEN`）は、GitHub の environment `npm-publish` の secret に置き、publish のジョブの、公開の手順にだけ渡す。environment の保護の規則で、`main` だけから使えるようにし、メンテナーの承認を求める（GitHub の設定。オーナーが行う）。
 - `--provenance` を付ける。npm のページで、どのリポジトリ、コミット、ワークフローから作ったかを確かめられる。
@@ -47,9 +49,11 @@ rp-kit（`@pii-token-vault/rp-kit`）は、M9 の後に npm に公開すると�
 - 初回の公開から trusted publishing に切り替えるまでの間は、`NPM_TOKEN` が GitHub にある。トークンは、範囲を `@pii-token-vault` のパッケージの読み書きに絞り、有効期限をいちばん短くする。
 - GitHub のメンテナーのアカウントが乗っ取られると、ワークフローを起動して公開できる。GitHub と npm の両方で、2要素認証を必須にしておく（オーナーの設定）。
 - provenance は、どこで作ったかを示すだけで、中身が正しいことは示さない。
+- `npm audit` が見つけるのは、公開の時点で登録されている脆弱性だけである。公開の後に見つかった依存の脆弱性は、Dependabot（`.github/dependabot.yml`）の PR で知り、直した版を出す。
 
 ## 変えたもの
 
 - `.github/workflows/publish-rp-kit.yml` を足した。
+- `scripts/pack-rp-kit.ts`：公開用の `package.json` に `files` を足した（テストも足した）。
 - `packages/rp-kit/README.md` の「メンテナー向け」：公開の手順を、このワークフローにした。
 - plan 10章「公開の順番」：公開の作業を、このワークフローで行うと書いた。

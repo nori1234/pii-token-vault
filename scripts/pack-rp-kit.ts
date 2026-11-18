@@ -5,7 +5,8 @@
 //
 // - packages/rp-kit/tsconfig.build.json で、src を JavaScript（.js）と型定義（.d.ts）に変換する。
 // - 型定義の中の相対 import（'./x.ts'）を、'./x.js' に書き換える（tsc は、型定義の中の拡張子を書き換えない）。
-// - 公開用の package.json を作る（private を外し、exports を変換したファイルに向ける）。README と LICENSE を入れる。
+// - 公開用の package.json を作る（private を外し、exports を変換したファイルに向ける。files に、変換したファイルと
+//   README、LICENSE だけを並べる）。README と LICENSE を入れる。
 // - README の相対のリンク（../../docs/… など）は、npm のページでも開けるように、GitHub の main の URL に書き換える。
 // - テスト、tsconfig、変換の前の .ts は入れない。
 //
@@ -104,8 +105,14 @@ function readmeLinkBase(repository: unknown): { readonly root: string; readonly 
   return { root, dir: new URL(directory.endsWith('/') ? directory : `${directory}/`, root).href };
 }
 
-/** 公開用の package.json（リポジトリの中の package.json から作る）。 */
-export function publishManifest(source: Record<string, unknown>): Record<string, unknown> {
+/**
+ * 公開用の package.json（リポジトリの中の package.json から作る）。`emitted` は、変換した .js と .d.ts の、出力先からの
+ * 相対パス。files に、それと README、LICENSE だけを並べる（出力先に、ほかのファイルがあっても入れない）。
+ */
+export function publishManifest(
+  source: Record<string, unknown>,
+  emitted: readonly string[],
+): Record<string, unknown> {
   return {
     name: source.name,
     version: source.version,
@@ -125,6 +132,7 @@ export function publishManifest(source: Record<string, unknown>): Record<string,
       '.': { types: './index.d.ts', default: './index.js' },
       './kit': { types: './kit/index.d.ts', default: './kit/index.js' },
     },
+    files: [...emitted, 'README.md', ...EXTRA_FILES.map(({ to }) => to)].sort(),
     dependencies: source.dependencies,
   };
 }
@@ -146,7 +154,11 @@ export function packRpKit(outDir?: string): PackedRpKit {
     ],
     { cwd: ROOT, stdio: ['ignore', 'inherit', 'inherit'] },
   );
-  for (const file of listFiles(dir)) {
+  const emitted = listFiles(dir);
+  for (const file of emitted) {
+    if (!file.endsWith('.js') && !file.endsWith('.d.ts')) {
+      throw new Error(`変換したものに、.js と .d.ts のほかのファイルがある（${file}）`);
+    }
     if (!file.endsWith('.d.ts')) continue;
     const path = join(dir, file);
     writeFileSync(path, rewriteDeclarationImports(readFileSync(path, 'utf8')));
@@ -155,7 +167,7 @@ export function packRpKit(outDir?: string): PackedRpKit {
     string,
     unknown
   >;
-  const manifest = publishManifest(source);
+  const manifest = publishManifest(source, emitted);
   writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   writeFileSync(
     join(dir, 'README.md'),

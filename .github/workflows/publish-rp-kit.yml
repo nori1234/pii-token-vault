@@ -4,6 +4,8 @@
 # - 公開するのは、そのコミットで CI（lint・typecheck・test と e2e）が通ったものだけ。
 # - まとめるジョブ（pack）と、公開するジョブ（publish）を分ける。
 #   - pack は、npm ci（--ignore-scripts）と npm run pack:rp-kit で tarball を作る。秘密の値を持たない。
+#     作った tarball を空のプロジェクトに入れ、パッケージ名で読み込めることと、企業に届く依存（dependencies）に
+#     既知の脆弱性がないこと（npm audit --omit=dev）を確かめる。CI の npm ci は --no-audit なので、ここで確かめる。
 #   - publish は、pack が作った tarball を受け取って、npm publish だけを実行する。依存を入れず、リポジトリの
 #     コードも動かさない。npm のトークン（NPM_TOKEN）は、GitHub の environment「npm-publish」の secret に置き、
 #     公開の手順にだけ渡す。environment の保護の規則で、main だけと、メンテナーの承認を求める。
@@ -105,6 +107,25 @@ jobs:
         env:
           TARBALL: ${{ steps.pack.outputs.tarball }}
         run: npm publish --dry-run --ignore-scripts "./${TARBALL}"
+
+      - name: 空のプロジェクトに入れて確かめる（パッケージ名での読み込みと、依存の監査）
+        # 企業が npm install したときと同じ形で、SDK と /kit を読み込めることを確かめる。そのうえで、企業に届く
+        # 依存だけを対象に、既知の脆弱性を調べる（重さによらず、1件でもあれば止める）。
+        working-directory: ${{ runner.temp }}
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: |
+          mkdir consumer
+          cd consumer
+          echo '{"name":"rp-kit-consumer-check","private":true,"type":"module"}' > package.json
+          npm install --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP/dist/${TARBALL}"
+          node --input-type=module -e "
+            const sdk = await import('@pii-token-vault/rp-kit');
+            const kit = await import('@pii-token-vault/rp-kit/kit');
+            if (Object.keys(sdk).length === 0 || Object.keys(kit).length === 0) process.exit(1);
+          "
+          npm ls --omit=dev --all
+          npm audit --omit=dev --audit-level=low
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

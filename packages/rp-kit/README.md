@@ -220,7 +220,7 @@ const report = await runConformanceKit({ hooks, mockOp, participation: { mode: '
 npm run pack:rp-kit -- <出力先のディレクトリ>
 ```
 
-- 出力先に、変換した `.js` と `.d.ts`、公開用の `package.json`、README、LICENSE が入ります。テストと、変換の前の `.ts` は入りません。
+- 出力先に、変換した `.js` と `.d.ts`、公開用の `package.json`、README、LICENSE が入ります。テストと、変換の前の `.ts` は入りません。公開用の `package.json` の `files` には、このファイルだけを並べます（出力先にほかのファイルが紛れても、npm は入れません）。
 - README の相対のリンク（`../../docs/…` など）は、npm のページでも開けるように、GitHub の `main` の URL に書き換えて入れます。コードブロックとインラインのコードの中は、書き換えません。
 - このコマンドは、公開をしません。公開は、下の GitHub Actions のワークフローで行います。
 - 版は `packages/rp-kit/package.json` の `version` です（同じ版は、二度と公開できません）。公開の範囲は public です（まとめた `package.json` の `publishConfig`）。
@@ -237,6 +237,8 @@ npm run pack:rp-kit -- <出力先のディレクトリ>
 - `main` 以外で起動したとき。
 - そのコミットで、CI（lint・typecheck・test と e2e）が通っていないとき。
 - その版が、もう公開してあるとき。
+- まとめた tarball を空のプロジェクトに入れて、パッケージ名（`@pii-token-vault/rp-kit` と `@pii-token-vault/rp-kit/kit`）で読み込めないとき。
+- 企業に届く依存（`dependencies`）に、既知の脆弱性があるとき（`npm audit --omit=dev`。重さによらず止める）。
 
 最初に一度だけ、オーナーが次を設定します。
 
