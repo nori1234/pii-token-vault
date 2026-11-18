@@ -152,7 +152,7 @@ describe('漏えい：受付番号だけでは許可しない（テスト1・2�
 - 時刻を進めるときは、時刻を進めるハーネスを使う（不変条件8の例外）。アプリのコードは、`withTenant` か `withWarifuUser` を通して DB に触れる。
 - 不安定なテストを、再試行で通さない（Playwright の `retries` は 0）。
 - テストの中では、外へつながない（不変条件7。テスト用の補助にも適用する）。どのテストのファイルにも、外へのつなぎの見張り（`test/setup/egress.ts`）が入る。Vitest は setupFiles（`test/setup/egress-guard.ts`）で入れ、Playwright の E2E は、各ファイルの `beforeAll` で入れて `afterAll` で確かめる。
-  - 見張る間は、ループバック（127.0.0.0/8、::1、localhost）と Unix ソケットのほかへの TCP・TLS の接続と UDP の送信、注入したリゾルバを通さない名前解決（c-ares の問い合わせと `dns.lookup`。ループバックの名前の c-ares の問い合わせも含む）を、つながずに止めて記録する。ファイルの最後に、記録が0件であることを確かめる。
+  - 見張る間は、ループバック（127.0.0.0/8、::1、localhost）と Unix ソケットのほかへの TCP・TLS の接続と UDP の送信、注入したリゾルバを通さない名前解決（c-ares の問い合わせ、`dns.lookup`、`dns.lookupService` による逆引き。ループバックの名前の c-ares の問い合わせも含む）を、つながずに止めて記録する。ファイルの最後に、記録が0件であることを確かめる。
   - 外の宛先は、送信サービスの補助（`test/setup/sender.ts`）の模擬の DNS と、127.0.0.1 に写す最後の接続で表す。サーバーを立てる補助は、つながってきた相手を逆引きしない（smtp-server は `disableReverseLookup: true`。relay の SMTP の受け口と同じ）。
   - 見張りが止めたことを確かめるテストは、そのテストの中で `takeEgressAttempts` で記録を取り出す（`x-egress-guard`）。記録には、宛先（ホストとポート、名前）と呼び出した場所だけが残り、URL のパスやクエリは残らない。
   - 見張れないもの：子プロセス（一時的なクラスタと鍵サービス）とワーカースレッドの中の通信と、ブラウザ（Chromium）の通信。
@@ -194,7 +194,7 @@ M10 で、SSRF の横断のテストを足した（不変条件7、plan 2章「S
 
 | ファイル | 確かめること |
 |---|---|
-| `x-egress-guard` | 見張りの自己検査（setupFiles と E2E のファイルに入っていること。net、tls、http、https、fetch、dns（c-ares、`dns.lookup`、名前付きの import）、dgram のつなぎと名前解決を止めて、宛先だけを記録すること。ループバックと Unix ソケットは止めないこと） |
+| `x-egress-guard` | 見張りの自己検査（setupFiles と E2E のファイルに入っていること。net、tls、http、https、fetch、dns（c-ares、`dns.lookup`、`dns.lookupService`、名前付きの import）、dgram のつなぎと名前解決を止めて、宛先だけを記録すること。ループバックと Unix ソケットは止めないこと） |
 | `x-ssrf-company-api` | テスト11（悪意のあるテナントが SET の受け口を、IMDS、プライベート、ループバック、IPv6 の ULA、公開と内部の混在、IP の形の URL に向けても、company-api から送信サービスまで通して、どこにもつながず、送り直しに残し、ログに宛先を残さない。DNS rebinding とリダイレクトでも、内部にはつながない） |
 
 単体の検査は、`packages/rp-kit/test`（SDK）と `packages/demo-rp/test`（出金先の変更の参照実装、通信の1ファイル）にある。

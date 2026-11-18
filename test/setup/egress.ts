@@ -3,7 +3,7 @@
 // 中の次のものを、ループバック（127.0.0.0/8、::1、localhost）と Unix ドメインソケットのほかへは、つながずに止めて
 // 記録する。
 // - TCP と TLS の接続（net.Socket の connect。http、https、fetch（undici）、tls、http2、pg が通る）
-// - 名前解決（c-ares の問い合わせ（dns.resolve*、dns.promises、Resolver）と、dns.lookup）
+// - 名前解決（c-ares の問い合わせ（dns.resolve*、dns.promises、Resolver）と、dns.lookup と dns.lookupService）
 // - UDP の送信（dgram）
 // テストの中の割符のサービス（idp、relay、company-api、keysvc、sender）は、テストと同じプロセスで動く。送信サービスの
 // 名前解決と最後の接続は、テストの補助が差し替える（test/setup/sender.ts）。そのため、割符のコードやライブラリ
@@ -180,13 +180,42 @@ export function installEgressGuard(): void {
     record('dns', String(hostname), 'dns.promises.lookup');
     throw blockedError();
   };
+
+  // dns.lookupService（getnameinfo）。dns.lookup とも c-ares の handle とも別の入口で、どちらの差し替えも通らない
+  // ので、別に差し替える。ループバックのアドレスだけを通す。IP アドレスでない引数は、元の関数がつながずに断る。
+  const lookupService = dns.lookupService;
+  const promisesLookupService = dns.promises.lookupService;
+  const passesLookupService = (address: string) =>
+    isIP(String(address)) === 0 || isLoopbackHost(String(address));
+  const patchedLookupService = function (this: unknown, address: string, ...rest: unknown[]) {
+    if (passesLookupService(address)) {
+      return (lookupService as (...a: unknown[]) => unknown).call(this, address, ...rest);
+    }
+    record('dns', String(address), 'dns.lookupService');
+    const callback = rest.at(-1);
+    if (typeof callback === 'function')
+      process.nextTick(callback as (e: Error) => void, blockedError());
+    return {};
+  };
+  const patchedPromisesLookupService = async (address: string, ...rest: unknown[]) => {
+    if (passesLookupService(address)) {
+      return (promisesLookupService as (...a: unknown[]) => Promise<unknown>)(address, ...rest);
+    }
+    record('dns', String(address), 'dns.promises.lookupService');
+    throw blockedError();
+  };
+
   (dns as { lookup: unknown }).lookup = patchedLookup;
   (dns.promises as { lookup: unknown }).lookup = patchedPromisesLookup;
-  // `import { lookup } from 'node:dns'` の束縛も、差し替えた関数を指すようにする。
+  (dns as { lookupService: unknown }).lookupService = patchedLookupService;
+  (dns.promises as { lookupService: unknown }).lookupService = patchedPromisesLookupService;
+  // `import { lookup, lookupService } from 'node:dns'`（と 'node:dns/promises'）の束縛も、差し替えた関数を指すようにする。
   syncBuiltinESMExports();
   undo.push(() => {
     (dns as { lookup: unknown }).lookup = lookup;
     (dns.promises as { lookup: unknown }).lookup = promisesLookup;
+    (dns as { lookupService: unknown }).lookupService = lookupService;
+    (dns.promises as { lookupService: unknown }).lookupService = promisesLookupService;
     syncBuiltinESMExports();
   });
 
