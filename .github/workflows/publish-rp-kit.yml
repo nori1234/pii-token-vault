@@ -181,7 +181,15 @@ jobs:
         run: |
           set -o pipefail
           out="$RUNNER_TEMP/npm-stage.out"
-          npm stage publish --provenance --access public --ignore-scripts "./${TARBALL}" | tee "$out"
+          if ! npm stage publish --provenance --access public --ignore-scripts "./${TARBALL}" | tee "$out"; then
+            # npm は、trusted publishing のトークンを得られなかった理由を、画面には出さず、ログのファイル
+            # （~/.npm/_logs）にだけ書く。その OIDC の行だけを出す（トークンの値は書かれない）。
+            echo '::group::npm の OIDC の記録（trusted publishing のトークンを得られなかった理由）'
+            grep -h -E ' oidc ' "$HOME"/.npm/_logs/*-debug-0.log || echo '（OIDC の記録はない）'
+            echo '::endgroup::'
+            echo '::error::npm に仮置きできなかった。npm の trusted publishing の登録（nori1234/pii-token-vault、publish-rp-kit.yml、environment npm-publish）を確かめる'
+            exit 1
+          fi
           staged=$(grep -E '^\+ .*\(staged' "$out" || true)
           {
             echo "${TARBALL} を npm に仮置きした。まだ公開していない（誰も入れられない）。"

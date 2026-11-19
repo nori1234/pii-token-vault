@@ -78,6 +78,7 @@ rp-kit（`@pii-token-vault/rp-kit`）は、M9 の後に npm に公開すると�
 - npm には trusted publishing でつなぐ。`NPM_TOKEN` を読む手順を外し、setup-node に `registry-url` を渡さない（トークンを読む `.npmrc` を作らない）。
 - `npm stage` は、Node 22 に付いてくる npm（10.x）にはないので、publish のジョブで npm を 12.2.3 に固定して入れる（`--ignore-scripts`）。npm 12.2.3 は Node `^22.22.2` を求め、`node-version: 22` で入る版（22.23.x）は、これを満たす。
 - 仮置きの ID は、ジョブの Summary に出す。
+- 仮置きに失敗したときは、npm のログのファイル（`~/.npm/_logs`）から OIDC の行だけを、ジョブのログに出す。npm は、trusted publishing のトークンを得られなかった理由を、画面に出さないため（2026-11-19 の最初の仮置きは、理由が分からないまま `ENEEDAUTH` で止まった）。
 
 理由：
 
